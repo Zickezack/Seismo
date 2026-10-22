@@ -29,6 +29,11 @@ dev = [
     # Drives the UI in a headless browser (skill verify); needs `playwright install chromium` once.
     "playwright>=1.64,<2",
 ]
+# Dev stack image only (Dockerfile target `dev`): restarts api and worker when the code changes;
+# uvicorn --reload uses it as well.
+reload = [
+    "watchfiles>=1.3,<2",
+]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

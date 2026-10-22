@@ -1,9 +1,30 @@
-# Development container: the `dev` service next to the `db` service of ../docker-compose.yml.
+# Development stack: the `dev` container next to the services of ../docker-compose.yml.
 # Relative paths resolve from the first compose file, i.e. the repository root.
 
 # A project of its own, with its own database volume: closing the dev container never stops a
 # stack started with `docker compose up`, and that stack's `down` never trips over `dev`.
 name: seismo-dev
+
+# migrate, api and worker run the workspace code instead of the copy in the image, so a saved
+# change shows up without a rebuild. Only a dependency change needs a new image (README.md).
+x-live-code: &live-code
+  build:
+    context: .
+    target: dev
+  image: seismo:dev
+  volumes:
+    - ./app:/app/app
+    - ./migrations:/app/migrations
+
+# A failed migration must not keep the dev container from starting - that is where it gets fixed.
+x-after-migrate: &after-migrate
+  migrate:
+    condition: service_completed_successfully
+    required: false
+
+x-watch-environment: &watch-environment
+  # File events do not cross a bind mount from Windows; polling sees every change.
+  WATCHFILES_FORCE_POLLING: "true"
 
 services:
   dev:
@@ -22,7 +43,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-5}
-      # For the api started from the terminal (README.md).
+      # For an api started from the terminal (skill verify).
       ADMIN_USERNAME: ${ADMIN_USERNAME:?set ADMIN_USERNAME in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
@@ -32,6 +53,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  migrate:
+    <<: *live-code
+
+  api:
+    <<: *live-code
+    command: ["uvicorn", "app.web.main:app_from_env", "--factory", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"]
+    environment: *watch-environment
+    depends_on: *after-migrate
+
+  worker:
+    <<: *live-code
+    command: ["watchfiles", "--filter", "python", "--target-type", "command", "python -m app.worker", "app"]
+    environment: *watch-environment
+    depends_on: *after-migrate
 
 volumes:
   claude-config:

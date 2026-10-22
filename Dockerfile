@@ -1,5 +1,5 @@
 # One image for the migrate, api and worker services; docker-compose.yml picks the command.
-FROM python:3.14-slim
+FROM python:3.14-slim AS app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -22,3 +22,13 @@ USER app
 
 EXPOSE 8000
 CMD ["uvicorn", "app.web.main:app_from_env", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+
+# Dev stack only (.devcontainer/docker-compose.dev.yml): it mounts the workspace code over the copy
+# above, and watchfiles restarts api and worker on every change.
+FROM app AS dev
+USER root
+RUN pip install -e ".[reload]"
+USER app
+
+# The last stage is what a plain build produces: the production image, without dev tools.
+FROM app

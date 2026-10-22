@@ -67,9 +67,25 @@ docker compose ps
 Requirements: Docker and VS Code with the Dev Containers extension.
 
 1. Create `.env` (see above). The dev container needs the admin variables as well.
-2. Run **Dev Containers: Reopen in Container**. It starts the `dev` container and `db`.
+2. Run **Dev Containers: Reopen in Container**. It starts the `dev` container and, next to it,
+   `db`, `migrate`, `api` and `worker` (Compose project `seismo-dev`).
 3. Claude Code is installed on every build. Its login and settings live in the `claude-config`
    volume, so a rebuild keeps them. Sign in once with `claude`.
+
+The dashboard of the dev stack is at `http://localhost:${API_PORT:-8000}`. The stack from
+`docker compose up` uses the same port, so run only one of the two at a time.
+
+`migrate`, `api` and `worker` run the workspace code: `app/` and `migrations/` are mounted into the
+image `seismo:dev` (Dockerfile target `dev`).
+
+- A saved `.py` file restarts `api` and `worker` within about a second; a changed template or
+  stylesheet applies at once. Reload the page in the browser to see it.
+- A new migration: `python -m alembic upgrade head` in the dev container (`migrate` only runs when
+  the stack starts).
+- A changed dependency in `pyproject.toml` needs a new image. From a terminal on the host, in the
+  repository folder:
+  `docker compose -f docker-compose.yml -f .devcontainer/docker-compose.dev.yml up -d --build migrate api worker`
+- Logs: Docker Desktop, or `docker compose -p seismo-dev logs -f api worker` on the host.
 
 Inside the dev container (the database is reachable as host `db`):
 
@@ -77,8 +93,6 @@ Inside the dev container (the database is reachable as host `db`):
 python -m pytest                     # all tests; integration tests use the database <POSTGRES_DB>_test
 python -m pytest tests/unit          # without database
 python -m alembic upgrade head       # migrate the development database
-python -m uvicorn app.web.main:app_from_env --factory --reload --host 0.0.0.0   # api on port 8000
-python -m app.worker                 # worker
 ```
 
 Browser checks (skill `verify`) use Playwright with headless Chromium; every dev container build

@@ -2,8 +2,8 @@
   "name": "Seismo",
   "dockerComposeFile": ["../docker-compose.yml", "docker-compose.dev.yml"],
   "service": "dev",
-  // Only the dev container and the database; api and worker are started from the terminal (README.md).
-  "runServices": ["dev", "db"],
+  // The whole app runs next to the dev container, on the workspace code (docker-compose.dev.yml).
+  "runServices": ["dev", "db", "migrate", "api", "worker"],
   "workspaceFolder": "/workspaces/Seismo",
   "shutdownAction": "stopCompose",
   "remoteUser": "vscode",
@@ -23,7 +23,6 @@
   "remoteEnv": {
     "PATH": "/home/vscode/.local/bin:${containerEnv:PATH}"
   },
-  "forwardPorts": [8000],
   "customizations": {
     "vscode": {
       "extensions": ["ms-python.python"]
