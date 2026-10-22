@@ -3,15 +3,15 @@
 
 # A project of its own, with its own database volume: closing the dev container never stops a
 # stack started with `docker compose up`, and that stack's `down` never trips over `dev`.
-name: finnewsint-dev
+name: seismo-dev
 
 services:
   dev:
     image: mcr.microsoft.com/devcontainers/python:3.14
     command: sleep infinity
-    working_dir: /workspaces/FinNewsInt
+    working_dir: /workspaces/Seismo
     volumes:
-      - .:/workspaces/FinNewsInt:cached
+      - .:/workspaces/Seismo:cached
       # Claude Code login, settings and history survive container rebuilds.
       - claude-config:/home/vscode/.claude
     environment:

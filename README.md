@@ -1,4 +1,4 @@
-# FinNewsInt
+# Seismo
 
 Self-hosted platform that turns global news into a persistent, versioned event and knowledge model.
 Goals and rules: [`requirements.md`](requirements.md), [`architecture.md`](architecture.md),

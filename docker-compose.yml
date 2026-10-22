@@ -4,7 +4,7 @@
 
 x-app: &app
   build: .
-  image: finnewsint:local
+  image: seismo:local
   environment:
     POSTGRES_HOST: db
     POSTGRES_PORT: "5432"

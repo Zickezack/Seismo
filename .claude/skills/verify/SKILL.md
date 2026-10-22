@@ -13,7 +13,7 @@ Why: status codes and API tests miss CSS/JS-only bugs - a style rule overriding 
 - Start: `.env` must exist (from `.env.example`). `docker compose up -d --build`, then poll `docker compose ps --format '{{.Service}}={{.Health}}'` until `api=healthy` and `worker=healthy` (about 10 s); `migrate` shows `Exited (0)`.
 - App URL: `http://localhost:8000` - `GET /health/live`, `GET /health/ready` (200 with `{"status":"ok","database":"ok","schema":"current"}`). Logs: `docker compose logs --no-log-prefix api worker migrate`, one JSON object per line.
 - Test suite: inside the dev container `python -m pytest` (integration tests need its `db`). From the host without VS Code: `npx -y @devcontainers/cli@latest up --workspace-folder .`, then `npx -y @devcontainers/cli@latest exec --workspace-folder . python -m pytest`. Never `pkill -f <pattern>` inside `exec bash -c '...'`: the pattern also matches that shell and kills it.
-- Stop and cleanup: `docker compose down -v` (stack and its `db-data` volume); `docker compose -p finnewsint-dev down -v` (dev container, its database and its Claude Code login volume - leave out `-v` to keep the login).
+- Stop and cleanup: `docker compose down -v` (stack and its `db-data` volume); `docker compose -p seismo-dev down -v` (dev container, its database and its Claude Code login volume - leave out `-v` to keep the login).
 
 If this section is empty or a step fails, work out the steps from the README, compose files, and devcontainer config, then record exactly what worked.
 

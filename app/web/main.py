@@ -19,7 +19,7 @@ def create_app(settings: Settings) -> FastAPI:
         yield
         engine.dispose()
 
-    app = FastAPI(title="FinNewsInt", lifespan=lifespan)
+    app = FastAPI(title="Seismo", lifespan=lifespan)
     app.state.engine = engine
     app.state.expected_revision = head_revision()
     app.middleware("http")(log_requests)

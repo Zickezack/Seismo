@@ -2,7 +2,7 @@ import pytest
 
 from app.config import ConfigError, Settings
 
-REQUIRED = {"POSTGRES_USER": "finnewsint", "POSTGRES_PASSWORD": "secret", "POSTGRES_DB": "finnewsint"}
+REQUIRED = {"POSTGRES_USER": "seismo", "POSTGRES_PASSWORD": "secret", "POSTGRES_DB": "seismo"}
 
 
 def test_required_variables_only_gives_defaults():
@@ -33,7 +33,7 @@ def test_optional_variables_override_defaults():
 
 def test_missing_required_variables_are_all_named():
     with pytest.raises(ConfigError) as error:
-        Settings.from_env({"POSTGRES_USER": "finnewsint", "POSTGRES_DB": "  "})
+        Settings.from_env({"POSTGRES_USER": "seismo", "POSTGRES_DB": "  "})
 
     assert "POSTGRES_PASSWORD" in str(error.value)
     assert "POSTGRES_DB" in str(error.value)

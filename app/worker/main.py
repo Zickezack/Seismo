@@ -20,7 +20,7 @@ from app.services.health_service import HealthReport, check_readiness
 logger = logging.getLogger(__name__)
 
 # Inside the container filesystem on purpose: the heartbeat only matters while this process runs.
-HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "finnewsint-worker-heartbeat"
+HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "seismo-worker-heartbeat"
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:

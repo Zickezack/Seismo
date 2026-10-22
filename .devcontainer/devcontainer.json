@@ -1,10 +1,10 @@
 {
-  "name": "FinNewsInt",
+  "name": "Seismo",
   "dockerComposeFile": ["../docker-compose.yml", "docker-compose.dev.yml"],
   "service": "dev",
   // Only the dev container and the database; api and worker are started from the terminal (README.md).
   "runServices": ["dev", "db"],
-  "workspaceFolder": "/workspaces/FinNewsInt",
+  "workspaceFolder": "/workspaces/Seismo",
   "shutdownAction": "stopCompose",
   "remoteUser": "vscode",
   "features": {
