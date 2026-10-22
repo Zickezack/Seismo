@@ -4,14 +4,18 @@ from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
+from app.config import AuthSettings
 from app.db.migrations import head_revision
 from app.web.main import create_app
 from app.worker import main as worker
 from tests.integration.alembic_helpers import upgrade
 
+# The readiness check is public; any valid admin login will do.
+AUTH = AuthSettings(admin_username="admin", admin_password="integration-test", session_secret="s" * 32)
+
 
 def get_ready(settings):
-    with TestClient(create_app(settings)) as client:
+    with TestClient(create_app(settings, AUTH)) as client:
         return client.get("/health/ready")
 
 

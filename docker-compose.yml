@@ -2,17 +2,19 @@
 # All configuration comes from environment variables - locally from .env (see .env.example),
 # on Portainer from the stack environment.
 
+x-app-environment: &app-environment
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-5}
+
 x-app: &app
   build: .
   image: seismo:local
-  environment:
-    POSTGRES_HOST: db
-    POSTGRES_PORT: "5432"
-    POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
-    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-    POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
-    LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-5}
+  environment: *app-environment
 
 services:
   db:
@@ -45,6 +47,13 @@ services:
 
   api:
     <<: *app
+    environment:
+      <<: *app-environment
+      # Admin login - only the api gets it, worker and migrate never see the password.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?set ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
     restart: unless-stopped
     ports:
       - "${API_PORT:-8000}:8000"

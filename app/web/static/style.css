@@ -1,0 +1,176 @@
+/* One stylesheet for every page, so buttons, fields and messages look the same everywhere
+   (requirements.md, "Basic UI Requirements / Styleguide"). */
+
+:root {
+  --color-background: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-text: #1d2330;
+  --color-muted: #5b6475;
+  --color-border: #d5d9e0;
+  --color-primary: #1f5fbf;
+  --color-primary-hover: #184c99;
+  --color-error-background: #fdecec;
+  --color-error-text: #a01b1b;
+  --radius: 6px;
+  --space: 1rem;
+  --content-width: 72rem;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-background);
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin: 0 0 var(--space);
+}
+
+/* Header */
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem var(--space);
+  /* Full-width bar, but its content lines up with the page content below. */
+  padding: 0.75rem max(var(--space), calc((100% - var(--content-width)) / 2 + var(--space)));
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.brand {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem var(--space);
+}
+
+.session-user {
+  color: var(--color-muted);
+}
+
+/* Layout */
+
+.content {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space);
+}
+
+.card {
+  padding: 1.5rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.card-narrow {
+  max-width: 36rem;
+  margin: 2rem auto;
+}
+
+/* Forms: short fields two to a row on wider screens; actions and wide fields span the full row
+   (requirements.md, "Basic UI Requirements / Styleguide", item 7). */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space);
+}
+
+@media (min-width: 40rem) {
+  .form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.field-wide,
+.form-actions {
+  grid-column: 1 / -1;
+}
+
+label {
+  font-weight: 600;
+}
+
+input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+input:focus-visible,
+.button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Buttons */
+
+.button {
+  padding: 0.5rem 1.25rem;
+  font: inherit;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.button-secondary {
+  color: var(--color-primary);
+  background: transparent;
+}
+
+.button-secondary:hover {
+  color: var(--color-primary-hover);
+  background: var(--color-background);
+}
+
+/* Messages */
+
+.message {
+  margin: 0 0 var(--space);
+  padding: 0.75rem var(--space);
+  border-radius: var(--radius);
+}
+
+.message-error {
+  color: var(--color-error-text);
+  background: var(--color-error-background);
+}

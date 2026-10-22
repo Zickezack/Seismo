@@ -36,7 +36,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.
 
 ### Epic: Projektfundament und Laufzeitumgebung
-3. As an admin, I want to log in to the dashboard with the admin credentials from the env file, so the platform is not openly accessible.
 4. As an admin, I want a PostgreSQL-based job queue with leases, retries and a visible job status, plus a configurable limit for parallel LLM calls, so a restart never leaves jobs lost or stuck, a retried job has no duplicate effect, and the GPU is not overloaded.
 5. As an admin, I want scripted database backups and a documented restore that has been tested once, so data can be recovered after a failure.
 
@@ -105,3 +104,4 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ### Epic: Projektfundament und Laufzeitumgebung
 1. As a developer, I want a devcontainer and a Docker Compose stack with separate `api`, `worker` and `db` (PostgreSQL) services - configured only through environment variables, with health checks, structured logs and Alembic migrations - so the system starts reproducibly on the AI-Station and Claude Code is still available after every container rebuild.
 2. As a developer, I want the project in a Git repository with a remote and a `.gitignore` that keeps `.env`, local settings and other secrets out, so every change is versioned and the CI/CD pipeline (skill `deploy-setup`) can build on it.
+3. As an admin, I want to log in to the dashboard with the admin credentials from the env file, so the platform is not openly accessible.

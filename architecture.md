@@ -65,6 +65,7 @@ Conventions for where new code goes. Procedure for implementing a feature: skill
 
 - Keep data access (repositories) and business rules (services) in separate layers even inside a small monorepo, with thin route/controller handlers - this keeps the logic testable without spinning up the web framework.
 - Pick one convention for request-time checks (manual auth/permission checks at the top of each handler, or a dependency-injection mechanism) and apply it uniformly across all routes, rather than mixing both styles.
+  Chosen: dependency injection. `app/web/main.py` includes every router with `Depends(require_admin)` (`app/web/access.py`), except the public ones it lists explicitly (`/health/*`, `/login`, `/logout`, `/static`); `tests/unit/test_web_auth.py` fails for any other route that answers without a session.
 - Directory layout: one Python package and one Docker image. Compose runs that image as the `api` and the `worker` service with different commands, so both share the domain code and still scale independently.
 
   ```text

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} – Seismo</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">Seismo</a>
+    {% if admin %}
+    <form class="session" method="post" action="/logout">
+      <span class="session-user" data-testid="session-user">Angemeldet als {{ admin }}</span>
+      <button class="button button-secondary" type="submit" data-testid="logout">Abmelden</button>
+    </form>
+    {% endif %}
+  </header>
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

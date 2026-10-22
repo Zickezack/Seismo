@@ -4,18 +4,19 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import Settings
+from app.config import AuthSettings, Settings
 from app.services.health_service import HealthReport
 from app.web import middleware
 from app.web.main import create_app
 from app.web.routes import health
 
 SETTINGS = Settings(postgres_user="u", postgres_password="p", postgres_db="d")
+AUTH = AuthSettings(admin_username="admin", admin_password="correct horse battery", session_secret="s" * 32)
 
 
 @pytest.fixture
 def client():
-    with TestClient(create_app(SETTINGS)) as client:
+    with TestClient(create_app(SETTINGS, AUTH)) as client:
         yield client
 
 

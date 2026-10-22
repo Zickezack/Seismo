@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 from sqlalchemy import URL
 
 REQUIRED_VARIABLES = ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB")
+AUTH_VARIABLES = ("ADMIN_USERNAME", "ADMIN_PASSWORD", "SESSION_SECRET")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+MIN_ADMIN_PASSWORD_LENGTH = 12
+MIN_SESSION_SECRET_LENGTH = 32
 
 
 class ConfigError(ValueError):
@@ -27,9 +30,7 @@ class Settings:
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "Settings":
         environ = os.environ if environ is None else environ
-        missing = [name for name in REQUIRED_VARIABLES if not environ.get(name, "").strip()]
-        if missing:
-            raise ConfigError(f"Missing required environment variables: {', '.join(missing)}")
+        _require(environ, REQUIRED_VARIABLES)
 
         log_level = environ.get("LOG_LEVEL", cls.log_level).strip().upper()
         if log_level not in LOG_LEVELS:
@@ -61,6 +62,53 @@ class Settings:
             port=self.postgres_port,
             database=self.postgres_db,
         )
+
+
+@dataclass(frozen=True)
+class AuthSettings:
+    """Admin login of the api. Kept apart from Settings, so worker and migrate never get the password."""
+
+    admin_username: str
+    admin_password: str = field(repr=False)
+    session_secret: str = field(repr=False)
+    # Only true once the api is served over HTTPS; browsers never send a Secure cookie over plain HTTP.
+    session_cookie_secure: bool = False
+
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> "AuthSettings":
+        environ = os.environ if environ is None else environ
+        _require(environ, AUTH_VARIABLES)
+
+        # The placeholders in .env.example are shorter than these minimums, so a copied template never starts.
+        if len(environ["ADMIN_PASSWORD"]) < MIN_ADMIN_PASSWORD_LENGTH:
+            raise ConfigError(f"ADMIN_PASSWORD must be at least {MIN_ADMIN_PASSWORD_LENGTH} characters long")
+        session_secret = environ["SESSION_SECRET"].strip()
+        if len(session_secret) < MIN_SESSION_SECRET_LENGTH:
+            raise ConfigError(f"SESSION_SECRET must be at least {MIN_SESSION_SECRET_LENGTH} characters long")
+
+        return cls(
+            admin_username=environ["ADMIN_USERNAME"].strip(),
+            admin_password=environ["ADMIN_PASSWORD"],
+            session_secret=session_secret,
+            session_cookie_secure=_boolean(environ, "SESSION_COOKIE_SECURE", cls.session_cookie_secure),
+        )
+
+
+def _require(environ, names):
+    missing = [name for name in names if not environ.get(name, "").strip()]
+    if missing:
+        raise ConfigError(f"Missing required environment variables: {', '.join(missing)}")
+
+
+def _boolean(environ, name, default):
+    raw = environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("true", "1"):
+        return True
+    if raw in ("false", "0"):
+        return False
+    raise ConfigError(f"{name} must be true or false")
 
 
 def _positive_number(environ, name, default, number_type):

@@ -1,8 +1,9 @@
 import pytest
 
-from app.config import ConfigError, Settings
+from app.config import AuthSettings, ConfigError, Settings
 
 REQUIRED = {"POSTGRES_USER": "seismo", "POSTGRES_PASSWORD": "secret", "POSTGRES_DB": "seismo"}
+AUTH_REQUIRED = {"ADMIN_USERNAME": "admin", "ADMIN_PASSWORD": "a" * 12, "SESSION_SECRET": "s" * 32}
 
 
 def test_required_variables_only_gives_defaults():
@@ -71,3 +72,56 @@ def test_database_url_escapes_special_characters_in_the_password():
     assert url.password == "p@ss:w/rd"
     assert url.host == "db"
     assert "p%40ss%3Aw%2Frd" in url.render_as_string(hide_password=False)
+
+
+def test_auth_settings_need_no_database_variables():
+    auth = AuthSettings.from_env(AUTH_REQUIRED | {"ADMIN_USERNAME": " admin "})
+
+    assert auth.admin_username == "admin"
+    assert auth.admin_password == "a" * 12
+    assert auth.session_cookie_secure is False
+
+
+def test_settings_need_no_admin_variables():
+    # Worker and migrate load Settings only and never get the admin password (docker-compose.yml).
+    Settings.from_env(REQUIRED)
+
+
+def test_missing_auth_variables_are_all_named():
+    with pytest.raises(ConfigError) as error:
+        AuthSettings.from_env({"ADMIN_USERNAME": "admin", "SESSION_SECRET": " "})
+
+    assert "ADMIN_PASSWORD" in str(error.value)
+    assert "SESSION_SECRET" in str(error.value)
+    assert "ADMIN_USERNAME" not in str(error.value)
+
+
+def test_short_admin_password_is_rejected_without_echoing_it():
+    with pytest.raises(ConfigError, match="ADMIN_PASSWORD must be at least 12 characters") as error:
+        AuthSettings.from_env(AUTH_REQUIRED | {"ADMIN_PASSWORD": "change-me"})
+
+    assert "change-me" not in str(error.value)
+
+
+def test_short_session_secret_is_rejected():
+    with pytest.raises(ConfigError, match="SESSION_SECRET must be at least 32 characters"):
+        AuthSettings.from_env(AUTH_REQUIRED | {"SESSION_SECRET": "s" * 31})
+
+
+@pytest.mark.parametrize(("value", "expected"), [("true", True), ("TRUE", True), ("1", True), ("false", False), ("0", False)])
+def test_session_cookie_secure_is_read(value, expected):
+    auth = AuthSettings.from_env(AUTH_REQUIRED | {"SESSION_COOKIE_SECURE": value})
+
+    assert auth.session_cookie_secure is expected
+
+
+def test_invalid_session_cookie_secure_is_rejected():
+    with pytest.raises(ConfigError, match="SESSION_COOKIE_SECURE must be true or false"):
+        AuthSettings.from_env(AUTH_REQUIRED | {"SESSION_COOKIE_SECURE": "maybe"})
+
+
+def test_admin_password_and_session_secret_are_hidden_in_repr():
+    shown = repr(AuthSettings.from_env(AUTH_REQUIRED))
+
+    assert "a" * 12 not in shown
+    assert "s" * 32 not in shown

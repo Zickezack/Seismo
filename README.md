@@ -19,13 +19,26 @@ git clone https://github.com/Zickezack/Seismo.git
 
 ## Configuration
 
-All configuration comes from environment variables. Copy the template once and set a password:
+All configuration comes from environment variables. Copy the template once and replace the
+placeholders:
 
 ```sh
 cp .env.example .env
 ```
 
 `.env` is gitignored. On Portainer, the same variables are set in the stack environment.
+
+The dashboard needs an admin login; the api refuses to start without it:
+
+| Variable | Rule |
+|----------|------|
+| `ADMIN_USERNAME` | Login name of the admin. |
+| `ADMIN_PASSWORD` | At least 12 characters. |
+| `SESSION_SECRET` | At least 32 characters, e.g. `openssl rand -hex 32`. |
+| `SESSION_COOKIE_SECURE` | Optional, default `false`; `true` only once the api is served over HTTPS. |
+
+Only the `api` container gets these variables. Changing `ADMIN_PASSWORD` or `SESSION_SECRET` logs
+out every open session; a session otherwise lasts 12 hours from the login.
 
 ## Run the stack
 
@@ -38,9 +51,12 @@ docker compose ps
 |-----------|------------------------------------------------------------------------|-------------------------|
 | `db`      | PostgreSQL 18; volume `db-data` is the only persistent storage         | `pg_isready`            |
 | `migrate` | Runs `alembic upgrade head` once, then exits; `api` and `worker` wait for it | exit code 0       |
-| `api`     | FastAPI on `http://localhost:${API_PORT:-8000}`                        | `GET /health/ready`     |
+| `api`     | FastAPI and dashboard on `http://localhost:${API_PORT:-8000}`          | `GET /health/ready`     |
 | `worker`  | Background worker (job queue follows in a later story)                 | heartbeat file          |
 
+- Everything except `/health/*`, `/login` and `/static/*` requires the admin login. A browser is
+  sent to the login page and back afterwards; other clients get `401`. FastAPI's `/docs` and
+  `/openapi.json` are switched off.
 - `GET /health/live`: the api process answers.
 - `GET /health/ready`: the database answers and its schema is at the newest migration (503 otherwise).
 - Logs are JSON lines on stdout: `docker compose logs -f api worker`.
@@ -50,7 +66,7 @@ docker compose ps
 
 Requirements: Docker and VS Code with the Dev Containers extension.
 
-1. Create `.env` (see above).
+1. Create `.env` (see above). The dev container needs the admin variables as well.
 2. Run **Dev Containers: Reopen in Container**. It starts the `dev` container and `db`.
 3. Claude Code is installed on every build. Its login and settings live in the `claude-config`
    volume, so a rebuild keeps them. Sign in once with `claude`.
@@ -64,6 +80,9 @@ python -m alembic upgrade head       # migrate the development database
 python -m uvicorn app.web.main:app_from_env --factory --reload --host 0.0.0.0   # api on port 8000
 python -m app.worker                 # worker
 ```
+
+Browser checks (skill `verify`) use Playwright with headless Chromium; every dev container build
+installs it (`python -m playwright install --with-deps chromium`).
 
 New migration: `python -m alembic revision --autogenerate -m "<what changes>"`, then read and
 correct the generated file (procedure: skill `datenmodell-aendern`).
