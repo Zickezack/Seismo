@@ -39,6 +39,7 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Watchlist | `watchlist` | Entities, sectors or event types an analyst follows. | none |
 | Alert | `alert_rule` | A rule that notifies about new events or material changes. | none |
 | Job | `job` | A unit of work in the PostgreSQL job queue, with status, lease and retry count. | none |
+| Plattform-Einstellungen | `platform_settings` | Settings that apply to the whole instance, edited by the admin (`requirements.md`, "Settings"). | none |
 
 ## Model-wide rules
 
@@ -61,7 +62,50 @@ These follow from the architecture principles (`architecture.md`) and apply to e
 
 ## Entities
 
-No entity is implemented yet. Each term from "Domain terms" gets its entry here, with fields, when the story that introduces it is implemented.
+Each term from "Domain terms" gets its entry here, with fields, when the story that introduces it is implemented.
+
+### Job (`job`)
+- Store: SQL table `job`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | kind | varchar(100) | yes | | Job type, e.g. `testjob`; a worker claims only the kinds it has a handler for. UI: Art. |
+  | payload | jsonb | yes | `{}` | Input of the job: IDs only, never names or texts (rule 13). |
+  | dedupe_key | varchar(200) | no | | While a job with this key waits or runs, no second one is queued (partial unique index `uq_job_dedupe_key_active`). |
+  | status | varchar(20) | yes | `queued` | `queued`, `running`, `succeeded`, `failed` (check constraint). UI: Wartend, Läuft, Erledigt, Fehlgeschlagen. |
+  | attempts | integer | yes | 0 | Counted when a worker claims the job; not counted when a stopping worker hands it back. Reset to 0 when the admin requeues a failed job. |
+  | max_attempts | integer | yes | 5 | After the last attempt the job fails instead of being retried. |
+  | run_after | timestamptz | yes | now() | Earliest time of the next attempt; failed attempts wait 30 s, doubling up to 1 h. |
+  | lease_token | uuid | no | | New on every claim. A worker writes to the job only while its token is still current (fencing). |
+  | lease_owner | varchar(200) | no | | Worker holding the lease: container hostname and process id. |
+  | lease_expires_at | timestamptz | no | | Renewed while the job runs. An expired lease puts the job back into the queue, or fails it after the last attempt. |
+  | last_error | text | no | | Error type and message of the last failed attempt, at most 2000 characters. Shown to the admin, never logged. |
+  | created_at | timestamptz | yes | now() | |
+  | updated_at | timestamptz | yes | now() | Last change of status or attempt; a lease renewal does not count. |
+  | started_at | timestamptz | no | | Start of the latest attempt. |
+  | finished_at | timestamptz | no | | Set when the job succeeded or failed; the retention period counts from here. |
+
+- Relationships: none yet; job kinds reference their records by ID in `payload`.
+- Rules: a job's result is written in the same transaction that marks it succeeded, and only while its lease is current, so a retried job has no duplicate effect. All times come from the database clock. The worker deletes succeeded and failed jobs once an hour after their retention period (Plattform-Einstellungen); waiting and running jobs are never deleted.
+- Privacy: none
+
+### Plattform-Einstellungen (`platform_settings`)
+- Store: SQL table `platform_settings`, exactly one row (`id` = 1, check constraint)
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | smallint | yes | 1 | Always 1. |
+  | llm_max_parallel_calls | integer | yes | 1 | Most LLM calls running at once across all workers, 1 to 32. Enforced with PostgreSQL advisory locks, one per slot; read on every slot request, so a change applies without a restart. |
+  | succeeded_jobs_retention_days | integer | yes | 7 | Days a succeeded job is kept after `finished_at`, 1 to 3650. |
+  | failed_jobs_retention_days | integer | yes | 30 | Days a failed job is kept after `finished_at`, 1 to 3650. |
+  | updated_at | timestamptz | yes | now() | |
+
+- Relationships: none
+- Rules: every setting is read with its default, so a missing row or column never breaks a page. Admin only. Benutzer-Einstellungen are stored separately once user management exists.
+- Privacy: none
 
 <!-- Template - copy once per entity:
 

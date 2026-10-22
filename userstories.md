@@ -36,7 +36,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.
 
 ### Epic: Projektfundament und Laufzeitumgebung
-4. As an admin, I want a PostgreSQL-based job queue with leases, retries and a visible job status, plus a configurable limit for parallel LLM calls, so a restart never leaves jobs lost or stuck, a retried job has no duplicate effect, and the GPU is not overloaded.
 5. As an admin, I want scripted database backups and a documented restore that has been tested once, so data can be recovered after a failure.
 
 ### Epic: Quellenadapter und Ingestion
@@ -55,6 +54,8 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ### Epic: Strukturierte Ereignisextraktion
 1. As an analyst, I want a versioned event schema and an LLM extraction via Ollama - for articles that pass a configurable relevance pre-filter - that turns an article into event candidates with event type, actors, location, time, status and impacts, each statement labelled as fact, claim, forecast or interpretation and backed by a text quote, so events are structured and evidence-based.
 2. As an analyst, I want the LLM output validated against the JSON schema, invalid output retried and logged, missing details marked as unknown instead of invented, separate confidence values for extraction, source quality and inference, and the model version, schema version and extraction time stored, so every extracted statement is traceable.
+3. As an admin, I want the worker's stop grace period (`stop_grace_period` in `docker-compose.yml`) to be longer than the longest LLM call, so a deploy or restart lets a running extraction finish instead of killing it and repeating the call once its lease has expired.
+4. As an admin, I want LLM jobs to wait while Ollama is unreachable instead of using up their attempts, so a switched-off or restarting LLM machine delays the extraction but never makes jobs fail.
 
 ### Epic: Ereignisidentität und zeitliche Entwicklung
 1. As an analyst, I want each event candidate assigned to an existing event (Ereignis) or turned into a new event with a stable event ID, so several reports about the same event form one consistent event record.
@@ -105,3 +106,4 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 1. As a developer, I want a devcontainer and a Docker Compose stack with separate `api`, `worker` and `db` (PostgreSQL) services - configured only through environment variables, with health checks, structured logs and Alembic migrations - so the system starts reproducibly on the AI-Station and Claude Code is still available after every container rebuild.
 2. As a developer, I want the project in a Git repository with a remote and a `.gitignore` that keeps `.env`, local settings and other secrets out, so every change is versioned and the CI/CD pipeline (skill `deploy-setup`) can build on it.
 3. As an admin, I want to log in to the dashboard with the admin credentials from the env file, so the platform is not openly accessible.
+4. As an admin, I want a PostgreSQL-based job queue with leases, retries and a visible job status, plus a configurable limit for parallel LLM calls, so a restart never leaves jobs lost or stuck, a retried job has no duplicate effect, and the GPU is not overloaded.

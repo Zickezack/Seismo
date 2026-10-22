@@ -22,7 +22,8 @@ Rules: `requirements.md`, sections "Settings" and "Basic UI Requirements" (items
 ## 3. Layout
 
 - The two scopes are separate areas (separate pages or routes), never mixed within one section.
-- Within an area: single column of sections, a quick-navigation row near the top with one link per section, each section collapsible and expanded by default. A quick-nav click scrolls to the section and expands it if collapsed.
+- Within an area: single column of sections, each section collapsible and expanded by default.
+- Quick-navigation row near the top, one link per section, only once the area has enough sections to need it - not for one or two (`requirements.md`, item 4: "several"). A quick-nav click scrolls to the section and expands it if collapsed.
 - Within a section: short fields two per row, wide fields (text area, file picker, submit button) spanning the full row.
 - Collapse with a native mechanism (`<details>` or the `hidden` attribute). No style rule may override `hidden`.
 - Small edits save in place without reload (`requirements.md`, "Destructive and Bulk Actions", item 3).

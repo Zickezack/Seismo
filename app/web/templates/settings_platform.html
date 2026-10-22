@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Plattform-Einstellungen{% endblock %}
+
+{% macro number_field(field) %}
+<div class="field">
+  <label for="{{ field.name }}">{{ field.label }}</label>
+  <input id="{{ field.name }}" name="{{ field.name }}" type="number" inputmode="numeric"
+         min="{{ field.minimum }}" max="{{ field.maximum }}" step="1" required
+         value="{{ settings[field.name] }}" aria-describedby="{{ field.name }}-hint">
+  <p class="hint" id="{{ field.name }}-hint">{{ field.hint }}</p>
+</div>
+{% endmacro %}
+
+{% macro section(id, title, names) %}
+<details class="card section" id="{{ id }}" open data-testid="section-{{ id }}">
+  <summary><h2>{{ title }}</h2></summary>
+  <form class="form-grid" method="post" action="/settings/platform" data-inline-save data-testid="form-{{ id }}">
+    {% for name in names %}{{ number_field(fields[name]) }}{% endfor %}
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="save-{{ id }}">Speichern</button>
+      <span class="save-status" data-save-status role="status" data-testid="status-{{ id }}"></span>
+    </div>
+  </form>
+</details>
+{% endmacro %}
+
+{% block content %}
+<h1>Plattform-Einstellungen</h1>
+{# A quick-navigation row follows once there are enough sections (requirements.md, "Basic UI Requirements / Styleguide", item 4). #}
+{{ section("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls"]) }}
+{{ section("aufbewahrung", "Aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]) }}
+{% endblock %}

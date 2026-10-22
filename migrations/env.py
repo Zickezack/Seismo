@@ -2,6 +2,7 @@
 from alembic import context
 from sqlalchemy import create_engine, pool
 
+import app.db.models  # noqa: F401 - registers the tables on Base.metadata for autogenerate
 from app.config import Settings
 from app.db.base import Base
 from app.logging_config import configure_logging

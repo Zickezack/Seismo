@@ -11,6 +11,10 @@
   --color-primary-hover: #184c99;
   --color-error-background: #fdecec;
   --color-error-text: #a01b1b;
+  --color-success-background: #e7f5ec;
+  --color-success-text: #1d6b3a;
+  --color-warning-background: #fff4dc;
+  --color-warning-text: #7a5300;
   --radius: 6px;
   --space: 1rem;
   --content-width: 72rem;
@@ -33,6 +37,15 @@ body {
 h1 {
   font-size: 1.5rem;
   margin: 0 0 var(--space);
+}
+
+h2 {
+  font-size: 1.125rem;
+  margin: 0;
+}
+
+a {
+  color: var(--color-primary);
 }
 
 /* Header */
@@ -67,6 +80,25 @@ h1 {
   color: var(--color-muted);
 }
 
+.site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem var(--space);
+}
+
+.site-nav a {
+  color: var(--color-text);
+  text-decoration: none;
+  padding: 0.25rem 0;
+  border-bottom: 2px solid transparent;
+}
+
+.site-nav a:hover,
+.site-nav a[aria-current="page"] {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
 /* Layout */
 
 .content {
@@ -85,6 +117,49 @@ h1 {
 .card-narrow {
   max-width: 36rem;
   margin: 2rem auto;
+}
+
+/* Sections stack in a single column (requirements.md, "Basic UI Requirements / Styleguide", item 6). */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  margin-bottom: var(--space);
+}
+
+.stack > * {
+  margin: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem var(--space);
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-muted);
+}
+
+/* Collapsible sections: a native <details>, expanded by default (requirements.md, item 5). */
+.section {
+  margin-bottom: var(--space);
+}
+
+.section > summary {
+  cursor: pointer;
+}
+
+.section > summary > h2 {
+  display: inline;
+}
+
+.section[open] > summary {
+  margin-bottom: var(--space);
 }
 
 /* Forms: short fields two to a row on wider screens; actions and wide fields span the full row
@@ -118,7 +193,7 @@ label {
   font-weight: 600;
 }
 
-input {
+input:not([type="checkbox"]) {
   width: 100%;
   padding: 0.5rem 0.75rem;
   font: inherit;
@@ -128,8 +203,16 @@ input {
   border-radius: var(--radius);
 }
 
+input[type="checkbox"] {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
 input:focus-visible,
-.button:focus-visible {
+.button:focus-visible,
+a:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
@@ -162,6 +245,125 @@ input:focus-visible,
   background: var(--color-background);
 }
 
+.button:disabled,
+.button:disabled:hover {
+  color: var(--color-muted);
+  background: var(--color-background);
+  border-color: var(--color-border);
+  cursor: not-allowed;
+}
+
+/* In-place save confirmation next to the submit button (static/app.js, data-inline-save). */
+.save-status {
+  margin-left: var(--space);
+}
+
+.save-status-ok {
+  color: var(--color-success-text);
+}
+
+.save-status-error {
+  color: var(--color-error-text);
+}
+
+/* Filter links, e.g. job status */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.filter {
+  padding: 0.25rem 0.75rem;
+  color: var(--color-text);
+  text-decoration: none;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+}
+
+.filter[aria-current="true"] {
+  color: #ffffff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.count {
+  font-weight: 600;
+}
+
+/* Tables: scroll sideways inside their own container on narrow screens (skill listen-ui). */
+
+.table-container {
+  overflow-x: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.table th,
+.table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table th {
+  font-weight: 600;
+  background: var(--color-background);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table .cell-select {
+  width: 1px;
+}
+
+.table .cell-error {
+  min-width: 16rem;
+  max-width: 32rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.status {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  font-weight: 600;
+  border-radius: var(--radius);
+  background: var(--color-background);
+}
+
+.status-running {
+  color: var(--color-primary);
+  background: #e6eefa;
+}
+
+.status-succeeded {
+  color: var(--color-success-text);
+  background: var(--color-success-background);
+}
+
+.status-failed {
+  color: var(--color-error-text);
+  background: var(--color-error-background);
+}
+
+.status-queued {
+  color: var(--color-warning-text);
+  background: var(--color-warning-background);
+}
+
 /* Messages */
 
 .message {
@@ -173,4 +375,9 @@ input:focus-visible,
 .message-error {
   color: var(--color-error-text);
   background: var(--color-error-background);
+}
+
+.message-success {
+  color: var(--color-success-text);
+  background: var(--color-success-background);
 }

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Jobs{% endblock %}
+{% block content %}
+<h1>Jobs</h1>
+
+<section class="card stack">
+  <div class="toolbar">
+    <nav class="filters" aria-label="Nach Status filtern">
+      <a class="filter" href="/jobs" data-testid="filter-all"{% if not overview.status %} aria-current="true"{% endif %}>Alle <span class="count">{{ overview.total }}</span></a>
+      {% for status, label in status_labels.items() %}
+      <a class="filter" href="/jobs?status={{ status }}" data-testid="filter-{{ status }}"{% if overview.status == status %} aria-current="true"{% endif %}>{{ label }} <span class="count" data-testid="count-{{ status }}">{{ overview.counts[status] }}</span></a>
+      {% endfor %}
+    </nav>
+    <form method="post" action="/jobs/test">
+      <button class="button button-secondary" type="submit" data-testid="enqueue-test-job">Testjob einreihen</button>
+    </form>
+  </div>
+  <p class="hint" data-testid="llm-slots">LLM-Aufrufe: {{ overview.llm_slots_in_use }} von {{ overview.llm_max_parallel_calls }} belegt · <a href="/settings/platform#verarbeitung">Limit ändern</a></p>
+</section>
+
+<form class="stack" method="post" action="/jobs/requeue" data-bulk-form data-testid="job-list">
+  <input type="hidden" name="status" value="{{ overview.status or '' }}">
+  <div class="toolbar">
+    <button class="button" type="submit" data-bulk-action data-testid="requeue" disabled>Erneut einreihen</button>
+    {% if overview.matching > overview.jobs|length %}
+    <span class="hint" data-testid="list-limit">Angezeigt: die neuesten {{ overview.jobs|length }} von {{ overview.matching }}</span>
+    {% endif %}
+  </div>
+  {% if overview.jobs %}
+  <div class="table-container">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle fehlgeschlagenen Jobs auswählen" data-testid="select-all"></th>
+          <th>ID</th>
+          <th>Art</th>
+          <th>Status</th>
+          <th>Versuche</th>
+          <th>Erstellt</th>
+          <th>Aktualisiert</th>
+          <th>Nächster Versuch</th>
+          <th>Lease bis</th>
+          <th>Worker</th>
+          <th>Letzter Fehler</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in overview.jobs %}
+        <tr data-testid="job-{{ job.id }}">
+          <td class="cell-select"><input type="checkbox" name="job_id" value="{{ job.id }}" data-select-row aria-label="Job #{{ job.id }} auswählen" data-testid="select-{{ job.id }}"{% if not job.can_requeue %} disabled title="Nur fehlgeschlagene Jobs lassen sich erneut einreihen"{% endif %}></td>
+          <td>#{{ job.id }}</td>
+          <td>{{ job.kind_label }}</td>
+          <td><span class="status status-{{ job.status }}" data-testid="status-{{ job.id }}">{{ job.status_label }}</span></td>
+          <td>{{ job.attempts }} / {{ job.max_attempts }}</td>
+          <td data-testid="created-{{ job.id }}">{{ job.created_at|local_time }}</td>
+          <td>{{ job.updated_at|local_time }}</td>
+          <td>{{ job.run_after|local_time if job.status == "queued" else "–" }}</td>
+          <td>{{ job.lease_expires_at|local_time }}</td>
+          <td>{{ job.lease_owner or "–" }}</td>
+          <td class="cell-error" data-testid="error-{{ job.id }}">{{ job.last_error or "–" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p data-testid="no-jobs">Keine Jobs{% if overview.status %} mit diesem Status{% endif %}.</p>
+  {% endif %}
+</form>
+{% endblock %}
