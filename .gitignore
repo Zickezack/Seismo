@@ -1,0 +1,35 @@
+# Personal Claude Code settings (e.g. the next-story SessionStart hook) and notes
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Local compose overrides - docker compose loads this file automatically
+docker-compose.override.yml
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets: only .env.example (placeholders) is versioned
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.venv/

@@ -1,0 +1,32 @@
+# Development container: the `dev` service next to the `db` service of ../docker-compose.yml.
+# Relative paths resolve from the first compose file, i.e. the repository root.
+
+# A project of its own, with its own database volume: closing the dev container never stops a
+# stack started with `docker compose up`, and that stack's `down` never trips over `dev`.
+name: finnewsint-dev
+
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/python:3.14
+    command: sleep infinity
+    working_dir: /workspaces/FinNewsInt
+    volumes:
+      - .:/workspaces/FinNewsInt:cached
+      # Claude Code login, settings and history survive container rebuilds.
+      - claude-config:/home/vscode/.claude
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-5}
+      # Makes Claude Code keep .claude.json (account, project trust) inside the volume as well.
+      CLAUDE_CONFIG_DIR: /home/vscode/.claude
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  claude-config:

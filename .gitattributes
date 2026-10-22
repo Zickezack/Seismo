@@ -1,0 +1,2 @@
+# LF in the repository and in every checkout, also on Windows: the files run in Linux containers.
+* text=auto eol=lf

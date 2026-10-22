@@ -1,0 +1,31 @@
+{
+  "name": "FinNewsInt",
+  "dockerComposeFile": ["../docker-compose.yml", "docker-compose.dev.yml"],
+  "service": "dev",
+  // Only the dev container and the database; api and worker are started from the terminal (README.md).
+  "runServices": ["dev", "db"],
+  "workspaceFolder": "/workspaces/FinNewsInt",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode",
+  "features": {
+    // Required by the Claude Code feature; it cannot install Node.js on this image by itself.
+    "ghcr.io/devcontainers/features/node:1": {},
+    // Installs the Claude Code CLI and VS Code extension on every build, so a rebuild never loses it.
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+  },
+  // A fresh named volume belongs to root; Claude Code runs as vscode and must write to it.
+  // The image's site-packages belong to root, so the project is installed for the vscode user.
+  // A workspace mounted from Windows belongs to root as well, and git refuses such a repository
+  // ("dubious ownership"); system scope, because VS Code copies ~/.gitconfig from the host.
+  "postCreateCommand": "sudo chown vscode:vscode /home/vscode/.claude && sudo git config --system --add safe.directory ${containerWorkspaceFolder} && pip install --user -e '.[dev]'",
+  // First on PATH, so `alembic`, `uvicorn` and `pytest` are the project's, not the image's pipx tools.
+  "remoteEnv": {
+    "PATH": "/home/vscode/.local/bin:${containerEnv:PATH}"
+  },
+  "forwardPorts": [8000],
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"]
+    }
+  }
+}
