@@ -142,8 +142,11 @@ image `seismo:dev` (Dockerfile target `dev`).
   stylesheet applies at once. Reload the page in the browser to see it.
 - A new migration: `python -m alembic upgrade head` in the dev container (`migrate` only runs when
   the stack starts).
-- A changed dependency in `pyproject.toml` needs a new image. From a terminal on the host, in the
-  repository folder:
+- A changed dependency in `pyproject.toml` needs a new image. **Dev Containers: Rebuild Container**
+  builds every service of `runServices` anew - `migrate`, `api` and `worker` included - and restarts
+  them; plain *Reopen in Container* builds nothing. The rebuild takes a few minutes and ends a Claude
+  Code session in the container (login and history stay in the `claude-config` volume). Faster, and
+  without touching the dev container, from a terminal on the host in the repository folder:
   `docker compose -f docker-compose.yml -f .devcontainer/docker-compose.dev.yml up -d --build migrate api worker`
 - Logs: Docker Desktop, or `docker compose -p seismo-dev logs -f api worker` on the host.
 
