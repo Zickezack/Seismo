@@ -25,7 +25,7 @@ class Rule:
         return len(self.pattern)
 
     def matches(self, path: str) -> bool:
-        return _regex(self.pattern).match(path) is not None
+        return pattern_matches(self.pattern, path)
 
 
 @dataclass
@@ -36,7 +36,7 @@ class Group:
 
 def allows(robots_txt: str, product_token: str, url: str) -> bool:
     """Whether the robots.txt lets the product token fetch the URL."""
-    path = _path_of(url)
+    path = path_of(url)
     if path == "/robots.txt":
         return True
     best: Rule | None = None
@@ -83,17 +83,24 @@ def _groups(robots_txt: str) -> dict[str, Group]:
                     delay = _seconds(value)
                     group.crawl_delay = delay if delay is not None else group.crawl_delay
                 elif value:  # an empty Disallow allows everything: no rule
-                    group.rules.append(Rule(key == "allow", _normalise(value)))
+                    group.rules.append(Rule(key == "allow", normalise(value)))
     return groups
 
 
-def _path_of(url: str) -> str:
+def pattern_matches(pattern: str, path: str) -> bool:
+    """Whether a normalised path pattern - `*` any characters, a trailing `$` the end - matches from the start of the
+    path. Also the location syntax of TDMRep (tdm_policy)."""
+    return _regex(pattern).match(path) is not None
+
+
+def path_of(url: str) -> str:
+    """The path and query of a URL, normalised as patterns are."""
     parts = urlsplit(url)
-    path = _normalise(parts.path or "/")
-    return f"{path}?{_normalise(parts.query)}" if parts.query else path
+    path = normalise(parts.path or "/")
+    return f"{path}?{normalise(parts.query)}" if parts.query else path
 
 
-def _normalise(text: str) -> str:
+def normalise(text: str) -> str:
     return quote(unquote(text), safe=_SAFE)
 
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass, fields
 from sqlalchemy import Connection, Engine
 
 from app.repositories import platform_settings_repository
+from app.services import tdm_policy
 
 
 class InvalidSetting(ValueError):
@@ -21,6 +22,12 @@ class PlatformSettings:
     backups_to_keep: int = 14
     article_max_age_days: int = 7
     domain_min_interval_seconds: int = 10
+    # One domain per line; a full text from it or a subdomain is not fetched (tdm_policy).
+    tdm_blocked_domains: str = "\n".join(tdm_policy.STARTER_BLOCKED_DOMAINS)
+
+    @property
+    def blocked_domains(self) -> list[str]:
+        return self.tdm_blocked_domains.split()
 
 
 @dataclass(frozen=True)
@@ -32,6 +39,7 @@ class NumberField:
     hint: str
     minimum: int
     maximum: int
+    kind = "number"
 
     @property
     def error(self) -> str:
@@ -45,6 +53,22 @@ class NumberField:
         if not self.minimum <= value <= self.maximum:
             raise InvalidSetting(self.error)
         return value
+
+
+@dataclass(frozen=True)
+class DomainListField:
+    """A list of domains, one per line, as the form shows and checks it; stored sorted, each once."""
+
+    name: str
+    label: str
+    hint: str
+    kind = "domains"
+
+    def parse(self, raw: str) -> str:
+        try:
+            return "\n".join(tdm_policy.parse_domains(raw))
+        except ValueError as error:
+            raise InvalidSetting(f"{self.label}: {error}.") from None
 
 
 FORM_FIELDS = {
@@ -70,6 +94,12 @@ FORM_FIELDS = {
             "Zwischen zwei Anfragen an denselben Host, für Feeds und Volltexte. Ein längerer Crawl-delay aus robots.txt gilt immer.",
             1,
             600,
+        ),
+        DomainListField(
+            "tdm_blocked_domains",
+            "Domains ohne Volltext",
+            "Eine Domain pro Zeile, gilt auch für ihre Subdomains: deren Bedingungen verbieten Text- und Data-Mining, "
+            "ihre Artikel bleiben ohne Volltext. Ein maschinenlesbarer Vorbehalt (TDMRep) gilt zusätzlich, für jede Domain.",
         ),
         NumberField(
             "succeeded_jobs_retention_days", "Erledigte Jobs aufbewahren (Tage)", "Danach löscht der Worker sie.", 1, 3650

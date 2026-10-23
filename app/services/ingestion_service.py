@@ -20,7 +20,7 @@ from sqlalchemy import Connection, Engine
 
 from app.db.models import BACKFILL_PRIORITY, LIVE_PRIORITY, FullTextStatus
 from app.repositories import article_repository, raw_text_repository, source_repository
-from app.services import job_service, platform_settings_service, source_service
+from app.services import job_service, platform_settings_service, source_service, tdm_policy
 from app.services.fetch_policy_service import PoliteHttp
 from app.services.bulk import BulkResult
 from app.services.source_service import Source
@@ -176,10 +176,13 @@ def fetch_full_text(
 ) -> Callable[[Connection], None] | None:
     """First phase of a full-text job: fetch the article's page. Returns the effect that records the outcome.
 
-    A lasting outcome (stored, disallowed by robots.txt, a content type not kept, refused by the host, HTTP 4xx,
-    source inactive or deleted) settles the article. A passing failure (timeout, HTTP 5xx) raises SourceUnavailable to be
-    retried; on the final attempt it settles the article as failed instead. HostBusy defers the job. A
-    backfill's full text takes only a free request slot (fetch_policy_service).
+    A lasting outcome (stored, disallowed by robots.txt, text and data mining reserved, a content type not kept,
+    refused by the host, HTTP 4xx, source inactive or deleted) settles the article. A passing failure (timeout,
+    HTTP 5xx) raises SourceUnavailable to be retried; on the final attempt it settles the article as failed instead.
+    HostBusy defers the job. A backfill's full text takes only a free request slot (fetch_policy_service).
+
+    Text and data mining (story 9): a domain on the list is not asked at all, a host's tdmrep.json is asked before
+    the page, and the page's own header and meta tags decide last; a reserved page is not kept (tdm_policy).
     """
     with engine.connect() as connection:
         article = article_repository.get_for_full_text(connection, article_id)
@@ -188,11 +191,16 @@ def fetch_full_text(
     if not article.source_active:
         reason = "Quelle gelöscht" if article.source_active is None else "Quelle inaktiv"
         return _settle(article_id, FullTextStatus.SKIPPED, reason)
-    platform_interval = platform_settings_service.current(engine).domain_min_interval_seconds
-    min_interval = request_interval(platform_interval, article.source_min_request_interval_seconds)
+    settings = platform_settings_service.current(engine)
+    if listed := tdm_policy.blocked_domain(article.url, settings.blocked_domains):
+        return _settle(article_id, FullTextStatus.RESERVED, _listed(listed))
+    min_interval = request_interval(settings.domain_min_interval_seconds, article.source_min_request_interval_seconds)
     try:
         with HttpClient(contact) as http:
             polite = PoliteHttp(engine, http, min_interval, reserved_slot, backfill=backfill)
+            in_file = tdm_policy.file_layer(polite.tdm_rules(article.url), article.url)
+            if in_file.reserved:
+                return _settle(article_id, FullTextStatus.RESERVED, tdm_policy.decide(in_file).reason)
             response = polite.get(article.url, FULL_TEXT_ACCEPT)
     except FetchDisallowed as error:
         return _settle(article_id, FullTextStatus.DISALLOWED, str(error))
@@ -206,6 +214,14 @@ def fetch_full_text(
         if final_attempt:
             return _settle(article_id, FullTextStatus.FAILED, str(error))
         raise
+    # A redirect may end on a listed domain.
+    if listed := tdm_policy.blocked_domain(response.url, settings.blocked_domains):
+        return _settle(article_id, FullTextStatus.RESERVED, _listed(listed))
+    verdict = tdm_policy.decide(
+        in_file, tdm_policy.header_layer(response.headers), tdm_policy.meta_layer(response.content, response.content_type)
+    )
+    if verdict.reserved:
+        return _settle(article_id, FullTextStatus.RESERVED, verdict.reason)
     media_type = (response.content_type or "").split(";")[0].strip().lower()
     if media_type not in FULL_TEXT_TYPES:
         return _settle(article_id, FullTextStatus.UNSUPPORTED, f"Inhaltstyp {media_type or 'unbekannt'} wird nicht gespeichert")
@@ -215,6 +231,10 @@ def fetch_full_text(
             raw_text_repository.insert_raw_text(connection, article_id, response.content, response.content_type, response.url)
 
     return store
+
+
+def _listed(domain: str) -> str:
+    return f"Text- und Data-Mining laut Bedingungen nicht erlaubt (Domains ohne Volltext: {domain})"
 
 
 def _settle(article_id: int, status: FullTextStatus, error: str) -> Callable[[Connection], None]:

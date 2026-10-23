@@ -39,6 +39,7 @@ class FullTextStatus(StrEnum):
     UNSUPPORTED = "unsupported"  # a content type the raw-data layer does not keep
     FAILED = "failed"
     BLOCKED = "blocked"  # the host refused it (HTTP 401, 403), often a bot protection
+    RESERVED = "reserved"  # the publisher reserves text and data mining (TDMRep, or the host list); nothing kept
     SKIPPED = "skipped"  # source inactive or deleted, or fetched before full texts existed
 
 
@@ -47,6 +48,11 @@ class BackfillStatus(StrEnum):
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"  # by the admin, or the source was deactivated
+
+
+class TdmrepStatus(StrEnum):
+    RULES = "rules"  # tdmrep_rules holds the rules of a valid file
+    NONE = "none"  # no file, or none that could be read: the host does not use the protocol
 
 
 class RobotsStatus(StrEnum):
@@ -117,6 +123,8 @@ class PlatformSettingsRecord(Base):
     backups_to_keep: Mapped[int] = mapped_column(server_default="14")
     article_max_age_days: Mapped[int] = mapped_column(server_default="7")
     domain_min_interval_seconds: Mapped[int] = mapped_column(server_default="10")
+    # Domains whose terms forbid text and data mining, one per line; NULL: the list the code starts with.
+    tdm_blocked_domains: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -263,5 +271,12 @@ class FetchHost(Base):
     robots_status: Mapped[str | None] = mapped_column(String(20))
     robots_txt: Mapped[str | None] = mapped_column(Text)
     robots_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The host's /.well-known/tdmrep.json (TDM Reservation Protocol): its rules while it has a valid one.
+    tdmrep_status: Mapped[str | None] = mapped_column(String(20))
+    tdmrep_rules: Mapped[str | None] = mapped_column(Text)
+    tdmrep_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    __table_args__ = (CheckConstraint(robots_status.in_([s.value for s in RobotsStatus]), name="robots_status"),)
+    __table_args__ = (
+        CheckConstraint(robots_status.in_([s.value for s in RobotsStatus]), name="robots_status"),
+        CheckConstraint(tdmrep_status.in_([s.value for s in TdmrepStatus]), name="tdmrep_status"),
+    )

@@ -16,6 +16,7 @@ FULL_TEXT_LABELS = {
     FullTextStatus.UNSUPPORTED: "Nicht unterstützt",
     FullTextStatus.FAILED: "Fehlgeschlagen",
     FullTextStatus.BLOCKED: "Blockiert",
+    FullTextStatus.RESERVED: "Vorbehalten",
     FullTextStatus.SKIPPED: "Übersprungen",
 }
 

@@ -9,19 +9,33 @@ from app.db.models import FetchHost
 _ONE_SECOND = literal_column("interval '1 second'")
 
 
-def get(connection: Connection, host: str, robots_max_age: timedelta) -> Row | None:
-    """The host's robots.txt state, with `robots_fresh` telling whether it is younger than `robots_max_age`,
-    and `paused` whether the host's pause (Retry-After) still lasts."""
-    fresh = FetchHost.robots_fetched_at > func.now() - robots_max_age.total_seconds() * _ONE_SECOND
+def get(connection: Connection, host: str, max_age: timedelta) -> Row | None:
+    """The host's robots.txt and tdmrep.json state, with `robots_fresh` and `tdmrep_fresh` telling whether each is
+    younger than `max_age`, and `paused` whether the host's pause (Retry-After) still lasts."""
+    def fresh(fetched_at):
+        return func.coalesce(fetched_at > func.now() - max_age.total_seconds() * _ONE_SECOND, False)
+
     paused = func.coalesce(FetchHost.paused_until > func.now(), False)
     statement = select(
-        FetchHost.robots_status, FetchHost.robots_txt, fresh.label("robots_fresh"), paused.label("paused")
+        FetchHost.robots_status,
+        FetchHost.robots_txt,
+        fresh(FetchHost.robots_fetched_at).label("robots_fresh"),
+        FetchHost.tdmrep_status,
+        FetchHost.tdmrep_rules,
+        fresh(FetchHost.tdmrep_fetched_at).label("tdmrep_fresh"),
+        paused.label("paused"),
     ).where(FetchHost.host == host)
     return connection.execute(statement).one_or_none()
 
 
 def save_robots(connection: Connection, host: str, status: str, robots_txt: str | None) -> None:
     values = {"robots_status": status, "robots_txt": robots_txt, "robots_fetched_at": func.now()}
+    statement = insert(FetchHost).values(host=host, **values).on_conflict_do_update(index_elements=[FetchHost.host], set_=values)
+    connection.execute(statement)
+
+
+def save_tdmrep(connection: Connection, host: str, status: str, rules: str | None) -> None:
+    values = {"tdmrep_status": status, "tdmrep_rules": rules, "tdmrep_fetched_at": func.now()}
     statement = insert(FetchHost).values(host=host, **values).on_conflict_do_update(index_elements=[FetchHost.host], set_=values)
     connection.execute(statement)
 

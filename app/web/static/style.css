@@ -447,6 +447,7 @@ a:focus-visible {
 }
 
 .status-unsupported,
+.status-reserved,
 .status-skipped {
   color: var(--color-muted);
 }

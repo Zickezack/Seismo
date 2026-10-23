@@ -109,6 +109,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | backups_to_keep | integer | yes | 14 | Backup files kept; after each new backup the oldest beyond this number are deleted, 1 to 365. |
   | article_max_age_days | integer | yes | 7 | Items published longer ago than this are not taken by the live fetch; they belong to the backfill. Items without a date always come. 1 to 365. |
   | domain_min_interval_seconds | integer | yes | 10 | Minimum time between two requests to the same host, feeds and full texts alike; a longer Crawl-delay in the host's robots.txt wins. 1 to 600. |
+  | tdm_blocked_domains | text | no | the starter list | Domains whose terms forbid text and data mining, one per line, sorted, at most 500; each covers its subdomains. A full text from them is not fetched (Vorbehalten). Empty: none. Starter list (NULL): the publishers found in October 2026 (`tdm_policy.STARTER_BLOCKED_DOMAINS`). UI: Domains ohne Volltext. |
   | updated_at | timestamptz | yes | now() | |
 
 - Relationships: none
@@ -160,7 +161,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | published_at | timestamptz | no | | Publication time as the source states it, in UTC (RSS pubDate, Atom published, else the item's only date: RSS 1.0 dc:date, Atom updated); empty when it states none (rules 4 and 5). GDELT states none: when GDELT first saw the article (seendate, 15-minute steps), the admin's decision of 2026-10-23. UI: Veröffentlicht. |
   | fetched_at | timestamptz | yes | now() | When it was stored. UI: Abgerufen. Index `ix_article_fetched_at`. |
   | language | varchar(10) | no | | ISO 639 code as the source states it for the item or the feed (GDELT: its English language name, translated), else the language of the Quelle; empty if neither has one. |
-  | full_text_status | varchar(20) | yes | `pending` | `pending`, `stored`, `disallowed` (robots.txt), `unsupported` (content type), `failed`, `blocked` (the host refused it, HTTP 401 or 403, often a bot protection), `skipped` (source inactive or deleted, or stored before full texts existed); check constraint. Set once, from `pending`; only the admin's "Blockierte Volltexte abrufen" puts `blocked` back to `pending`. UI: Volltext - Ausstehend, Gespeichert, Gesperrt, Nicht unterstützt, Fehlgeschlagen, Blockiert, Übersprungen. |
+  | full_text_status | varchar(20) | yes | `pending` | `pending`, `stored`, `disallowed` (robots.txt), `unsupported` (content type), `failed`, `blocked` (the host refused it, HTTP 401 or 403, often a bot protection), `reserved` (the publisher reserves text and data mining: its domain is on the list, or TDMRep says so - nothing of the page is kept), `skipped` (source inactive or deleted, or stored before full texts existed); check constraint. Set once, from `pending`; only the admin's "Blockierte Volltexte abrufen" puts `blocked` back to `pending`. UI: Volltext - Ausstehend, Gespeichert, Gesperrt, Nicht unterstützt, Fehlgeschlagen, Blockiert, Vorbehalten, Übersprungen. |
   | full_text_error | text | no | | Why the full text is not stored, e.g. `HTTP 404`; when blocked, also whether a contact was in the User-Agent. Shown to the admin, never logged. |
   | backfill_id | bigint | no | | The Backfill that found it, foreign key `ON DELETE SET NULL`; empty for an article of the live fetch, also when a backfill finds it again. |
 
@@ -219,9 +220,12 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | robots_status | varchar(20) | no | | `rules`, `allow_all` (404 and other 4xx), `disallow_all` (401, 403); check constraint. Empty until asked. |
   | robots_txt | text | no | | The rules, while `robots_status` is `rules`. |
   | robots_fetched_at | timestamptz | no | | Asked again after 24 hours. |
+  | tdmrep_status | varchar(20) | no | | `rules` (a valid `/.well-known/tdmrep.json`) or `none` (no file, a 4xx or no valid TDMRep); check constraint. Empty until asked. |
+  | tdmrep_rules | text | no | | The file's rules as JSON (location, reserved, policy), while `tdmrep_status` is `rules`. |
+  | tdmrep_fetched_at | timestamptz | no | | Asked again after 24 hours, before the next full text from the host. |
 
 - Relationships: none; matched by the host of a URL.
-- Rules: every request to a source's host - feed or full text - checks robots.txt (group `Seismo`, else `*`) and takes a request slot, never before the end of a pause (app/services/fetch_policy_service.py).
+- Rules: every request to a source's host - feed or full text - checks robots.txt (group `Seismo`, else `*`) and takes a request slot, never before the end of a pause (app/services/fetch_policy_service.py). A full text checks the host's tdmrep.json first (app/services/tdm_policy.py).
 - Privacy: none
 
 ### Seed-Protokoll (`seed_log`)

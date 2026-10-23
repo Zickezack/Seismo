@@ -175,3 +175,27 @@ def test_full_texts_refused_before_are_blocked_and_failed_again_on_downgrade(eng
     assert statuses() == {"a": "blocked", "b": "blocked", "c": "failed", "d": "stored"}
     downgrade(engine, "d29ed1e9b63f")
     assert statuses() == {"a": "failed", "b": "failed", "c": "failed", "d": "stored"}
+
+
+def test_tdm_columns_start_empty_and_reserved_full_texts_fail_on_downgrade(engine):
+    upgrade(engine, "b573f2c351f0")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO fetch_host (host) VALUES ('example.org')"))
+        connection.execute(text("INSERT INTO platform_settings (id, llm_max_parallel_calls) VALUES (1, 2)"))
+
+    upgrade(engine)
+
+    with engine.begin() as connection:
+        host = connection.execute(text("SELECT tdmrep_status, tdmrep_rules, tdmrep_fetched_at FROM fetch_host")).one()
+        assert tuple(host) == (None, None, None)
+        assert connection.execute(text("SELECT tdm_blocked_domains FROM platform_settings")).scalar_one() is None
+        connection.execute(
+            text(
+                "INSERT INTO article (source_name, source_url, item_key, url, full_text_status) "
+                "VALUES ('BBC', 'https://example.org', 'a', 'https://example.org/a', 'reserved')"
+            )
+        )
+    downgrade(engine, "b573f2c351f0")
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT full_text_status FROM article")).scalar_one() == "failed"

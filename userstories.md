@@ -34,7 +34,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 
 ### Epic: Quellenadapter und Ingestion
 8. As an analyst, I want every Quelle to carry its region - the continent it reports from, or worldwide - and the source list sortable and filterable by it, with the starter catalogue bringing the region of each source, so coverage stays balanced across continents and can be viewed per continent.
-9. As an admin, I want full texts fetched only where the publisher allows text and data mining - honouring a machine-readable reservation (TDMRep: the `tdm-reservation` header or meta tag, `/.well-known/tdmrep.json`) and a list of hosts whose terms forbid it, starting with those found for the starter catalogue (BBC, France 24, The Guardian, SRF, tagesschau, SCMP, Times of India, CNBC, FreightWaves, The Loadstar, OilPrice, Rigzone, Defense News) - and otherwise keeping only the article's metadata, so articles found through GDELT respect their publishers' terms as well.
 10. As an analyst, I want the ReliefWeb API as a source type, so humanitarian and conflict reports come in through the route ReliefWeb offers for automated access, since its robots.txt excludes the RSS feeds.
 11. As an analyst, I want the EIA Open Data API as a source of energy data releases (e.g. the weekly petroleum and natural gas storage reports), with its API key from the environment, since EIA's robots.txt excludes its RSS feeds.
 
@@ -109,6 +108,7 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 5. As an analyst, I want a GDELT DOC 2.0 API adapter with configurable queries as the second source, so ingestion covers global events beyond the configured feeds.
 6. As an admin, I want historical backfill to run separately from live ingestion, so a backfill never delays current news.
 7. As an admin, I want full-text fetches that a host's bot protection blocks (e.g. the BFS article pages on www.admin.ch answer HTTP 403 to the Seismo User-Agent) recognised per source and resolved through an allowed route - a contact in the User-Agent, an official API or feed with the full text, or the publisher's permission - never by disguising the fetcher, so such sources still deliver complete texts.
+9. As an admin, I want full texts fetched only where the publisher allows text and data mining - honouring a machine-readable reservation (TDMRep: the `tdm-reservation` header or meta tag, `/.well-known/tdmrep.json`) and a list of hosts whose terms forbid it, starting with those found for the starter catalogue (BBC, France 24, The Guardian, SRF, tagesschau, SCMP, Times of India, CNBC, FreightWaves, The Loadstar, OilPrice, Rigzone, Defense News) - and otherwise keeping only the article's metadata, so articles found through GDELT respect their publishers' terms as well.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.

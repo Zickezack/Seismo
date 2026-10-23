@@ -13,18 +13,21 @@ A backfill request (story 6) reserves no slot: it goes only while the host is fr
 it is, so live requests always get the next slot.
 """
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
 from sqlalchemy import Engine, Row
 
-from app.db.models import RobotsStatus
+from app.db.models import RobotsStatus, TdmrepStatus
 from app.repositories import fetch_host_repository
-from app.services import robots_txt
+from app.services import robots_txt, tdm_policy
 from app.sources.errors import FetchDisallowed, HostBusy, SourceRejected, SourceUnavailable
 from app.sources.http import HttpClient, HttpResponse, unavailable
 
+# How long a host's robots.txt and tdmrep.json count before they are asked for again.
 ROBOTS_MAX_AGE = timedelta(hours=24)
 # RFC 9309 asks crawlers to read at least 500 KiB of a robots.txt.
 ROBOTS_MAX_BYTES = 500 * 1024
@@ -89,22 +92,52 @@ class PoliteHttp:
     def get(self, url: str, accept: str) -> HttpResponse:
         """Raises FetchDisallowed, HostBusy, or what HttpClient.get raises."""
         host, robots_url = _host_of(url)
-        with self._engine.connect() as connection:
-            known = fetch_host_repository.get(connection, host, ROBOTS_MAX_AGE)
-        if known is not None and known.paused:
-            if self._backfill:
-                with self._engine.connect() as connection:
-                    raise HostBusy(fetch_host_repository.free_at_of(connection, host, self._min_interval), reserved=False)
-            # A slot reserved before the pause began is void; the new one lies after it.
-            with self._engine.begin() as connection:
-                slot, _now = fetch_host_repository.reserve_slot(connection, host, self._min_interval)
-            raise HostBusy(slot)
-        try:
+        known = self._known_unless_paused(host)
+        with self._pausing_on_retry_after(host):
             rules = self._robots(host, robots_url, known)
             if not rules.allows(url):
                 raise FetchDisallowed("Durch robots.txt gesperrt")
             self._wait_for_turn(host, max(self._min_interval, rules.crawl_delay()))
             return self._http.get(url, accept)
+
+    def tdm_rules(self, url: str) -> str | None:
+        """The rules of the host's /.well-known/tdmrep.json, asked for once a day like robots.txt (no request slot);
+        None when the host has none. Raises HostBusy during a pause, SourceUnavailable to be asked again later."""
+        host, _robots_url = _host_of(url)
+        known = self._known_unless_paused(host)
+        if known is not None and known.tdmrep_fresh:
+            return known.tdmrep_rules
+        scheme = urlsplit(url).scheme
+        with self._pausing_on_retry_after(host):
+            tdmrep_url = f"{scheme}://{host}{tdm_policy.TDMREP_PATH}"
+            response = self._http.fetch(tdmrep_url, "application/json", tdm_policy.TDMREP_MAX_BYTES)
+            if response.status >= 500 or response.status == 429:
+                raise unavailable(response, "tdmrep.json: ")
+        # No file, a 4xx or a file that is no TDMRep: the host does not use the protocol.
+        rules = tdm_policy.parse_tdmrep(response.content) if response.status == 200 else None
+        with self._engine.begin() as connection:
+            status = TdmrepStatus.RULES if rules is not None else TdmrepStatus.NONE
+            fetch_host_repository.save_tdmrep(connection, host, status, rules)
+        return rules
+
+    def _known_unless_paused(self, host: str) -> Row | None:
+        """What is known of the host; HostBusy while it asked for a pause (Retry-After)."""
+        with self._engine.connect() as connection:
+            known = fetch_host_repository.get(connection, host, ROBOTS_MAX_AGE)
+        if known is None or not known.paused:
+            return known
+        if self._backfill:
+            with self._engine.connect() as connection:
+                raise HostBusy(fetch_host_repository.free_at_of(connection, host, self._min_interval), reserved=False)
+        # A slot reserved before the pause began is void; the new one lies after it.
+        with self._engine.begin() as connection:
+            slot, _now = fetch_host_repository.reserve_slot(connection, host, self._min_interval)
+        raise HostBusy(slot)
+
+    @contextmanager
+    def _pausing_on_retry_after(self, host: str) -> Iterator[None]:
+        try:
+            yield
         except SourceUnavailable as error:
             if error.retry_after:
                 with self._engine.begin() as connection:

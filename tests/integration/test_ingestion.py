@@ -766,3 +766,106 @@ def test_refetch_is_all_or_nothing_and_an_inactive_source_blocks_it(database, ad
     assert (result.processed, result.blocked) == (0, ["Fed (inaktiv)", "Quelle #999 (nicht gefunden)"])
     assert full_text(database, ids["a"])[0] == "blocked"
     assert ingestion_service.refetch_blocked(database, []).processed == 0
+
+
+def tdmrep(web, host, *rules, status=200):
+    web.pages[f"https://{host}/.well-known/tdmrep.json"] = (status, "application/json", json.dumps(list(rules)).encode())
+
+
+def test_a_listed_domain_gets_no_request_and_keeps_its_metadata(database, adapter, web):
+    ids = fetch_articles(database, adapter, item("a", url="https://www.bbc.co.uk/news/a"))
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == (
+        "reserved", "Text- und Data-Mining laut Bedingungen nicht erlaubt (Domains ohne Volltext: bbc.co.uk)"
+    )
+    assert not any("bbc.co.uk" in url for url in web.requests)
+    [article] = articles(database)
+    assert (article.title, article.url) == ("Meldung a", "https://www.bbc.co.uk/news/a")
+    assert raw_texts(database) == []
+
+
+def test_an_emptied_list_lets_a_domain_in(database, adapter, web):
+    with database.begin() as connection:
+        platform_settings_repository.save(connection, {"tdm_blocked_domains": ""})
+    ids = fetch_articles(database, adapter, item("a", url="https://www.bbc.co.uk/news/a"))
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == ("stored", None)
+
+
+def test_a_reservation_in_tdmrep_json_keeps_the_page_from_being_asked(database, adapter, web):
+    tdmrep(web, "a.bank.example", {"location": "/a.html", "tdm-reservation": 1, "tdm-policy": "https://a.bank.example/tdm"},
+           {"location": "/", "tdm-reservation": 0})
+    url = "https://a.bank.example/{}.html"
+    ids = fetch_articles(database, adapter, item("a", url=url.format("a")), item("b", url=url.format("b")))
+
+    run_jobs(database)
+    _set_host(database, next_slot_at=text("now()"), last_request_at=text("now() - interval '1 minute'"))
+    with database.begin() as connection:
+        connection.execute(update(Job).where(Job.status == JobStatus.QUEUED).values(run_after=text("now()")))
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == (
+        "reserved", "Text- und Data-Mining vorbehalten (tdmrep.json); Bedingungen: https://a.bank.example/tdm"
+    )
+    assert full_text(database, ids["b"]) == ("stored", None)
+    assert url.format("a") not in web.requests
+    # Asked once for both, like robots.txt.
+    assert web.requests.count("https://a.bank.example/.well-known/tdmrep.json") == 1
+
+
+@pytest.mark.parametrize(
+    ("headers", "page", "outcome"),
+    [
+        ({"tdm-reservation": "1"}, b"<p>text</p>", ("reserved", "Text- und Data-Mining vorbehalten (HTTP-Header)")),
+        ({}, b'<head><meta name="tdm-reservation" content="1"></head>', ("reserved", "Text- und Data-Mining vorbehalten (HTML-Meta)")),
+        # The page's meta tag overrides its header.
+        ({"tdm-reservation": "1"}, b'<head><meta name="tdm-reservation" content="0"></head>', ("stored", None)),
+    ],
+)
+def test_the_page_itself_can_reserve_and_a_reserved_page_is_not_kept(database, adapter, web, headers, page, outcome):
+    web.pages["https://a.bank.example/a.html"] = (200, "text/html", page)
+    web.headers["https://a.bank.example/a.html"] = headers
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == outcome
+    assert len(raw_texts(database)) == (1 if outcome[0] == "stored" else 0)
+
+
+def test_a_header_reservation_overrides_an_open_file(database, adapter, web):
+    tdmrep(web, "a.bank.example", {"location": "/", "tdm-reservation": 0})
+    web.headers["https://a.bank.example/a.html"] = {"tdm-reservation": "1", "tdm-policy": "https://a.bank.example/p"}
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == ("reserved", "Text- und Data-Mining vorbehalten (HTTP-Header); Bedingungen: https://a.bank.example/p")
+
+
+def test_a_tdmrep_json_that_cannot_be_read_now_is_asked_again_before_the_page(database, adapter, web):
+    tdmrep(web, "a.bank.example", status=503)
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database)
+
+    [job] = jobs(database, job_service.FETCH_ARTICLE_JOB_KIND)
+    assert (job.status, job.last_error) == (JobStatus.QUEUED, "SourceUnavailable: tdmrep.json: HTTP 503")
+    assert "https://a.bank.example/a.html" not in web.requests
+    assert full_text(database, ids["a"]) == ("pending", None)
+
+
+def test_a_redirect_to_a_listed_domain_is_not_kept(database, adapter, web):
+    web.pages["https://a.bank.example/a.html"] = (301, None, b"")
+    web.headers["https://a.bank.example/a.html"] = {"location": "https://www.theguardian.com/world/a"}
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"])[0] == "reserved"
+    assert "theguardian.com" in full_text(database, ids["a"])[1]
+    assert raw_texts(database) == []

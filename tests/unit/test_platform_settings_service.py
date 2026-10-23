@@ -34,7 +34,25 @@ def test_every_setting_has_a_form_field_and_every_default_fits_its_range():
 
     assert set(FORM_FIELDS) == set(defaults.__dict__)
     for name, field in FORM_FIELDS.items():
-        assert field.minimum <= getattr(defaults, name) <= field.maximum
+        if field.kind == "domains":
+            # Valid, and already as the form stores it.
+            assert field.parse(getattr(defaults, name)) == getattr(defaults, name)
+        else:
+            assert field.minimum <= getattr(defaults, name) <= field.maximum
+
+
+def test_domain_list_is_stored_sorted_once_each_and_names_what_is_no_domain():
+    field = FORM_FIELDS["tdm_blocked_domains"]
+
+    assert field.parse("  WWW.Example.com \n\n*.bbc.co.uk\nexample.com\nwww.example.com\n") == "bbc.co.uk\nexample.com\nwww.example.com"
+    assert field.parse("") == ""
+    with pytest.raises(InvalidSetting, match=r"^Domains ohne Volltext: keine Domain: https://bbc.com/news, localhost\.$"):
+        field.parse("bbc.com\nhttps://bbc.com/news\nlocalhost")
+
+
+def test_blocked_domains_start_with_the_publishers_that_forbid_text_and_data_mining():
+    assert {"bbc.co.uk", "theguardian.com", "tagesschau.de", "srf.ch"} <= set(PlatformSettings().blocked_domains)
+    assert PlatformSettings(tdm_blocked_domains="").blocked_domains == []
 
 
 def test_save_names_every_invalid_value_and_writes_nothing(monkeypatch):

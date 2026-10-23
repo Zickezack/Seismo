@@ -1,5 +1,6 @@
 """HTTP for the source adapters: one User-Agent, timeouts, a size limit and a few redirects."""
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from importlib.metadata import version
@@ -24,6 +25,7 @@ class HttpResponse:
     status: int = 200
     content_type: str | None = None
     retry_after: float | None = None  # seconds, from the Retry-After header
+    headers: Mapping[str, str] = field(default_factory=dict)  # names in lower case
 
 
 def user_agent(contact: str) -> str:
@@ -77,6 +79,7 @@ class HttpClient:
                     status=response.status_code,
                     content_type=response.headers.get("content-type"),
                     retry_after=retry_after_seconds(response.headers.get("retry-after")),
+                    headers={name.lower(): value for name, value in response.headers.items()},
                 )
         except (httpx2.InvalidURL, httpx2.UnsupportedProtocol):
             raise SourceRejected("Ungültige URL") from None

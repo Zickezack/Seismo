@@ -64,6 +64,7 @@ Goal: process millions of articles, many languages and long historical periods.
 1. Start with open or lawfully usable sources. Check the licence terms before using live, intraday or historical stock prices or fundamental data.
 2. Respect each source's terms of use and text licensing. The full text of every article is fetched from its URL; checking each source's terms is the admin's responsibility.
 3. Full texts are stored only temporarily and deleted according to the source's retention period after successful processing (`datamodel.md`, "Model-wide rules").
+4. Full texts are fetched only where the publisher does not reserve text and data mining - by a machine-readable reservation (TDM Reservation Protocol) or because the admin lists its domain, its terms forbidding it; otherwise only the article's metadata is kept.
 
 ## Acceptance Criteria per Epic
 Grouped by the epics in `userstories.md`. A story is complete only when the criteria of its epic that it touches hold.
