@@ -16,12 +16,12 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
-from urllib.robotparser import RobotFileParser
 
 from sqlalchemy import Engine, Row
 
 from app.db.models import RobotsStatus
 from app.repositories import fetch_host_repository
+from app.services import robots_txt
 from app.sources.errors import FetchDisallowed, HostBusy, SourceRejected, SourceUnavailable
 from app.sources.http import HttpClient, HttpResponse, unavailable
 
@@ -41,22 +41,17 @@ class RobotsRules:
     status: RobotsStatus
     robots_txt: str | None = None
 
-    def _parser(self) -> RobotFileParser:
-        parser = RobotFileParser()
-        parser.parse((self.robots_txt or "").splitlines())
-        return parser
-
     def allows(self, url: str) -> bool:
         if self.status == RobotsStatus.ALLOW_ALL:
             return True
         if self.status == RobotsStatus.DISALLOW_ALL:
             return False
-        return self._parser().can_fetch(USER_AGENT_TOKEN, url)
+        return robots_txt.allows(self.robots_txt or "", USER_AGENT_TOKEN, url)
 
     def crawl_delay(self) -> float:
         if self.status != RobotsStatus.RULES:
             return 0
-        return float(self._parser().crawl_delay(USER_AGENT_TOKEN) or 0)
+        return robots_txt.crawl_delay(self.robots_txt or "", USER_AGENT_TOKEN)
 
 
 def robots_rules(response: HttpResponse) -> RobotsRules:
