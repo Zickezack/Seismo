@@ -41,8 +41,9 @@ Only the `api` container gets these variables. Changing `ADMIN_PASSWORD` or `SES
 out every open session; a session otherwise lasts 12 hours from the login.
 
 `FETCH_CONTACT` (optional, strongly recommended) is an e-mail address or URL sent in the User-Agent of
-every source fetch, so a source can reach the operator; some sources ask for it - the BLS, and www.admin.ch
-(BFS) answers full-text requests without one with HTTP 403. The worker sends it; the api only shows a
+every source fetch, so a source can reach the operator; some sources ask for it - www.admin.ch (BFS)
+answers full-text requests without one with HTTP 403, and the SEC and the BLS want an e-mail address (a URL
+gets HTTP 403 there). The worker sends it; the api only shows a
 warning on the source list while it is missing. After setting it, recreate both containers
 (`docker compose up -d api worker`), then select the affected sources and use "Blockierte Volltexte abrufen".
 

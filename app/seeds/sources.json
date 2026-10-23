@@ -74,7 +74,7 @@
     "name": "BLS – Arbeitsmarktbericht",
     "url": "https://www.bls.gov/feed/empsit.rss",
     "language": "en",
-    "terms_note": "Alle BLS-Veröffentlichungen sind gemeinfrei und ohne Genehmigung nutzbar; Quellenangabe BLS erbeten, fremde Fotos und Illustrationen sowie das BLS-Logo ausgenommen. Die BLS beantwortet nur Abrufe mit einem User-Agent samt Kontaktangabe. Nutzungsbedingungen: https://www.bls.gov/opub/copyright-information.htm"
+    "terms_note": "Alle BLS-Veröffentlichungen sind gemeinfrei und ohne Genehmigung nutzbar; Quellenangabe BLS erbeten, fremde Fotos und Illustrationen sowie das BLS-Logo ausgenommen. Die BLS beantwortet nur Abrufe mit einem User-Agent samt E-Mail-Adresse (FETCH_CONTACT); eine URL genügt nicht. Nutzungsbedingungen: https://www.bls.gov/opub/copyright-information.htm"
   },
   {
     "key": "cision-news-de",
@@ -271,5 +271,12 @@
     "query": "(\"oil supply\" OR \"gas supply\" OR \"pipeline explosion\" OR \"refinery fire\" OR blackout)",
     "fetch_interval_minutes": 15,
     "terms_note": "GDELT-Daten sind für akademische, kommerzielle und staatliche Nutzung unbeschränkt und gebührenfrei nutzbar; bei Weitergabe GDELT zitieren und auf gdeltproject.org verlinken. Die verlinkten Artikel unterliegen den Bedingungen ihrer Verlage. Nutzungsbedingungen: https://www.gdeltproject.org/about.html#termsofuse"
+  },
+  {
+    "key": "sec-press-releases",
+    "name": "SEC – Pressemitteilungen",
+    "url": "https://www.sec.gov/news/pressreleases.rss",
+    "language": "en",
+    "terms_note": "Inhalte von sec.gov dürfen ohne Erlaubnis der SEC kopiert und weitergegeben werden; Quellenangabe erbeten, Siegel und Logos ausgenommen. Automatisierter Zugriff höchstens 10 Anfragen pro Sekunde und nur als gekennzeichneter Bot: User-Agent mit E-Mail-Adresse (FETCH_CONTACT), sonst HTTP 403. Nutzungsbedingungen: https://www.sec.gov/about/privacy-information"
   }
 ]
