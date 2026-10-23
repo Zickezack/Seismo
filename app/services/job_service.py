@@ -34,7 +34,13 @@ STATUS_LABELS = {
     JobStatus.FAILED: "Fehlgeschlagen",
 }
 FETCH_SOURCE_JOB_KIND = "fetch_source"
-KIND_LABELS = {TEST_JOB_KIND: "Testjob", BACKUP_JOB_KIND: "Datenbank-Backup", FETCH_SOURCE_JOB_KIND: "Quelle abrufen"}
+FETCH_ARTICLE_JOB_KIND = "fetch_article"
+KIND_LABELS = {
+    TEST_JOB_KIND: "Testjob",
+    BACKUP_JOB_KIND: "Datenbank-Backup",
+    FETCH_SOURCE_JOB_KIND: "Quelle abrufen",
+    FETCH_ARTICLE_JOB_KIND: "Volltext abrufen",
+}
 
 
 @dataclass(frozen=True)

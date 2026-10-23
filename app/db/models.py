@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    LargeBinary,
     SmallInteger,
     String,
     Text,
@@ -29,6 +30,21 @@ class JobStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class FullTextStatus(StrEnum):
+    PENDING = "pending"
+    STORED = "stored"
+    DISALLOWED = "disallowed"  # by the host's robots.txt
+    UNSUPPORTED = "unsupported"  # a content type the raw-data layer does not keep
+    FAILED = "failed"
+    SKIPPED = "skipped"  # source inactive or deleted, or fetched before full texts existed
+
+
+class RobotsStatus(StrEnum):
+    RULES = "rules"  # robots_txt holds the rules
+    ALLOW_ALL = "allow_all"  # no robots.txt (404 and other 4xx)
+    DISALLOW_ALL = "disallow_all"  # robots.txt answered 401 or 403
 
 
 # A job with a dedupe key exists only once while it is waiting or running.
@@ -85,6 +101,7 @@ class PlatformSettingsRecord(Base):
     backup_interval_hours: Mapped[int] = mapped_column(server_default="24")
     backups_to_keep: Mapped[int] = mapped_column(server_default="14")
     article_max_age_days: Mapped[int] = mapped_column(server_default="7")
+    domain_min_interval_seconds: Mapped[int] = mapped_column(server_default="10")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -95,6 +112,7 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(backup_interval_hours >= 1, name="backup_interval_hours"),
         CheckConstraint(backups_to_keep >= 1, name="backups_to_keep"),
         CheckConstraint(article_max_age_days >= 1, name="article_max_age_days"),
+        CheckConstraint(domain_min_interval_seconds >= 1, name="domain_min_interval_seconds"),
     )
 
 
@@ -156,8 +174,41 @@ class Article(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     language: Mapped[str | None] = mapped_column(String(10))
+    full_text_status: Mapped[str] = mapped_column(String(20), server_default=FullTextStatus.PENDING.value)
+    # Why the full text is not stored: shown to the admin, never logged (datamodel.md, rule 13).
+    full_text_error: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         UniqueConstraint(source_id, item_key),
         Index("ix_article_fetched_at", fetched_at),
+        CheckConstraint(full_text_status.in_([s.value for s in FullTextStatus]), name="full_text_status"),
     )
+
+
+class RawText(Base):
+    """An article's content as fetched (UI term: Rohtext), in the temporary raw-data layer (datamodel.md, rule 8)."""
+
+    __tablename__ = "raw_text"
+
+    article_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("article.id", ondelete="CASCADE"), primary_key=True)
+    # The bytes as received: the normalisation reads the encoding from content_type and the document itself.
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    content_type: Mapped[str | None] = mapped_column(String(200))
+    url: Mapped[str] = mapped_column(String(2000))  # after redirects
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FetchHost(Base):
+    """What every fetch from one host goes through: its robots.txt and its request slots (not shown in the UI)."""
+
+    __tablename__ = "fetch_host"
+
+    host: Mapped[str] = mapped_column(String(255), primary_key=True)  # lower case, with a port other than the default
+    # Start of the next free request slot; each reservation moves it one interval ahead.
+    next_slot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_request_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    robots_status: Mapped[str | None] = mapped_column(String(20))
+    robots_txt: Mapped[str | None] = mapped_column(Text)
+    robots_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (CheckConstraint(robots_status.in_([s.value for s in RobotsStatus]), name="robots_status"),)

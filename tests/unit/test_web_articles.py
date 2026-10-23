@@ -19,6 +19,7 @@ def article(article_id, **fields):
     values = dict(
         id=article_id, url=f"https://example.org/{article_id}.html", title=f"Meldung <{article_id}>", published_at=NOW,
         fetched_at=NOW, language="de", source_id=2, source_display_name="EZB", source_exists=True,
+        full_text_status="stored", full_text_error=None, full_text_bytes=48_000,
     )
     return ArticleListItem(**values | fields)
 
@@ -28,7 +29,11 @@ OVERVIEW = ArticleOverview(
     sources=[SourceChoice(2, "EZB"), SourceChoice(3, "Fed")],
     articles=[
         article(11),
-        article(10, title=None, published_at=None, language=None, source_id=None, source_display_name="Alt", source_exists=False),
+        article(
+            10, title=None, published_at=None, language=None, source_id=None, source_display_name="Alt",
+            source_exists=False, full_text_status="disallowed", full_text_error="Durch robots.txt gesperrt",
+            full_text_bytes=None,
+        ),
     ],
     matching=2,
 )
@@ -102,3 +107,12 @@ def test_more_articles_than_shown(client, overview):
 
 def test_navigation_marks_the_article_page(client, overview):
     assert 'aria-current="page"' in tag_of(client.get("/articles").text, "nav-articles")
+
+
+def test_full_text_status_size_and_reason(client, overview):
+    html = client.get("/articles").text
+
+    assert '<span class="status status-stored">Gespeichert</span> 47\u00a0KB' in html
+    assert '<span class="status status-disallowed">Gesperrt</span>' in html
+    assert text_of(html, "full-text-error-10") == "Durch robots.txt gesperrt"
+    assert tag_of(html, "full-text-error-11") is None

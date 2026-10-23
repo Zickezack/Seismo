@@ -4,10 +4,19 @@ from datetime import datetime
 
 from sqlalchemy import Engine
 
+from app.db.models import FullTextStatus
 from app.repositories import article_repository, source_repository
 from app.services import source_service
 
 LIST_LIMIT = 100
+FULL_TEXT_LABELS = {
+    FullTextStatus.PENDING: "Ausstehend",
+    FullTextStatus.STORED: "Gespeichert",
+    FullTextStatus.DISALLOWED: "Gesperrt",
+    FullTextStatus.UNSUPPORTED: "Nicht unterstützt",
+    FullTextStatus.FAILED: "Fehlgeschlagen",
+    FullTextStatus.SKIPPED: "Übersprungen",
+}
 
 
 @dataclass(frozen=True)
@@ -21,6 +30,18 @@ class ArticleListItem:
     source_id: int | None
     source_display_name: str  # the source's current name, or the copy kept after it was deleted
     source_exists: bool
+    full_text_status: str
+    full_text_error: str | None
+    full_text_bytes: int | None  # size of the raw text while it is kept
+
+    @property
+    def full_text_label(self) -> str:
+        return FULL_TEXT_LABELS[self.full_text_status]
+
+    @property
+    def full_text_size(self) -> str:
+        # A no-break space: number and unit stay on one line in a narrow cell.
+        return f"{max(1, round(self.full_text_bytes / 1024))}\u00a0KB" if self.full_text_bytes else ""
 
     @property
     def language_label(self) -> str:

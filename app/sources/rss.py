@@ -5,9 +5,8 @@ from urllib.parse import urlsplit
 
 import feedparser
 
-from app.sources.base import FetchedItem, SourceSettings, language_code
+from app.sources.base import FetchedItem, Http, SourceSettings, language_code
 from app.sources.errors import SourceRejected
-from app.sources.http import HttpClient
 
 ACCEPT = (
     "application/rss+xml, application/atom+xml, application/rdf+xml, "
@@ -18,7 +17,7 @@ ACCEPT = (
 class RssAdapter:
     label = "RSS"
 
-    def fetch(self, source: SourceSettings, http: HttpClient) -> list[FetchedItem]:
+    def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
         response = http.get(source.url, ACCEPT)
         # The final URL resolves relative links. No content type on purpose: some sources (Destatis)
         # send valid RSS as text/html, which would make feedparser read it as a web page.

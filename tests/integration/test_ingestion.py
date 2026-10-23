@@ -1,12 +1,14 @@
-"""Live ingestion in PostgreSQL: due sources are queued, fetch jobs store articles once, articles outlive their source."""
+"""Live ingestion in PostgreSQL: due sources are queued, fetch jobs store articles once, articles outlive their
+source, and each new article's full text lands in the raw-data layer. The network is simulated (Web)."""
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx2
 import pytest
-from sqlalchemy import select, text, update
+from sqlalchemy import cast, select, text, update
+from sqlalchemy.dialects.postgresql import JSONB
 
-from app.db.models import Article, Job, JobStatus, Source
+from app.db.models import Article, FetchHost, Job, JobStatus, RawText, Source
 from app.jobs.handlers import build_handlers
 from app.jobs.runner import run_next_job
 from app.repositories import platform_settings_repository
@@ -15,6 +17,7 @@ from app.sources import ADAPTERS
 from app.sources.base import FetchedItem
 from app.sources.errors import SourceRejected, SourceUnavailable
 from app.sources.http import HttpClient
+from app.sources.rss import RssAdapter
 from tests.integration.alembic_helpers import upgrade
 
 FEEDS = Path(__file__).parents[1] / "unit" / "feeds"
@@ -36,6 +39,29 @@ class FakeAdapter:
         return list(self.items)
 
 
+class Web:
+    """The network: robots.txt per host and answers per URL; any other page is a small HTML page."""
+
+    def __init__(self):
+        self.robots, self.pages, self.requests = {}, {}, []
+
+    def __call__(self, request):
+        url = str(request.url)
+        self.requests.append(url)
+        if request.url.path == "/robots.txt":
+            status, body = self.robots.get(request.url.host, (404, ""))
+            return httpx2.Response(status, text=body)
+        status, content_type, body = self.pages.get(url, (200, "text/html; charset=utf-8", f"<p>{url}</p>".encode()))
+        return httpx2.Response(status, content=body, headers={"content-type": content_type} if content_type else {})
+
+
+@pytest.fixture(autouse=True)
+def web(monkeypatch):
+    fake = Web()
+    monkeypatch.setattr(ingestion_service, "HttpClient", lambda contact: HttpClient(contact, httpx2.MockTransport(fake)))
+    return fake
+
+
 @pytest.fixture
 def database(engine):
     upgrade(engine)
@@ -50,7 +76,9 @@ def adapter(monkeypatch):
 
 
 def item(key, published_at=NOW, **fields):
-    values = dict(key=key, url=f"https://bank.example/{key}.html", title=f"Meldung {key}", published_at=published_at, language=None)
+    # A host per item: no item waits for another's request slot.
+    url = f"https://{key}.bank.example/{key}.html"
+    values = dict(key=key, url=url, title=f"Meldung {key}", published_at=published_at, language=None)
     return FetchedItem(**values | fields)
 
 
@@ -62,9 +90,10 @@ def create(database, name, **fields):
     return source_service.create(database, form | fields).id
 
 
-def run_jobs(database):
-    """Run every due job with the worker's handlers; the number run."""
+def run_jobs(database, *kinds):
+    """Run every due job of these kinds (default: all) with the worker's handlers; the number run."""
     handlers = build_handlers(database, Path("/nonexistent"), None, None, "ops@example.org")
+    handlers = {kind: handler for kind, handler in handlers.items() if not kinds or kind in kinds}
     count = 0
     while run_next_job(database, handlers, "test", 10, on_renewed=lambda: None):
         count += 1
@@ -76,9 +105,9 @@ def articles(database):
         return connection.execute(select(Article.__table__).order_by(Article.id)).all()
 
 
-def jobs(database):
+def jobs(database, kind=job_service.FETCH_SOURCE_JOB_KIND):
     with database.connect() as connection:
-        return connection.execute(select(Job.__table__).order_by(Job.id)).all()
+        return connection.execute(select(Job.__table__).where(Job.kind == kind).order_by(Job.id)).all()
 
 
 def make_due(database, source_id):
@@ -115,7 +144,7 @@ def test_fetch_job_stores_new_articles_once_with_a_copy_of_the_source(database, 
     adapter.items = [item("a", language="de"), item("b", published_at=None)]
     ingestion_service.enqueue_due_fetches(database)
 
-    assert run_jobs(database) == 1
+    assert run_jobs(database, job_service.FETCH_SOURCE_JOB_KIND) == 1
 
     stored = articles(database)
     assert [(row.item_key, row.source_id, row.source_name, row.source_url, row.language) for row in stored] == [
@@ -132,9 +161,13 @@ def test_fetch_job_stores_new_articles_once_with_a_copy_of_the_source(database, 
     adapter.items.append(item("c"))
     make_due(database, ezb)
     ingestion_service.enqueue_due_fetches(database)
-    run_jobs(database)
+    run_jobs(database, job_service.FETCH_SOURCE_JOB_KIND)
 
     assert [row.item_key for row in articles(database)] == ["a", "b", "c"]
+    # One full-text job per new article, none for the ones found again.
+    assert [job.payload for job in jobs(database, job_service.FETCH_ARTICLE_JOB_KIND)] == [
+        {"article_id": row.id} for row in articles(database)
+    ]
     assert [job.status for job in jobs(database)] == [JobStatus.SUCCEEDED, JobStatus.SUCCEEDED]
 
 
@@ -269,3 +302,176 @@ def _form(source):
         "language": source.language or "", "terms_note": source.terms_note or "",
         "raw_text_retention_days": str(source.raw_text_retention_days),
     }
+
+
+def raw_texts(database):
+    with database.connect() as connection:
+        return connection.execute(select(RawText.__table__).order_by(RawText.article_id)).all()
+
+
+def fetch_articles(database, adapter, *items):
+    """Store these items as new articles of a fresh source "EZB"; their full-text jobs wait in the queue."""
+    create(database, "EZB")
+    adapter.items = list(items)
+    ingestion_service.enqueue_due_fetches(database)
+    run_jobs(database, job_service.FETCH_SOURCE_JOB_KIND)
+    return {row.item_key: row.id for row in articles(database)}
+
+
+def full_text(database, article_id):
+    with database.connect() as connection:
+        row = connection.execute(select(Article.full_text_status, Article.full_text_error).where(Article.id == article_id)).one()
+    return tuple(row)
+
+
+def test_full_text_is_kept_as_fetched_with_its_type_and_final_url(database, adapter, web):
+    web.pages["https://a.bank.example/a.html"] = (200, "text/html; charset=iso-8859-1", "<p>Zürich</p>".encode("latin-1"))
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == ("stored", None)
+    [raw] = raw_texts(database)
+    assert (raw.article_id, raw.content, raw.content_type, raw.url) == (
+        ids["a"], "<p>Zürich</p>".encode("latin-1"), "text/html; charset=iso-8859-1", "https://a.bank.example/a.html"
+    )
+    [shown] = article_service.overview(database, None).articles
+    assert (shown.full_text_status, shown.full_text_bytes) == ("stored", len("<p>Zürich</p>"))
+    assert [job.status for job in jobs(database, job_service.FETCH_ARTICLE_JOB_KIND)] == [JobStatus.SUCCEEDED]
+
+
+@pytest.mark.parametrize(
+    ("robots", "url_allowed"),
+    [
+        ((200, "User-agent: *\nDisallow: /a.html\n"), False),
+        ((200, "User-agent: *\nAllow: /\n\nUser-agent: Seismo\nDisallow: /\n"), False),
+        ((200, "User-agent: GPTBot\nDisallow: /\n"), True),
+        ((403, "forbidden"), False),
+        ((401, ""), False),
+        ((404, ""), True),
+        ((410, ""), True),
+    ],
+)
+def test_robots_txt_decides(database, adapter, web, robots, url_allowed):
+    web.robots["a.bank.example"] = robots
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database)
+
+    expected = ("stored", None) if url_allowed else ("disallowed", "Durch robots.txt gesperrt")
+    assert full_text(database, ids["a"]) == expected
+    assert ("https://a.bank.example/a.html" in web.requests) is url_allowed
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        ((200, "image/png", b"\x89PNG"), ("unsupported", "Inhaltstyp image/png wird nicht gespeichert")),
+        ((200, None, b"?"), ("unsupported", "Inhaltstyp unbekannt wird nicht gespeichert")),
+        ((404, "text/html", b"weg"), ("failed", "HTTP 404")),
+        ((200, "application/pdf", b"%PDF-1.7"), ("stored", None)),
+    ],
+)
+def test_lasting_outcomes_settle_the_article(database, adapter, web, answer, outcome):
+    web.pages["https://a.bank.example/a.html"] = answer
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == outcome
+    assert [job.status for job in jobs(database, job_service.FETCH_ARTICLE_JOB_KIND)] == [JobStatus.SUCCEEDED]
+
+
+def test_passing_failure_is_retried_and_settles_as_failed_on_the_last_attempt(database, adapter, web):
+    web.pages["https://a.bank.example/a.html"] = (503, "text/html", b"busy")
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database)
+
+    [job] = jobs(database, job_service.FETCH_ARTICLE_JOB_KIND)
+    assert (job.status, job.attempts, full_text(database, ids["a"])) == (JobStatus.QUEUED, 1, ("pending", None))
+
+    with database.begin() as connection:
+        connection.execute(update(Job).where(Job.id == job.id).values(attempts=job.max_attempts - 1, run_after=text("now()")))
+        # A retry keeps the host's minimum interval as well; here it has passed.
+        connection.execute(update(FetchHost).values(next_slot_at=text("now()"), last_request_at=text("now() - interval '1 minute'")))
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == ("failed", "HTTP 503")
+    assert jobs(database, job_service.FETCH_ARTICLE_JOB_KIND)[0].status == JobStatus.SUCCEEDED
+
+
+@pytest.mark.parametrize(("change", "reason"), [("deactivate", "Quelle inaktiv"), ("delete", "Quelle gelöscht")])
+def test_full_text_of_an_inactive_or_deleted_source_is_skipped(database, adapter, web, change, reason):
+    ids = fetch_articles(database, adapter, item("a"))
+    [ezb] = [source.id for source in source_service.list_sources(database)]
+    if change == "delete":
+        source_service.delete(database, [ezb])
+    else:
+        source_service.set_active(database, [ezb], False)
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == ("skipped", reason)
+    assert "https://a.bank.example/a.html" not in web.requests
+
+
+def test_feed_disallowed_by_robots_txt_fails_its_job(database, adapter, web, monkeypatch):
+    monkeypatch.setitem(ADAPTERS, "rss", RssAdapter())
+    web.robots["ezb.example"] = (200, "User-agent: *\nDisallow: /rss\n")
+    create(database, "EZB")
+    ingestion_service.enqueue_due_fetches(database)
+
+    run_jobs(database)
+
+    [job] = jobs(database)
+    assert (job.status, job.last_error) == (JobStatus.FAILED, "PermanentJobError: Durch robots.txt gesperrt")
+    assert web.requests == ["https://ezb.example/robots.txt"]
+
+
+def test_requests_to_one_host_keep_the_minimum_interval(database, adapter, web):
+    same_host = {"url": "https://www.bank.example/{}.html"}
+    ids = fetch_articles(
+        database, adapter, item("a", url=same_host["url"].format("a")), item("b", url=same_host["url"].format("b"))
+    )
+
+    run_jobs(database)
+
+    # The first goes at once; the second is deferred to its reserved slot, 10 s later, without counting an attempt.
+    statuses = {key: full_text(database, article_id)[0] for key, article_id in ids.items()}
+    assert sorted(statuses.values()) == ["pending", "stored"]
+    waiting = next(job for job in jobs(database, job_service.FETCH_ARTICLE_JOB_KIND) if job.status == JobStatus.QUEUED)
+    slot = datetime.fromisoformat(waiting.payload["host_slot"]["at"])
+    assert waiting.attempts == 0 and waiting.run_after == slot
+    assert waiting.payload["host_slot"]["attempt"] == 1  # the attempt it comes back with
+    assert timedelta(seconds=9) < slot - datetime.now(UTC) <= timedelta(seconds=10)
+    assert web.requests.count("https://www.bank.example/robots.txt") == 1
+
+    # At its slot it goes without reserving again (the previous request is moved back instead of waiting).
+    with database.begin() as connection:
+        connection.execute(update(Job).where(Job.id == waiting.id).values(run_after=text("now()")))
+        connection.execute(update(FetchHost).values(last_request_at=text("now() - interval '1 minute'")))
+    run_jobs(database)
+
+    assert sorted(full_text(database, article_id)[0] for article_id in ids.values()) == ["stored", "stored"]
+    assert web.requests.count("https://www.bank.example/robots.txt") == 1
+
+
+def test_a_retry_queues_up_again_instead_of_using_its_old_slot(database, adapter, web):
+    url = "https://www.bank.example/{}.html"
+    web.pages[url.format("a")] = (503, "text/html", b"busy")
+    ids = fetch_articles(database, adapter, item("a", url=url.format("a")), item("b", url=url.format("b")))
+    run_jobs(database)  # a: sent, 503; b: deferred to its slot
+    job_a = next(job for job in jobs(database, job_service.FETCH_ARTICLE_JOB_KIND) if job.payload["article_id"] == ids["a"])
+    with database.begin() as connection:
+        # a's retry is due; give it an old slot as if it had been deferred before its first attempt.
+        old_slot = {"host_slot": {"at": "2026-01-01T00:00:00+00:00", "attempt": 1}}
+        connection.execute(update(Job).where(Job.id == job_a.id).values(run_after=text("now()"), payload=Job.payload.op("||")(cast(old_slot, JSONB))))
+
+    run_jobs(database)
+
+    # The retry (attempt 2) reserved a new slot behind b's and was deferred; nothing was sent.
+    retried = next(job for job in jobs(database, job_service.FETCH_ARTICLE_JOB_KIND) if job.id == job_a.id)
+    assert retried.payload["host_slot"]["attempt"] == 2
+    assert timedelta(seconds=19) < retried.run_after - datetime.now(UTC) <= timedelta(seconds=20)
+    assert web.requests.count(url.format("a")) == 1

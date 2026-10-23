@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 
 from app.db.models import Job, JobStatus
 from app.jobs import runner
-from app.jobs.errors import JobInterrupted, PermanentJobError
+from app.jobs.errors import JobDeferred, JobInterrupted, PermanentJobError
 from app.services import job_service, platform_settings_service
 from tests.integration.alembic_helpers import upgrade
 
@@ -217,6 +217,23 @@ def test_dedupe_key_keeps_a_job_from_waiting_twice(queue):
 
     # Once done, the same work may be queued again (e.g. reprocessing after a model change).
     assert enqueue(queue, dedupe_key="article:7") not in (None, job_id)
+
+
+def test_deferred_job_waits_until_its_time_without_counting_the_attempt(queue):
+    job_id = enqueue(queue, payload={"source_id": 3})
+    with queue.connect() as connection:
+        later = connection.execute(select(func.now() + timedelta(seconds=30))).scalar_one()
+
+    def defer(_job):
+        raise JobDeferred(later, {"host_slot": later.isoformat()})
+
+    runner.execute(queue, defer, claim(queue))
+
+    deferred = row(queue, job_id)
+    assert (deferred.status, deferred.attempts, deferred.run_after) == (JobStatus.QUEUED, 0, later)
+    assert deferred.payload == {"source_id": 3, "host_slot": later.isoformat()}
+    assert deferred.lease_token is None
+    assert claim(queue) is None
 
 
 def test_dedupe_works_for_many_jobs_on_one_connection(queue):

@@ -17,6 +17,8 @@ RETRYABLE_STATUS = {408, 425, 429}
 class HttpResponse:
     url: str  # after redirects; the base for relative links
     content: bytes
+    status: int = 200
+    content_type: str | None = None
 
 
 def user_agent(contact: str) -> str:
@@ -44,18 +46,30 @@ class HttpClient:
         self._client.close()
 
     def get(self, url: str, accept: str) -> HttpResponse:
+        """A successful answer; any other raises SourceRejected or SourceUnavailable."""
+        response = self.fetch(url, accept)
+        if response.status >= 500 or response.status in RETRYABLE_STATUS:
+            raise SourceUnavailable(f"HTTP {response.status}")
+        if response.status >= 400:
+            raise SourceRejected(f"HTTP {response.status}")
+        return response
+
+    def fetch(self, url: str, accept: str, max_bytes: int | None = None) -> HttpResponse:
+        """The answer whatever its status; only a failed connection or an answer above `max_bytes` raises."""
+        max_bytes = max_bytes or MAX_RESPONSE_BYTES
         try:
             with self._client.stream("GET", url, headers={"Accept": accept}) as response:
-                if response.status_code >= 500 or response.status_code in RETRYABLE_STATUS:
-                    raise SourceUnavailable(f"HTTP {response.status_code}")
-                if response.status_code >= 400:
-                    raise SourceRejected(f"HTTP {response.status_code}")
                 content = bytearray()
                 for chunk in response.iter_bytes():
                     content += chunk
-                    if len(content) > MAX_RESPONSE_BYTES:
-                        raise SourceRejected(f"Antwort grösser als {MAX_RESPONSE_BYTES // (1024 * 1024)} MB")
-                return HttpResponse(url=str(response.url), content=bytes(content))
+                    if len(content) > max_bytes:
+                        raise SourceRejected(f"Antwort grösser als {_size(max_bytes)}")
+                return HttpResponse(
+                    url=str(response.url),
+                    content=bytes(content),
+                    status=response.status_code,
+                    content_type=response.headers.get("content-type"),
+                )
         except (httpx2.InvalidURL, httpx2.UnsupportedProtocol):
             raise SourceRejected("Ungültige URL") from None
         except httpx2.TooManyRedirects:
@@ -64,3 +78,7 @@ class HttpClient:
             raise SourceUnavailable(f"Keine Antwort innerhalb von {TIMEOUT_SECONDS} s") from None
         except httpx2.TransportError as error:
             raise SourceUnavailable(f"Verbindung fehlgeschlagen: {type(error).__name__}") from None
+
+
+def _size(max_bytes: int) -> str:
+    return f"{max_bytes // (1024 * 1024)} MB" if max_bytes >= 1024 * 1024 else f"{max_bytes // 1024} KB"

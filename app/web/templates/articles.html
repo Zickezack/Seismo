@@ -32,6 +32,7 @@
         <th>Titel</th>
         <th>Quelle</th>
         <th>Sprache</th>
+        <th>Volltext</th>
       </tr>
     </thead>
     <tbody>
@@ -40,8 +41,9 @@
         <td data-testid="published-{{ article.id }}">{{ article.published_at|local_time }}</td>
         <td>{{ article.fetched_at|local_time }}</td>
         <td class="cell-title"><a href="{{ article.url }}" target="_blank" rel="noopener noreferrer" data-testid="title-{{ article.id }}">{{ article.title or article.url }}</a></td>
-        <td data-testid="source-{{ article.id }}">{% if article.source_exists %}<a href="/sources/{{ article.source_id }}">{{ article.source_display_name }}</a>{% else %}{{ article.source_display_name }} (gelöscht){% endif %}</td>
+        <td class="cell-wrap" data-testid="source-{{ article.id }}">{% if article.source_exists %}<a href="/sources/{{ article.source_id }}">{{ article.source_display_name }}</a>{% else %}{{ article.source_display_name }} (gelöscht){% endif %}</td>
         <td>{{ article.language_label }}</td>
+        <td class="cell-wrap" data-testid="full-text-{{ article.id }}"><span class="status status-{{ article.full_text_status }}">{{ article.full_text_label }}</span>{% if article.full_text_size %} {{ article.full_text_size }}{% endif %}{% if article.full_text_error %}<span class="hint" data-testid="full-text-error-{{ article.id }}">{{ article.full_text_error }}</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

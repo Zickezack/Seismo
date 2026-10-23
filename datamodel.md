@@ -40,6 +40,7 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Alert | `alert_rule` | A rule that notifies about new events or material changes. | none |
 | Job | `job` | A unit of work in the PostgreSQL job queue, with status, lease and retry count. | none |
 | Plattform-Einstellungen | `platform_settings` | Settings that apply to the whole instance, edited by the admin (`requirements.md`, "Settings"). | none |
+| Domain | `fetch_host` | The fetch state of one host: its robots.txt and its request slots. Not shown in the UI. | none |
 | Seed-Protokoll | `seed_log` | Which items of a seed source (e.g. the starter catalogue of Quellen) were imported once (`architecture.md`, "Seed Data"). Not shown in the UI. | none |
 
 ## Model-wide rules
@@ -105,6 +106,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | backup_interval_hours | integer | yes | 24 | Hours from the newest backup file to the next automatic backup, 1 to 720. |
   | backups_to_keep | integer | yes | 14 | Backup files kept; after each new backup the oldest beyond this number are deleted, 1 to 365. |
   | article_max_age_days | integer | yes | 7 | Items published longer ago than this are not taken by the live fetch; they belong to the backfill. Items without a date always come. 1 to 365. |
+  | domain_min_interval_seconds | integer | yes | 10 | Minimum time between two requests to the same host, feeds and full texts alike; a longer Crawl-delay in the host's robots.txt wins. 1 to 600. |
   | updated_at | timestamptz | yes | now() | |
 
 - Relationships: none
@@ -151,9 +153,44 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | published_at | timestamptz | no | | Publication time as the source states it, in UTC (RSS pubDate, Atom published, else the item's only date: RSS 1.0 dc:date, Atom updated); empty when it states none (rules 4 and 5). UI: Veröffentlicht. |
   | fetched_at | timestamptz | yes | now() | When it was stored. UI: Abgerufen. Index `ix_article_fetched_at`. |
   | language | varchar(10) | no | | ISO 639 code as the source states it for the item or the feed, else the language of the Quelle; empty if neither has one. |
+  | full_text_status | varchar(20) | yes | `pending` | `pending`, `stored`, `disallowed` (robots.txt), `unsupported` (content type), `failed`, `skipped` (source inactive or deleted, or stored before full texts existed); check constraint. Set once, from `pending`. UI: Volltext - Ausstehend, Gespeichert, Gesperrt, Nicht unterstützt, Fehlgeschlagen, Übersprungen. |
+  | full_text_error | text | no | | Why the full text is not stored, e.g. `HTTP 404`. Shown to the admin, never logged. |
 
-- Relationships: belongs to a Quelle while it exists.
+- Relationships: belongs to a Quelle while it exists; has at most one Rohtext.
 - Rules: metadata is kept permanently. A source adapter (`app/sources/`) returns items in one shape; only items within the maximum age (Plattform-Einstellungen) and with a web link become articles.
+- Privacy: none
+
+### Rohtext (`raw_text`)
+- Store: SQL table `raw_text`, one row per article
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | article_id | bigint | yes | | Primary key; foreign key to `article`, `ON DELETE CASCADE`. |
+  | content | bytea | yes | | The answer as received, not decoded: HTML, XHTML, plain text or PDF, at most 10 MB. PostgreSQL compresses it (TOAST). |
+  | content_type | varchar(200) | no | | The Content-Type header, with its charset. |
+  | url | varchar(2000) | yes | | Where it was fetched from, after redirects. |
+  | fetched_at | timestamptz | yes | now() | |
+
+- Relationships: belongs to one Artikel.
+- Rules: the temporary raw-data layer: deleted after its source's retention period once processing has succeeded (rule 8, epic Verdichtung und Daten-Lifecycle); nothing deletes it yet. The normalisation turns it into plain text.
+- Privacy: none
+
+### Domain (`fetch_host`)
+- Store: SQL table `fetch_host`, one row per host
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | host | varchar(255) | yes | | Primary key: host name in lower case, with a port other than the default. |
+  | next_slot_at | timestamptz | yes | now() | Start of the next free request slot; each reservation moves it one interval ahead. |
+  | last_request_at | timestamptz | no | | When the last request was sent; a job running late waits until the interval has passed. |
+  | robots_status | varchar(20) | no | | `rules`, `allow_all` (404 and other 4xx), `disallow_all` (401, 403); check constraint. Empty until asked. |
+  | robots_txt | text | no | | The rules, while `robots_status` is `rules`. |
+  | robots_fetched_at | timestamptz | no | | Asked again after 24 hours. |
+
+- Relationships: none; matched by the host of a URL.
+- Rules: every request to a source's host - feed or full text - checks robots.txt (group `Seismo`, else `*`) and takes a request slot (app/services/fetch_policy_service.py).
 - Privacy: none
 
 ### Seed-Protokoll (`seed_log`)

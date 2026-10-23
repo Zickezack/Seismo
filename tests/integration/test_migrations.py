@@ -5,7 +5,14 @@ from sqlalchemy import text
 import app.db.models  # noqa: F401 - registers the tables on Base.metadata
 from app.db.base import Base
 from app.db.migrations import head_revision
-from app.repositories import article_repository, platform_settings_repository, seed_log_repository, source_repository
+from app.repositories import (
+    article_repository,
+    fetch_host_repository,
+    platform_settings_repository,
+    raw_text_repository,
+    seed_log_repository,
+    source_repository,
+)
 from app.repositories.schema_repository import current_revision
 from app.services import job_service, platform_settings_service
 from tests.integration.alembic_helpers import downgrade, upgrade
@@ -44,10 +51,12 @@ def test_downgrade_and_upgrade_with_rows_in_place(engine):
         platform_settings_repository.save(connection, {"llm_max_parallel_calls": 2})
         seed_log_repository.record(connection, "sources", "ecb")
         source_id = source_repository.insert_source(connection, {"name": "EZB", "adapter_type": "rss", "url": "https://example.org"})
-        article_repository.insert_new(connection, [{
+        [article_id] = article_repository.insert_new(connection, [{
             "source_id": source_id, "source_name": "EZB", "source_url": "https://example.org", "item_key": "a",
             "url": "https://example.org/a", "title": None, "published_at": None, "language": None,
         }])
+        raw_text_repository.insert_raw_text(connection, article_id, b"<p>a</p>", "text/html", "https://example.org/a")
+        fetch_host_repository.save_robots(connection, "example.org", "allow_all", None)
 
     downgrade(engine)
     upgrade(engine)
@@ -80,3 +89,20 @@ def test_existing_sources_are_due_and_the_settings_row_gets_the_maximum_article_
         fetch_times = connection.execute(text("SELECT next_fetch_at, last_fetched_at FROM source")).one()
     assert (settings.llm_max_parallel_calls, settings.article_max_age_days) == (3, 7)
     assert tuple(fetch_times) == (None, None)
+
+
+def test_articles_stored_before_full_texts_existed_are_skipped(engine):
+    upgrade(engine, "2eb9974bce2d")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO article (source_name, source_url, item_key, url) "
+                "VALUES ('EZB', 'https://example.org', 'a', 'https://example.org/a')"
+            )
+        )
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        status = connection.execute(text("SELECT full_text_status, full_text_error FROM article")).one()
+    assert tuple(status) == ("skipped", "Abgerufen, bevor es Volltexte gab")

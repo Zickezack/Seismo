@@ -33,7 +33,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 3. As an admin, mass import and export of settings and selected or all data, so I can quickly set up a new instance or back up an existing one.
 
 ### Epic: Quellenadapter und Ingestion
-3. As an analyst, I want the full text of every new article fetched from its URL - respecting robots.txt and a per-domain rate limit - and kept in a temporary raw-data layer, so the event extraction works on complete texts.
 4. As an admin, I want failed fetches logged and retried with backoff, rate limits per source, and a status per source (last success, last error, consecutive failures), so temporary source outages cause no data loss.
 5. As an analyst, I want a GDELT DOC 2.0 API adapter with configurable queries as the second source, so ingestion covers global events beyond the configured feeds.
 6. As an admin, I want historical backfill to run separately from live ingestion, so a backfill never delays current news.
@@ -104,6 +103,7 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ### Epic: Quellenadapter und Ingestion
 1. As an admin, I want to manage the news sources (Quellen) - name, type, URL, active flag, fetch interval, language, terms-of-use note and raw-text retention period - and to import a starter catalogue of open business and central-bank feeds only when I trigger it, so I control what is ingested and under which rules.
 2. As an analyst, I want a uniform source adapter interface with RSS as the first adapter, storing source name, URL, publication time, fetch time and language separately, so new source types can be added without changing the event model.
+3. As an analyst, I want the full text of every new article fetched from its URL - respecting robots.txt and a per-domain rate limit - and kept in a temporary raw-data layer, so the event extraction works on complete texts.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.

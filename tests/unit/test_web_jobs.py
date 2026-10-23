@@ -179,11 +179,13 @@ def test_settings_page_shows_every_setting_in_its_section(client, services):
     assert 'value="7"' in input_of(html, "succeeded_jobs_retention_days")
     assert 'value="30"' in input_of(html, "failed_jobs_retention_days")
     assert 'value="7"' in input_of(html, "article_max_age_days")
+    assert 'value="10"' in input_of(html, "domain_min_interval_seconds")
+    assert 'max="600"' in input_of(html, "domain_min_interval_seconds")
     assert 'min="1"' in input_of(html, "article_max_age_days") and 'max="365"' in input_of(html, "article_max_age_days")
     sections = re.findall(r'data-testid="form-(\w+)"(.*?)</form>', html, re.DOTALL)
     assert [(name, re.findall(r'name="(\w+)"', form)) for name, form in sections] == [
         ("verarbeitung", ["llm_max_parallel_calls"]),
-        ("abruf", ["article_max_age_days"]),
+        ("abruf", ["article_max_age_days", "domain_min_interval_seconds"]),
         ("aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
         ("backups", ["backup_interval_hours", "backups_to_keep"]),
     ]

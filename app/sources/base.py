@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from app.sources.http import HttpClient
+from app.sources.http import HttpResponse
 
 _LANGUAGE_CODE = re.compile(r"[a-z]{2,3}")
 
@@ -26,10 +26,16 @@ class SourceSettings(Protocol):
     url: str
 
 
+class Http(Protocol):
+    """How an adapter sends a request: HttpClient, or the fetch policy around it (fetch_policy_service.PoliteHttp)."""
+
+    def get(self, url: str, accept: str) -> HttpResponse: ...
+
+
 class SourceAdapter(Protocol):
     label: str  # the source type as the UI shows it, e.g. "RSS"
 
-    def fetch(self, source: SourceSettings, http: HttpClient) -> list[FetchedItem]:
+    def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
         """The source's current items. Raises SourceRejected or SourceUnavailable (app/sources/errors.py)."""
 
 

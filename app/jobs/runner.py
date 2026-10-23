@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from sqlalchemy import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.jobs.errors import JobInterrupted, PermanentJobError
+from app.jobs.errors import JobDeferred, JobInterrupted, PermanentJobError
 from app.repositories import job_repository
 from app.repositories.job_repository import ClaimedJob
 from app.services import job_service
@@ -59,6 +59,11 @@ def execute(engine: Engine, handler: Handler, job: ClaimedJob) -> None:
         with engine.begin() as connection:
             job_repository.release(connection, job)
         logger.info("Job interrupted, back in the queue", extra=fields)
+    except JobDeferred as deferral:
+        with engine.begin() as connection:
+            job_repository.release(connection, job, deferral.run_after, deferral.payload)
+        # Debug only: a busy host defers many jobs, each once per slot.
+        logger.debug("Job deferred", extra=fields | {"run_after": deferral.run_after.isoformat()})
     except Exception as error:
         with engine.begin() as connection:
             status = job_service.record_failure(connection, job, error, permanent=isinstance(error, PermanentJobError))

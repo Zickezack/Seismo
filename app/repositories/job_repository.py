@@ -2,10 +2,10 @@
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-from sqlalchemy import Connection, Row, delete, func, literal, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Connection, Row, cast, delete, func, literal, select, update
+from sqlalchemy.dialects.postgresql import JSONB, insert
 
 from app.db.models import ACTIVE_JOB_STATUSES, Job, JobStatus
 
@@ -116,10 +116,20 @@ def mark_failed(connection: Connection, job: ClaimedJob, error: str) -> bool:
     )
 
 
-def release(connection: Connection, job: ClaimedJob) -> bool:
-    """Back into the queue without counting the attempt: the job was interrupted before doing its work."""
+def release(connection: Connection, job: ClaimedJob, run_after: datetime | None = None, payload: dict | None = None) -> bool:
+    """Back into the queue without counting the attempt: the job did not do its work.
+
+    Interrupted: due again at once. Deferred: due at `run_after`, with `payload` merged into its payload.
+    """
+    values = {"payload": Job.payload.op("||")(cast(payload, JSONB))} if payload else {}
     return _update_leased(
-        connection, job, status=JobStatus.QUEUED, attempts=Job.attempts - 1, run_after=func.now(), **_CLEARED_LEASE
+        connection,
+        job,
+        status=JobStatus.QUEUED,
+        attempts=Job.attempts - 1,
+        run_after=run_after or func.now(),
+        **values,
+        **_CLEARED_LEASE,
     )
 
 

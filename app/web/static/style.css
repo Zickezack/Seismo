@@ -383,7 +383,7 @@ a:focus-visible {
 }
 
 .table .cell-title {
-  min-width: 20rem;
+  min-width: 16rem;
   max-width: 40rem;
   white-space: normal;
 }
@@ -421,6 +421,38 @@ a:focus-visible {
 .status-queued {
   color: var(--color-warning-text);
   background: var(--color-warning-background);
+}
+
+/* Full text of an article (templates/articles.html) */
+.status-stored {
+  color: var(--color-success-text);
+  background: var(--color-success-background);
+}
+
+.status-pending {
+  color: var(--color-warning-text);
+  background: var(--color-warning-background);
+}
+
+.status-disallowed {
+  color: var(--color-error-text);
+  background: var(--color-error-background);
+}
+
+.status-unsupported,
+.status-skipped {
+  color: var(--color-muted);
+}
+
+.table .cell-wrap {
+  min-width: 8rem;
+  max-width: 14rem;
+  white-space: normal;
+}
+
+.table .cell-wrap .hint {
+  display: block;
+  margin-top: 0.25rem;
 }
 
 .status-active {

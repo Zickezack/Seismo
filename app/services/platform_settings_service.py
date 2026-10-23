@@ -20,6 +20,7 @@ class PlatformSettings:
     backup_interval_hours: int = 24
     backups_to_keep: int = 14
     article_max_age_days: int = 7
+    domain_min_interval_seconds: int = 10
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,13 @@ FORM_FIELDS = {
             "Ältere Einträge übernimmt der laufende Abruf nicht, sie gehören zum Backfill. Einträge ohne Datum kommen immer.",
             1,
             365,
+        ),
+        NumberField(
+            "domain_min_interval_seconds",
+            "Mindestabstand pro Domain (Sekunden)",
+            "Zwischen zwei Anfragen an denselben Host, für Feeds und Volltexte. Ein längerer Crawl-delay aus robots.txt gilt immer.",
+            1,
+            600,
         ),
         NumberField(
             "succeeded_jobs_retention_days", "Erledigte Jobs aufbewahren (Tage)", "Danach löscht der Worker sie.", 1, 3650
