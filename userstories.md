@@ -36,6 +36,7 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 4. As an admin, I want failed fetches logged and retried with backoff, rate limits per source, and a status per source (last success, last error, consecutive failures), so temporary source outages cause no data loss.
 5. As an analyst, I want a GDELT DOC 2.0 API adapter with configurable queries as the second source, so ingestion covers global events beyond the configured feeds.
 6. As an admin, I want historical backfill to run separately from live ingestion, so a backfill never delays current news.
+7. As an admin, I want full-text fetches that a host's bot protection blocks (e.g. the BFS article pages on www.admin.ch answer HTTP 403 to the Seismo User-Agent) recognised per source and resolved through an allowed route - a contact in the User-Agent, an official API or feed with the full text, or the publisher's permission - never by disguising the fetcher, so such sources still deliver complete texts.
 
 ### Epic: Normalisierung, Deduplizierung und Clustering
 1. As an analyst, I want article HTML cleaned to plain text and the metadata normalised (canonical URL, title, UTC timestamps, detected language), so all later steps work on consistent data.
