@@ -16,6 +16,8 @@ ACCEPT = (
 
 class RssAdapter:
     label = "RSS"
+    needs_query = False
+    default_url = None
 
     def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
         response = http.get(source.url, ACCEPT)

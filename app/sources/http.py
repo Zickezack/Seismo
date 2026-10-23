@@ -89,7 +89,7 @@ def unavailable(response: HttpResponse, prefix: str = "") -> SourceUnavailable:
     message = f"{prefix}HTTP {response.status}"
     if response.retry_after:
         message += f" (Retry-After {round(response.retry_after)} s)"
-    return SourceUnavailable(message, response.retry_after)
+    return SourceUnavailable(message, retry_after=response.retry_after)
 
 
 def retry_after_seconds(value: str | None, now: datetime | None = None) -> float | None:

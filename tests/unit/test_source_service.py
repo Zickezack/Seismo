@@ -21,6 +21,7 @@ def test_valid_form_is_trimmed():
         name="EZB – Pressemitteilungen",
         adapter_type="rss",
         url="https://www.ecb.europa.eu/rss/press.html",
+        query=None,
         is_active=True,
         fetch_interval_minutes=60,
         language="en",
@@ -41,7 +42,7 @@ def test_unticked_checkbox_empty_language_and_empty_note():
     [
         ("name", "   ", "Name: bitte angeben."),
         ("name", "x" * 201, "Name: höchstens 200 Zeichen."),
-        ("adapter_type", "gdelt", "Typ: bitte einen der angebotenen Werte wählen."),
+        ("adapter_type", "twitter", "Typ: bitte einen der angebotenen Werte wählen."),
         ("adapter_type", "", "Typ: bitte einen der angebotenen Werte wählen."),
         ("language", "xx", "Sprache: bitte einen der angebotenen Werte wählen."),
         ("terms_note", "x" * 2001, "Nutzungsbedingungen: höchstens 2000 Zeichen."),
@@ -95,6 +96,39 @@ def test_min_request_interval_is_optional_within_its_range(raw, expected):
             source_service.parse(FORM | {"min_request_interval_seconds": raw})
     else:
         assert source_service.parse(FORM | {"min_request_interval_seconds": raw}).min_request_interval_seconds == expected
+
+
+GDELT = FORM | {"adapter_type": "gdelt", "url": "", "query": ' "central bank" sourcelang:german '}
+
+
+def test_gdelt_source_gets_the_api_address_and_keeps_its_query():
+    values = source_service.parse(GDELT)
+
+    assert (values.adapter_type, values.url, values.query) == (
+        "gdelt", "https://api.gdeltproject.org/api/v2/doc/doc", '"central bank" sourcelang:german'
+    )
+    # An address of the admin's own stays.
+    assert source_service.parse(GDELT | {"url": "https://gdelt.example/doc"}).url == "https://gdelt.example/doc"
+
+
+@pytest.mark.parametrize(
+    ("form", "message"),
+    [
+        (GDELT | {"query": "  "}, "Suchanfrage: bitte angeben."),
+        (GDELT | {"query": "x" * 1001}, "Suchanfrage: höchstens 1000 Zeichen."),
+        (FORM | {"query": "inflation"}, "Suchanfrage: nur für den Typ GDELT."),
+    ],
+)
+def test_query_is_required_for_gdelt_and_not_allowed_for_rss(form, message):
+    with pytest.raises(InvalidSource) as error:
+        source_service.parse(form)
+
+    assert str(error.value) == message
+
+
+def test_rss_needs_its_url():
+    with pytest.raises(InvalidSource, match="^URL: bitte eine vollständige Adresse"):
+        source_service.parse(FORM | {"url": ""})
 
 
 def test_every_error_of_the_form_at_once():

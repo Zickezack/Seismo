@@ -24,7 +24,7 @@ JSON = {"Accept": "application/json"}
 
 def source(source_id, name, **fields):
     values = dict(
-        id=source_id, name=name, adapter_type="rss", url=f"https://example.org/{source_id}.xml", is_active=True,
+        id=source_id, name=name, adapter_type="rss", url=f"https://example.org/{source_id}.xml", query=None, is_active=True,
         fetch_interval_minutes=60, language="en", terms_note=None, raw_text_retention_days=30,
         min_request_interval_seconds=None, created_at=NOW, updated_at=NOW, last_fetched_at=None, last_error=None,
         last_error_at=None, consecutive_failures=0,
@@ -39,6 +39,7 @@ SOURCES = [
         4, "Ausfall", last_fetched_at=NOW, last_error="HTTP 503 (Retry-After 120 s)", last_error_at=NOW,
         consecutive_failures=3, min_request_interval_seconds=60,
     ),
+    source(5, "GDELT <Zentralbanken>", adapter_type="gdelt", url="https://api.gdeltproject.org/api/v2/doc/doc", query='"central bank" <sourcelang:german>'),
 ]
 FORM = {
     "name": "Neu",
@@ -121,7 +122,7 @@ def flash_after(client, response):
 def test_list_shows_the_sources_in_the_order_the_service_returns(client, services):
     html = client.get("/sources").text
 
-    assert re.findall(r'data-testid="source-(\d+)"', html) == ["2", "1", "4"]
+    assert re.findall(r'data-testid="source-(\d+)"', html) == ["2", "1", "4", "5"]
     assert text_of(html, "name-2") == "Apfel &lt;Feed&gt;"
     assert text_of(html, "url-2") == "https://example.org/2.xml"
     assert text_of(html, "status-2") == "Aktiv"
@@ -135,6 +136,9 @@ def test_list_shows_the_sources_in_the_order_the_service_returns(client, service
     assert 'href="/articles?source=2"' in tag_of(html, "articles-2")
     assert text_of(html, "articles-1") == "0"
     assert text_of(html, "fetched-1") == "–"
+    # A GDELT source shows its Suchanfrage under the API address, escaped like every other text.
+    assert text_of(html, "query-5") == "&#34;central bank&#34; &lt;sourcelang:german&gt;"
+    assert tag_of(html, "query-2") is None
 
 
 def test_list_shows_the_fetch_status_and_the_last_error_while_failing(client, services):
@@ -220,6 +224,17 @@ def test_edit_page_saves_in_place(client, services):
     assert "Leer: Plattform-Wert (10 s)" in text_of(html, "min_request_interval_seconds-hint")
     assert text_of(html, "fetch-status-label") == "Noch nicht abgerufen"
     assert tag_of(html, "last-error") is None
+
+
+def test_form_offers_gdelt_with_a_query_and_an_optional_url(client, services):
+    html = client.get("/sources/new").text
+
+    assert '<option value="gdelt">GDELT</option>' in html
+    assert " required" not in tag_of(html, "query") and 'value=""' in tag_of(html, "query")
+    assert " required" not in re.search(r'<input id="url"[^>]*>', html).group(0)
+
+    edit = client.get("/sources/5").text
+    assert 'value="&#34;central bank&#34; &lt;sourcelang:german&gt;"' in tag_of(edit, "query")
 
 
 def test_edit_page_shows_the_fetch_status_and_the_own_minimum_interval(client, services):

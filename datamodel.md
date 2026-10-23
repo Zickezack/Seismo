@@ -121,8 +121,9 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   |-------|------|----------|---------|-------|
   | id | bigint identity | yes | | |
   | name | varchar(200) | yes | | Unique regardless of case (unique index `uq_source_name` on `lower(name)`). Sorted with the ICU collation `de-x-icu`. UI: Name. |
-  | adapter_type | varchar(20) | yes | | Adapter that fetches the source: `rss`. Checked in the service, not by a constraint, so a new adapter needs no migration. UI: Typ. |
-  | url | varchar(2000) | yes | | Feed address, `http` or `https` with a host. Not unique: one endpoint can serve several sources. |
+  | adapter_type | varchar(20) | yes | | Adapter that fetches the source: `rss`, `gdelt` (GDELT DOC 2.0 API). Checked in the service, not by a constraint, so a new adapter needs no migration. UI: Typ. |
+  | url | varchar(2000) | yes | | Feed or API address, `http` or `https` with a host. Left empty for `gdelt`, the API address is filled in. Not unique: one endpoint can serve several sources, e.g. every GDELT query. |
+  | query | text | no | | The search of an adapter that needs one, in its syntax, at most 1000 characters; required for `gdelt`, empty for `rss`. UI: Suchanfrage. |
   | is_active | boolean | yes | true | Only active sources are fetched. UI: Aktiv / Inaktiv. |
   | fetch_interval_minutes | integer | yes | 60 | Time between two fetches, 5 to 1440. UI: Abrufintervall. |
   | language | varchar(10) | no | | ISO 639-1 code; empty for a source in several or unknown languages (rule 5). The language of each article is stored separately. UI: Sprache. |
@@ -154,9 +155,9 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | item_key | varchar(1000) | yes | | The item's id in its source (RSS guid, Atom id), else its link; above 1000 bytes `sha256:<hex>` of it. Unique with `source_id` (`uq_article_source_id`), so a repeated fetch stores nothing twice. |
   | url | varchar(2000) | yes | | Link of the article, `http` or `https`. |
   | title | text | no | | As the source states it, at most 1000 characters. |
-  | published_at | timestamptz | no | | Publication time as the source states it, in UTC (RSS pubDate, Atom published, else the item's only date: RSS 1.0 dc:date, Atom updated); empty when it states none (rules 4 and 5). UI: Veröffentlicht. |
+  | published_at | timestamptz | no | | Publication time as the source states it, in UTC (RSS pubDate, Atom published, else the item's only date: RSS 1.0 dc:date, Atom updated); empty when it states none (rules 4 and 5). GDELT states none: when GDELT first saw the article (seendate, 15-minute steps), the admin's decision of 2026-10-23. UI: Veröffentlicht. |
   | fetched_at | timestamptz | yes | now() | When it was stored. UI: Abgerufen. Index `ix_article_fetched_at`. |
-  | language | varchar(10) | no | | ISO 639 code as the source states it for the item or the feed, else the language of the Quelle; empty if neither has one. |
+  | language | varchar(10) | no | | ISO 639 code as the source states it for the item or the feed (GDELT: its English language name, translated), else the language of the Quelle; empty if neither has one. |
   | full_text_status | varchar(20) | yes | `pending` | `pending`, `stored`, `disallowed` (robots.txt), `unsupported` (content type), `failed`, `skipped` (source inactive or deleted, or stored before full texts existed); check constraint. Set once, from `pending`. UI: Volltext - Ausstehend, Gespeichert, Gesperrt, Nicht unterstützt, Fehlgeschlagen, Übersprungen. |
   | full_text_error | text | no | | Why the full text is not stored, e.g. `HTTP 404`. Shown to the admin, never logged. |
 

@@ -123,3 +123,14 @@ def test_existing_sources_and_hosts_start_without_failures_or_pause(engine):
         paused_until = connection.execute(text("SELECT paused_until FROM fetch_host")).scalar_one()
     assert tuple(status) == (None, None, None, 0)
     assert paused_until is None
+
+
+def test_existing_sources_have_no_query(engine):
+    upgrade(engine, "856511d67c19")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO source (name, adapter_type, url) VALUES ('EZB', 'rss', 'https://example.org')"))
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT query FROM source")).scalar_one() is None

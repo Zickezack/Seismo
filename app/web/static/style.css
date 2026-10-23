@@ -451,7 +451,8 @@ a:focus-visible {
   white-space: normal;
 }
 
-.table .cell-wrap .hint {
+.table .cell-wrap .hint,
+.table .cell-url .hint {
   display: block;
   margin-top: 0.25rem;
 }

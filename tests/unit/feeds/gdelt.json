@@ -1,0 +1,8 @@
+{"articles": [
+ {"url": "https://www.handelsblatt.example/finanzen/ezb-zinsen.html", "url_mobile": "", "title": "EZB  belässt\n die Zinsen", "seendate": "20261023T141500Z", "socialimage": "", "domain": "handelsblatt.example", "language": "German", "sourcecountry": "Germany"},
+ {"url": "https://news.example/fed", "url_mobile": "", "title": "Fed holds rates", "seendate": "20261023T133000Z", "socialimage": "", "domain": "news.example", "language": "English", "sourcecountry": "United States"},
+ {"url": "https://kling.example/a", "title": "", "seendate": "kaputt", "language": "Klingon"},
+ {"url": "ftp://files.example/a", "title": "Kein Weblink", "seendate": "20261023T120000Z", "language": "English"},
+ {"title": "Ohne URL"},
+ "kein Objekt"
+]}

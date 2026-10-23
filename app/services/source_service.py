@@ -9,7 +9,8 @@ from sqlalchemy import Connection, Engine, Row
 from app.repositories import source_repository
 from app.repositories.source_repository import NameTaken
 from app.services.bulk import BulkResult
-from app.sources import ADAPTER_LABELS
+from app.sources import ADAPTER_LABELS, ADAPTERS
+from app.sources.base import SourceAdapter
 
 # The source types the form offers: one per adapter in app/sources/.
 ADAPTER_TYPES = ADAPTER_LABELS
@@ -32,6 +33,7 @@ NO_LANGUAGE_LABEL = "Mehrsprachig oder unbekannt"
 MAX_NAME_LENGTH = 200
 MAX_URL_LENGTH = 2000
 MAX_TERMS_NOTE_LENGTH = 2000
+MAX_QUERY_LENGTH = 1000
 FETCH_INTERVAL_MINUTES = (5, 1440)
 # Full texts are kept only temporarily (requirements.md, "Data Sources and Data Rights"); 0 deletes
 # a raw text as soon as its processing has succeeded.
@@ -46,6 +48,7 @@ NEW_SOURCE_FORM = {
     "name": "",
     "adapter_type": "rss",
     "url": "",
+    "query": "",
     "is_active": True,
     "fetch_interval_minutes": DEFAULT_FETCH_INTERVAL_MINUTES,
     "language": "",
@@ -70,6 +73,7 @@ class SourceValues:
     name: str
     adapter_type: str
     url: str
+    query: str | None
     is_active: bool
     fetch_interval_minutes: int
     language: str | None
@@ -120,10 +124,13 @@ def parse(form: Mapping[str, str]) -> SourceValues:
             errors.append(str(error))
             return None
 
+    adapter = ADAPTERS.get(form.get("adapter_type", "").strip())
     values = SourceValues(
         name=checked(_name, form.get("name", "")),
         adapter_type=checked(_choice, form.get("adapter_type", ""), "Typ", ADAPTER_TYPES),
-        url=checked(_url, form.get("url", "")),
+        # An adapter with a fixed address (GDELT's API) fills an empty URL.
+        url=checked(_url, form.get("url", "").strip() or (adapter and adapter.default_url) or ""),
+        query=checked(_query, form.get("query", ""), adapter),
         # A checkbox: the browser sends it only when it is ticked.
         is_active=bool(form.get("is_active")),
         fetch_interval_minutes=checked(
@@ -236,6 +243,23 @@ def _url(raw: str) -> str:
     if len(url) > MAX_URL_LENGTH:
         raise InvalidSource(f"URL: höchstens {MAX_URL_LENGTH} Zeichen.")
     return url
+
+
+def _query(raw: str, adapter: SourceAdapter | None) -> str | None:
+    """Required for an adapter that needs one, not allowed for the others; unchecked while the type is invalid."""
+    query = raw.strip()
+    if adapter is None:
+        return query or None
+    if not adapter.needs_query:
+        if query:
+            types = ", ".join(each.label for each in ADAPTERS.values() if each.needs_query)
+            raise InvalidSource(f"Suchanfrage: nur für den Typ {types}.")
+        return None
+    if not query:
+        raise InvalidSource("Suchanfrage: bitte angeben.")
+    if len(query) > MAX_QUERY_LENGTH:
+        raise InvalidSource(f"Suchanfrage: höchstens {MAX_QUERY_LENGTH} Zeichen.")
+    return query
 
 
 def _choice(raw: str, label: str, choices: Mapping[str, str], optional: bool = False) -> str | None:

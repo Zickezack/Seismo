@@ -37,7 +37,7 @@
           <td class="cell-select"><input type="checkbox" name="source_id" value="{{ source.id }}" data-select-row data-name="{{ source.name }}" aria-label="{{ source.name }} auswählen" data-testid="select-{{ source.id }}"></td>
           <td><a href="/sources/{{ source.id }}" data-testid="name-{{ source.id }}">{{ source.name }}</a></td>
           <td>{{ source.adapter_label }}</td>
-          <td class="cell-url" data-testid="url-{{ source.id }}">{{ source.url }}</td>
+          <td class="cell-url"><span data-testid="url-{{ source.id }}">{{ source.url }}</span>{% if source.query %}<span class="hint" data-testid="query-{{ source.id }}">{{ source.query }}</span>{% endif %}</td>
           <td data-testid="language-{{ source.id }}">{{ source.language_label }}</td>
           <td><span class="status status-{{ 'active' if source.is_active else 'inactive' }}" data-testid="status-{{ source.id }}">{{ "Aktiv" if source.is_active else "Inaktiv" }}</span></td>
           <td class="cell-wrap" data-testid="fetch-status-{{ source.id }}"><span class="status status-{{ source.fetch_status }}">{{ source.fetch_status_label }}</span>{% if source.consecutive_failures %}<span class="hint" data-testid="last-error-{{ source.id }}">{{ source.last_error_at|local_time }}: {{ source.last_error }}</span>{% endif %}</td>

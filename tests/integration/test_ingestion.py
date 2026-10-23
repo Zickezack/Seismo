@@ -1,8 +1,10 @@
 """Live ingestion in PostgreSQL: due sources are queued, fetch jobs store articles once, articles outlive their
 source, and each new article's full text lands in the raw-data layer. The network is simulated (Web)."""
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import httpx2
 import pytest
@@ -17,6 +19,7 @@ from app.services import article_service, ingestion_service, job_service, source
 from app.sources import ADAPTERS
 from app.sources.base import FetchedItem
 from app.sources.errors import SourceRejected, SourceUnavailable
+from app.sources.gdelt import API_URL, GdeltAdapter
 from app.sources.http import HttpClient
 from app.sources.rss import RssAdapter
 from tests.integration.alembic_helpers import upgrade
@@ -31,6 +34,8 @@ class FakeAdapter:
     """Returns `items`, or raises `error`; records each fetch."""
 
     label = "RSS"
+    needs_query = False
+    default_url = None
 
     def __init__(self):
         self.items, self.error, self.fetches = [], None, 0
@@ -43,8 +48,8 @@ class FakeAdapter:
 
 
 class Web:
-    """The network: robots.txt per host and answers per URL, with extra headers per URL; any other page is a
-    small HTML page."""
+    """The network: robots.txt per host and answers per URL - or per URL without its parameters, e.g. for an API -
+    with extra headers per URL; any other page is a small HTML page."""
 
     def __init__(self):
         self.robots, self.pages, self.headers, self.requests = {}, {}, {}, []
@@ -55,7 +60,8 @@ class Web:
         if request.url.path == "/robots.txt":
             status, body = self.robots.get(request.url.host, (404, ""))
             return httpx2.Response(status, text=body)
-        status, content_type, body = self.pages.get(url, (200, "text/html; charset=utf-8", f"<p>{url}</p>".encode()))
+        default = (200, "text/html; charset=utf-8", f"<p>{url}</p>".encode())
+        status, content_type, body = self.pages.get(url) or self.pages.get(url.split("?")[0], default)
         headers = {"content-type": content_type} if content_type else {}
         return httpx2.Response(status, content=body, headers=headers | self.headers.get(url, {}))
 
@@ -623,3 +629,72 @@ def test_a_host_that_asks_for_a_pause_gets_no_request_until_its_end(database, ad
 def _set_host(database, **values):
     with database.begin() as connection:
         connection.execute(update(FetchHost).values(**values))
+
+
+def gdelt_answer(*articles):
+    """An ArtList answer of the GDELT DOC API: (host, seen how long ago, language) per article."""
+    listed = [
+        {
+            "url": f"https://{host}/{host}.html", "title": f"Meldung {host}", "domain": host, "language": language,
+            "seendate": (datetime.now(UTC) - ago).strftime("%Y%m%dT%H%M%SZ"), "sourcecountry": "Germany",
+        }
+        for host, ago, language in articles
+    ]
+    return (200, "application/json; charset=utf-8", json.dumps({"articles": listed}).encode())
+
+
+def gdelt_requests(web):
+    return [parse_qs(urlsplit(url).query) for url in web.requests if url.startswith(API_URL)]
+
+
+def test_gdelt_query_end_to_end(database, web, monkeypatch):
+    monkeypatch.setitem(ADAPTERS, "gdelt", GdeltAdapter())
+    query = '"central bank" sourcelang:german'
+    gdelt = create(database, "GDELT Zentralbanken", adapter_type="gdelt", url="", query=query, language="")
+    web.pages[API_URL] = gdelt_answer(
+        ("a.bank.example", timedelta(minutes=20), "German"), ("b.bank.example", timedelta(days=8), "German")
+    )
+    ingestion_service.enqueue_due_fetches(database)
+
+    run_jobs(database)
+
+    # The query as entered, the last day on the first fetch; robots.txt of the API host asked first.
+    [asked] = gdelt_requests(web)
+    assert (asked["query"], asked["timespan"], asked["maxrecords"]) == ([query], ["1440min"], ["250"])
+    assert web.requests[0] == "https://api.gdeltproject.org/robots.txt"
+    # Older than the maximum age: left to the backfill. Seen time as publication time, language as ISO code.
+    [article] = articles(database)
+    assert (article.source_id, article.source_url, article.url, article.language) == (
+        gdelt, API_URL, "https://a.bank.example/a.bank.example.html", "de"
+    )
+    assert timedelta(minutes=19) < datetime.now(UTC) - article.published_at < timedelta(minutes=21)
+    assert full_text(database, article.id) == ("stored", None)
+
+    # The next fetch asks for what is new since the last success, and stores nothing twice.
+    make_due(database, gdelt)
+    ingestion_service.enqueue_due_fetches(database)
+    # The API host's minimum interval has passed, as it would in an hour.
+    _set_host(database, next_slot_at=text("now()"), last_request_at=text("now() - interval '1 minute'"))
+    run_jobs(database, job_service.FETCH_SOURCE_JOB_KIND)
+
+    assert gdelt_requests(web)[-1]["timespan"] == ["31min"]
+    assert len(articles(database)) == 1
+    assert source_status(database, gdelt).consecutive_failures == 0
+
+
+def test_gdelt_reason_for_rejecting_a_query_is_kept_but_never_logged(database, web, monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger=ingestion_service.__name__)
+    monkeypatch.setitem(ADAPTERS, "gdelt", GdeltAdapter())
+    gdelt = create(database, "GDELT Person", adapter_type="gdelt", url="", query='"Max Muster"', language="")
+    web.pages[API_URL] = (200, "text/html", b'Your search for "Max Muster" contained a phrase that is too short.')
+    ingestion_service.enqueue_due_fetches(database)
+
+    run_jobs(database)
+
+    status = source_status(database, gdelt)
+    assert status.last_error == 'GDELT lehnt die Suchanfrage ab: Your search for "Max Muster" contained a phrase that is too short.'
+    [job] = jobs(database)
+    assert job.status == JobStatus.FAILED
+    [record] = [record for record in caplog.records if record.getMessage() == "Source fetch failed"]
+    assert record.error == "GDELT lehnt die Suchanfrage ab"
+    assert all("Muster" not in str(vars(record)) for record in caplog.records)

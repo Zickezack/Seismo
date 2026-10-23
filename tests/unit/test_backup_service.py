@@ -63,7 +63,14 @@ def test_backup_name_carries_the_database_and_the_utc_time():
 
 @pytest.mark.parametrize(
     "name",
-    ["seismo_test-20261023T030005Z.dump", "seismo-latest.dump", "seismo-20261023T030005Z.dump.partial", "notes.txt"],
+    [
+        "seismo_test-20261023T030005Z.dump",
+        "seismo-latest.dump",
+        "seismo-20261023T030005Z.dump.partial",
+        "notes.txt",
+        # A shortened time is no backup of ours, so rotation never deletes it.
+        "seismo-20261023T0305Z.dump",
+    ],
 )
 def test_files_of_other_databases_and_foreign_files_are_no_backups(name):
     assert backup_service.created_at_of("seismo", name) is None

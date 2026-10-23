@@ -24,6 +24,8 @@ class SourceSettings(Protocol):
     """What an adapter reads of a Quelle."""
 
     url: str
+    query: str | None  # set only for an adapter that needs one
+    last_fetched_at: datetime | None  # the last successful fetch, e.g. to ask an API for what is new since
 
 
 class Http(Protocol):
@@ -34,6 +36,8 @@ class Http(Protocol):
 
 class SourceAdapter(Protocol):
     label: str  # the source type as the UI shows it, e.g. "RSS"
+    needs_query: bool  # a Quelle of this type has a Suchanfrage; the others have none
+    default_url: str | None  # the URL a Quelle of this type gets when the admin leaves it empty
 
     def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
         """The source's current items. Raises SourceRejected or SourceUnavailable (app/sources/errors.py)."""

@@ -108,6 +108,7 @@ def _form_page(
         "max_lengths": {
             "name": source_service.MAX_NAME_LENGTH,
             "url": source_service.MAX_URL_LENGTH,
+            "query": source_service.MAX_QUERY_LENGTH,
             "terms_note": source_service.MAX_TERMS_NOTE_LENGTH,
         },
     }

@@ -26,7 +26,7 @@ from app.services.bulk import BulkResult
 from app.services.source_service import Source
 from app.sources import ADAPTERS
 from app.sources.base import FetchedItem
-from app.sources.errors import FetchDisallowed, HostBusy, SourceRejected, SourceUnavailable
+from app.sources.errors import FetchDisallowed, HostBusy, SourceError, SourceRejected, SourceUnavailable
 from app.sources.http import HttpClient
 
 logger = logging.getLogger(__name__)
@@ -117,15 +117,15 @@ def fetch_source(
 
 
 def _record_failure(engine: Engine, source_id: int, error: Exception) -> None:
-    ours = isinstance(error, (SourceRejected, SourceUnavailable))
+    ours = isinstance(error, SourceError)
     message = str(error)[: job_service.MAX_ERROR_LENGTH] if ours else job_service.describe_error(error)
     with engine.begin() as connection:
         failures = source_repository.record_failure(connection, source_id, message)
     fields = {"source_id": source_id, "error_type": type(error).__name__, "consecutive_failures": failures}
-    # Only our own messages (HTTP status, timeout, robots.txt); others may quote what the source sent
-    # (datamodel.md, rule 13).
+    # Only an adapter's own words (HTTP status, timeout, robots.txt); its detail and any other message may
+    # quote what the source sent (datamodel.md, rule 13).
     if ours:
-        fields["error"] = message
+        fields["error"] = error.summary
     logger.warning("Source fetch failed", extra=fields)
 
 

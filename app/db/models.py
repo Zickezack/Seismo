@@ -126,6 +126,8 @@ class Source(Base):
     # Which adapter fetches it (app/sources/); checked in the service, so a new adapter needs no migration.
     adapter_type: Mapped[str] = mapped_column(String(20))
     url: Mapped[str] = mapped_column(String(2000))
+    # The search of an adapter that needs one (GDELT), in that adapter's syntax; None for the others.
+    query: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(server_default=true())
     fetch_interval_minutes: Mapped[int] = mapped_column(server_default="60")
     # ISO 639-1 code; None for a source in several or unknown languages (datamodel.md, rule 5).

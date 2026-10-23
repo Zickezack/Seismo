@@ -5,6 +5,7 @@ The newest file is the schedule: a backup is due once it is older than the backu
 (Plattform-Einstellungen), so a manual backup counts as well and a new interval applies at once.
 """
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,8 @@ BACKUP_SUFFIX = ".dump"
 # pg_dump writes here first; only a complete dump gets the backup name.
 PARTIAL_SUFFIX = ".dump.partial"
 TIME_FORMAT = "%Y%m%dT%H%M%SZ"
+# Exactly the shape TIME_FORMAT writes: strptime alone would read a shortened "T1415Z" as 14:01:05.
+_TIME_SHAPE = re.compile(r"\d{8}T\d{6}Z")
 RESTORE_SUFFIX = "_restore"
 PREVIOUS_SUFFIX = "_before_restore_"
 # PostgreSQL cuts longer database names, which could make two of them equal.
@@ -55,8 +58,11 @@ def created_at_of(database: str, name: str, suffix: str = BACKUP_SUFFIX) -> date
     prefix = f"{database}-"
     if not (name.startswith(prefix) and name.endswith(suffix)):
         return None
+    stamp = name[len(prefix) : -len(suffix)]
+    if not _TIME_SHAPE.fullmatch(stamp):
+        return None
     try:
-        return datetime.strptime(name[len(prefix) : -len(suffix)], TIME_FORMAT).replace(tzinfo=UTC)
+        return datetime.strptime(stamp, TIME_FORMAT).replace(tzinfo=UTC)
     except ValueError:
         return None
 

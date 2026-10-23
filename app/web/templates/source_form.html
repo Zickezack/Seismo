@@ -42,8 +42,14 @@
     </div>
     <div class="field field-wide">
       <label for="url">URL</label>
-      <input id="url" name="url" type="url" required maxlength="{{ max_lengths.url }}" value="{{ values.url }}" aria-describedby="url-hint">
-      <p class="hint" id="url-hint">Adresse des Feeds, mit http:// oder https://.</p>
+      {# Not required: GDELT fills an empty one; the server checks it for every type. #}
+      <input id="url" name="url" type="url" maxlength="{{ max_lengths.url }}" value="{{ values.url }}" aria-describedby="url-hint">
+      <p class="hint" id="url-hint">Adresse des Feeds, mit http:// oder https://. Bei GDELT leer lassen: die Adresse der API wird eingesetzt.</p>
+    </div>
+    <div class="field field-wide">
+      <label for="query">Suchanfrage</label>
+      <input id="query" name="query" type="text" maxlength="{{ max_lengths.query }}" value="{{ values.query or '' }}" aria-describedby="query-hint" data-testid="query">
+      <p class="hint" id="query-hint">Nur für GDELT, in dessen Syntax, z. B. "central bank" sourcelang:german. Pro Abruf kommen höchstens die neuesten 250 Artikel: die Suchanfrage eng genug fassen.</p>
     </div>
     <div class="field">
       <label for="language">Sprache</label>
