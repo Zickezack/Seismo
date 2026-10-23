@@ -155,6 +155,9 @@ class Source(Base):
     fetch_interval_minutes: Mapped[int] = mapped_column(server_default="60")
     # ISO 639-1 code; None for a source in several or unknown languages (datamodel.md, rule 5).
     language: Mapped[str | None] = mapped_column(String(10))
+    # What it reports on: a continent, the Middle East or worldwide; checked in the service like the type.
+    # None until set: sources from before regions existed.
+    region: Mapped[str | None] = mapped_column(String(20))
     terms_note: Mapped[str | None] = mapped_column(Text)
     raw_text_retention_days: Mapped[int] = mapped_column(server_default="30")
     # Raises the platform's minimum interval for every request made for this source; None: the platform's.

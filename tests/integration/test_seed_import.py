@@ -3,7 +3,7 @@ import threading
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.config import AuthSettings
 from app.db.models import SeedLogEntry, Source
@@ -15,8 +15,9 @@ from tests.integration.alembic_helpers import upgrade
 AUTH = AuthSettings(admin_username="admin", admin_password="correct horse battery", session_secret="s" * 32)
 
 
-def item(key, name):
-    return SeedItem(key=key, values=source_service.parse(seed_service._form_of({"name": name, "url": f"https://example.org/{key}"})))
+def item(key, name, **fields):
+    entry = {"name": name, "url": f"https://example.org/{key}", "region": "europe"} | fields
+    return SeedItem(key=key, values=source_service.parse(seed_service._form_of(entry)))
 
 
 CATALOGUE = [item("ecb", "EZB"), item("fed", "Fed"), item("snb", "SNB")]
@@ -88,7 +89,7 @@ def test_item_added_to_the_catalogue_later_comes_with_the_next_run(database, cat
 
 
 def test_name_in_use_is_reported_and_imported_once_the_name_is_free(database):
-    own = source_service.create(database, seed_service._form_of({"name": "fed", "url": "https://example.org/own"}))
+    own = source_service.create(database, seed_service._form_of({"name": "fed", "url": "https://example.org/own", "region": "europe"}))
 
     result = seed_service.import_sources(database)
 
@@ -150,6 +151,36 @@ def _form(source):
         "is_active": "on" if source.is_active else "",
         "fetch_interval_minutes": str(source.fetch_interval_minutes),
         "language": source.language or "",
+        "region": source.region or "",
         "terms_note": source.terms_note or "",
         "raw_text_retention_days": str(source.raw_text_retention_days),
     }
+
+
+def test_catalogue_regions_fill_only_missing_ones_known_by_url_and_query(database, catalogue):
+    gdelt = {"adapter_type": "gdelt", "url": "", "language": ""}
+    catalogue += [
+        item("gdelt-conflict", "GDELT Konflikte", query="(airstrike OR invasion)", region="worldwide", **gdelt),
+        item("gdelt-asia", "GDELT Asien", query="sourcecountry:japan", region="asia", **gdelt),
+    ]
+    seed_service.import_sources(database)
+    ids = {source.name: source.id for source in source_service.list_sources(database)}
+    form = {"name": "Eigene", "adapter_type": "rss", "url": "https://own.example/feed", "is_active": "on",
+            "fetch_interval_minutes": "60", "raw_text_retention_days": "30", "region": "europe"}
+    other = source_service.create(database, form).id
+    with database.begin() as connection:
+        # As before regions existed; the admin has given one of them a region of their own since.
+        connection.execute(update(Source).values(region=None))
+        connection.execute(update(Source).where(Source.id == ids["Fed"]).values(region="north_america"))
+
+    given = seed_service.take_catalogue_regions(database)
+
+    regions = {source.name: source.region for source in source_service.list_sources(database)}
+    assert given == 4
+    assert regions == {
+        "EZB": "europe", "Fed": "north_america", "SNB": "europe",
+        # One URL for both: each known by its query.
+        "GDELT Konflikte": "worldwide", "GDELT Asien": "asia",
+        "Eigene": None,  # not in the catalogue
+    }
+    assert other and seed_service.take_catalogue_regions(database) == 0

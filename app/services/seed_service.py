@@ -5,7 +5,7 @@ from pathlib import Path
 
 from sqlalchemy import Engine
 
-from app.repositories import seed_log_repository
+from app.repositories import seed_log_repository, source_repository
 from app.repositories.source_repository import NameTaken
 from app.services import source_service
 from app.services.source_service import SourceValues
@@ -64,6 +64,19 @@ def import_sources(engine: Engine) -> SeedResult:
                 continue
             imported += 1
     return SeedResult(imported=imported, skipped=skipped, name_taken=name_taken)
+
+
+def take_catalogue_regions(engine: Engine) -> int:
+    """Give every source the region of the catalogue item it matches - by URL and, for GDELT, its query - where it
+    has none yet: sources from before regions existed (story 8). A region set by the admin stays. The number given one.
+
+    An explicit admin action like the import (architecture.md, "Seed Data"); it imports nothing.
+    """
+    with engine.begin() as connection:
+        return sum(
+            source_repository.fill_region(connection, item.values.url, item.values.query, item.values.region)
+            for item in source_catalogue()
+        )
 
 
 def _form_of(item: dict) -> dict[str, str]:

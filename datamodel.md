@@ -130,6 +130,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | is_active | boolean | yes | true | Only active sources are fetched. UI: Aktiv / Inaktiv. |
   | fetch_interval_minutes | integer | yes | 60 | Time between two fetches, 5 to 1440. UI: Abrufintervall. |
   | language | varchar(10) | no | | ISO 639-1 code; empty for a source in several or unknown languages (rule 5). The language of each article is stored separately. UI: Sprache. |
+  | region | varchar(20) | no | | What the source reports on: `africa`, `asia`, `europe`, `middle_east`, `north_america`, `south_america`, `oceania`, `worldwide` (UI: Afrika, Asien, Europa, Naher Osten, Nordamerika, Südamerika, Ozeanien, Weltweit; the list sorts in this order). Checked in the service, not by a constraint. Required by the form; empty only for sources from before regions existed (UI: Ohne Region). UI: Region. |
   | terms_note | text | no | | What the source's terms allow, with a link, at most 2000 characters. Checking them is the admin's job (`requirements.md`, "Data Sources and Data Rights"). UI: Nutzungsbedingungen. |
   | raw_text_retention_days | integer | yes | 30 | Days a raw text is kept after its processing has succeeded, 0 to 365; 0 deletes it right after (rule 8). UI: Rohtext aufbewahren. |
   | min_request_interval_seconds | integer | no | | Minimum time between two requests to the same host for this source, feed and full texts alike, 1 to 600; empty: `domain_min_interval_seconds`. Only raises it, never lowers it. UI: Mindestabstand. |
@@ -142,7 +143,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | updated_at | timestamptz | yes | now() | Last change through the form or a bulk action. |
 
 - Relationships: has many Artikel (`article.source_id`).
-- Rules: bulk actions (Jetzt abrufen, Löschen, Aktivieren, Deaktivieren) are all or nothing; an inactive source blocks Jetzt abrufen. Abrufstatus: OK (no failure since the last success), n Fehler in Folge, or Noch nicht abgerufen; it covers the feed fetch only, a full text's outcome is kept at its Artikel. Deleting a source keeps its articles (they keep a copy of its name and URL). Seeded sources come only from the starter catalogue import (`app/seeds/sources.json`, Seed-Protokoll), active.
+- Rules: bulk actions (Jetzt abrufen, Blockierte Volltexte abrufen, Aktivieren, Deaktivieren, Region setzen, Löschen) are all or nothing; the list filters by region (or Ohne Region) and sorts by name or by region, then name; an inactive source blocks Jetzt abrufen. Abrufstatus: OK (no failure since the last success), n Fehler in Folge, or Noch nicht abgerufen; it covers the feed fetch only, a full text's outcome is kept at its Artikel. Deleting a source keeps its articles (they keep a copy of its name and URL). Seeded sources come only from the starter catalogue import (`app/seeds/sources.json`, Seed-Protokoll), active, with their region. "Regionen übernehmen" (Plattform-Einstellungen, Starterdaten) gives a source without a region the one of its catalogue item, matched by URL and query; it never overwrites a region.
 - Privacy: none
 
 ### Artikel (`article`)

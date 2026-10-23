@@ -6,6 +6,33 @@
 <p class="message message-warning" role="status" data-testid="contact-missing">Kein Kontakt im User-Agent: Ohne <code>FETCH_CONTACT</code> verweigern manche Hosts den Abruf, z. B. www.admin.ch. Eine E-Mail-Adresse oder URL in der Umgebung von Worker und api setzen (README).</p>
 {% endif %}
 
+{# A plain GET form, like the article list: the view can be bookmarked. #}
+<section class="card stack">
+<form class="toolbar" method="get" action="/sources" data-testid="source-filter">
+  <div class="actions">
+  <div class="field">
+    <label for="filter-region">Region</label>
+    <select id="filter-region" name="region" data-testid="filter-region">
+      <option value="">Alle Regionen</option>
+      {% for code, label in regions.items() %}
+      <option value="{{ code }}"{% if region_filter == code %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+      <option value="{{ no_region }}"{% if region_filter == no_region %} selected{% endif %}>{{ no_region_label }}</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="sort">Sortieren nach</label>
+    <select id="sort" name="sort" data-testid="sort">
+      {% for code, label in sort_orders.items() %}
+      <option value="{{ code }}"{% if sort == code %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  </div>
+  <button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button>
+</form>
+</section>
+
 <form class="stack" method="post" action="/sources/delete" data-bulk-form data-testid="source-list">
   <div class="toolbar">
     <div class="actions">
@@ -13,6 +40,12 @@
       <button class="button button-secondary" type="submit" formaction="/sources/refetch-blocked" data-bulk-action data-testid="refetch-blocked" disabled>Blockierte Volltexte abrufen</button>
       <button class="button button-secondary" type="submit" formaction="/sources/activate" data-bulk-action data-testid="activate" disabled>Aktivieren</button>
       <button class="button button-secondary" type="submit" formaction="/sources/deactivate" data-bulk-action data-testid="deactivate" disabled>Deaktivieren</button>
+      <span class="action-group">
+        <select name="region" aria-label="Region für die ausgewählten Quellen" data-testid="bulk-region">
+          {% for code, label in regions.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+        </select>
+        <button class="button button-secondary" type="submit" formaction="/sources/set-region" data-bulk-action data-testid="set-region" disabled>Region setzen</button>
+      </span>
       <button class="button button-danger" type="submit" formaction="/sources/delete" data-bulk-action data-confirm-delete="Quelle|Quellen" data-testid="delete" disabled>Löschen</button>
     </div>
     <a class="button" href="/sources/new" data-testid="new-source">Quelle hinzufügen</a>
@@ -27,6 +60,7 @@
           <th>Typ</th>
           <th>URL</th>
           <th>Sprache</th>
+          <th>Region</th>
           <th>Status</th>
           <th>Abrufstatus</th>
           <th>Abrufintervall</th>
@@ -43,6 +77,7 @@
           <td>{{ source.adapter_label }}</td>
           <td class="cell-url"><span data-testid="url-{{ source.id }}">{{ source.url }}</span>{% if source.query %}<span class="hint" data-testid="query-{{ source.id }}">{{ source.query }}</span>{% endif %}</td>
           <td data-testid="language-{{ source.id }}">{{ source.language_label }}</td>
+          <td data-testid="region-{{ source.id }}">{{ source.region_label }}</td>
           <td><span class="status status-{{ 'active' if source.is_active else 'inactive' }}" data-testid="status-{{ source.id }}">{{ "Aktiv" if source.is_active else "Inaktiv" }}</span></td>
           <td class="cell-wrap" data-testid="fetch-status-{{ source.id }}"><span class="status status-{{ source.fetch_status }}">{{ source.fetch_status_label }}</span>{% if source.consecutive_failures %}<span class="hint" data-testid="last-error-{{ source.id }}">{{ source.last_error_at|local_time }}: {{ source.last_error }}</span>{% endif %}{% if blocked_counts.get(source.id) %}<span class="hint hint-error" data-testid="blocked-{{ source.id }}">{{ blocked_counts[source.id] }} {{ "Volltext" if blocked_counts[source.id] == 1 else "Volltexte" }} blockiert</span>{% endif %}</td>
           <td data-testid="interval-{{ source.id }}">alle {{ source.fetch_interval_minutes }} Min.</td>
@@ -55,7 +90,11 @@
     </table>
   </div>
   {% else %}
+  {% if region_filter %}
+  <p data-testid="no-sources-in-region">Keine Quellen in dieser Auswahl. <a href="/sources">Alle Quellen anzeigen</a></p>
+  {% else %}
   <p data-testid="no-sources">Noch keine Quellen. Lege eine an oder importiere den Starterkatalog in den <a href="/settings/platform#starterdaten">Plattform-Einstellungen</a>.</p>
+  {% endif %}
   {% endif %}
 </form>
 {% endblock %}

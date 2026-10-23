@@ -62,6 +62,16 @@
       <p class="hint" id="language-hint">Sprache der Artikel. Die Sprache jedes Artikels wird zusätzlich erkannt.</p>
     </div>
     <div class="field">
+      <label for="region">Region</label>
+      <select id="region" name="region" required aria-describedby="region-hint" data-testid="region">
+        <option value=""{% if not values.region %} selected{% endif %} disabled>Bitte wählen</option>
+        {% for code, label in regions.items() %}
+        <option value="{{ code }}"{% if values.region == code %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <p class="hint" id="region-hint">Worüber die Quelle berichtet: ein Kontinent, der Nahe Osten oder weltweit.</p>
+    </div>
+    <div class="field">
       <span class="field-label">Abruf</span>
       <label class="checkbox-label"><input id="is_active" name="is_active" type="checkbox"{% if values.is_active %} checked{% endif %} aria-describedby="is_active-hint" data-testid="is_active"> Aktiv</label>
       <p class="hint" id="is_active-hint">Nur aktive Quellen werden abgerufen.</p>

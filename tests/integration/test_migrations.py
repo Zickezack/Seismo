@@ -199,3 +199,14 @@ def test_tdm_columns_start_empty_and_reserved_full_texts_fail_on_downgrade(engin
 
     with engine.connect() as connection:
         assert connection.execute(text("SELECT full_text_status FROM article")).scalar_one() == "failed"
+
+
+def test_existing_sources_start_without_a_region(engine):
+    upgrade(engine, "3152564cbc2b")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO source (name, adapter_type, url) VALUES ('EZB', 'rss', 'https://example.org')"))
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT region FROM source")).scalar_one() is None

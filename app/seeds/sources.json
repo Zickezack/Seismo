@@ -4,6 +4,7 @@
     "name": "EZB – Pressemitteilungen",
     "url": "https://www.ecb.europa.eu/rss/press.html",
     "language": "en",
+    "region": "europe",
     "terms_note": "Freie Nutzung erlaubt, sofern die Inhalte korrekt wiedergegeben werden und die EZB als Quelle genannt wird; Dokumente mit Autorennamen (z. B. Working Papers) nur mit schriftlicher Genehmigung. Enthält auch Reden und Interviews. Nutzungsbedingungen: https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html"
   },
   {
@@ -11,6 +12,7 @@
     "name": "Fed – Pressemitteilungen",
     "url": "https://www.federalreserve.gov/feeds/press_all.xml",
     "language": "en",
+    "region": "north_america",
     "terms_note": "Inhalte sind, sofern nicht anders gekennzeichnet, gemeinfrei und dürfen ohne Genehmigung kopiert und verbreitet werden; Quellenangabe (Board) erbeten, Siegel und Logos ausgenommen. Nutzungsbedingungen: https://www.federalreserve.gov/disclaimer.htm"
   },
   {
@@ -18,6 +20,7 @@
     "name": "Bank of England – News",
     "url": "https://www.bankofengland.co.uk/rss/news",
     "language": "en",
+    "region": "europe",
     "terms_note": "Herunterladen, Anzeigen und Drucken nur für persönliche oder organisationsinterne, nicht-kommerzielle Zwecke erlaubt; jede Weiterverwendung erfordert eine Genehmigung der Bank of England. Nutzungsbedingungen: https://www.bankofengland.co.uk/legal"
   },
   {
@@ -25,6 +28,7 @@
     "name": "SNB – Medienmitteilungen",
     "url": "https://www.snb.ch/public/rss/en/pressrel",
     "language": "en",
+    "region": "europe",
     "terms_note": "Speichern, Übersetzen (mit Quellenangabe), Weitergeben und sonstige Nutzung nur für nicht-kommerzielle Zwecke erlaubt. Nutzungsbedingungen: https://www.snb.ch/en/srv/disclaimer_copyright"
   },
   {
@@ -32,6 +36,7 @@
     "name": "Bundesbank – Aktuelles",
     "url": "https://www.bundesbank.de/service/rss/en/633306/feed.rss",
     "language": "en",
+    "region": "europe",
     "terms_note": "Speichern, Weitergeben und Vervielfältigen für persönlichen oder geschäftlichen Gebrauch erlaubt, unverändert und mit Angabe „Source: Deutsche Bundesbank“; Bilder und Videos ausgenommen. Nutzungsbedingungen: https://www.bundesbank.de/en/homepage/user-information/terms-of-use-642972?index=2"
   },
   {
@@ -39,6 +44,7 @@
     "name": "BIZ – Pressemitteilungen",
     "url": "https://www.bis.org/doclist/all_pressrels.rss",
     "language": "en",
+    "region": "worldwide",
     "terms_note": "Herunterladen und Weiterverbreiten nur für nicht-kommerzielle Zwecke erlaubt; in anderen Produkten nur begrenzte Auszüge (höchstens etwa 400 Wörter) mit Quellenangabe, sonst schriftliche Genehmigung nötig. Feed im Format RSS 1.0. Nutzungsbedingungen: https://www.bis.org/about/terms-conditions"
   },
   {
@@ -46,6 +52,7 @@
     "name": "BIZ – Reden von Zentralbankern",
     "url": "https://www.bis.org/doclist/cbspeeches.rss",
     "language": "en",
+    "region": "worldwide",
     "terms_note": "Herunterladen und Weiterverbreiten nur für nicht-kommerzielle Zwecke erlaubt; in anderen Produkten nur begrenzte Auszüge (höchstens etwa 400 Wörter) mit Quellenangabe, sonst schriftliche Genehmigung nötig. Die Reden stammen von Vertretern vieler Zentralbanken. Feed im Format RSS 1.0. Nutzungsbedingungen: https://www.bis.org/about/terms-conditions"
   },
   {
@@ -53,6 +60,7 @@
     "name": "Bank of Canada – Pressemitteilungen",
     "url": "https://www.bankofcanada.ca/content_type/press-releases/feed/",
     "language": "en",
+    "region": "north_america",
     "terms_note": "Freie Nutzung, Vervielfältigung und Verbreitung erlaubt mit Quellenangabe „Bank of Canada“ und Kennzeichnung von Änderungen; Banknotenbilder und Logo ausgenommen. Feed im Format RSS 1.0. Nutzungsbedingungen: https://www.bankofcanada.ca/terms/"
   },
   {
@@ -60,6 +68,7 @@
     "name": "Destatis – Pressemitteilungen",
     "url": "https://www.destatis.de/SiteGlobals/Functions/RSSFeed/DE/RSSNewsfeed/Aktuell.xml",
     "language": "de",
+    "region": "europe",
     "terms_note": "Vervielfältigung und Verbreitung, auch auszugsweise und gewerblich, mit Quellenangabe „Statistisches Bundesamt (Destatis)“ ohne Genehmigung erlaubt; Änderungen sind kenntlich zu machen. robots.txt verlangt 30 Sekunden zwischen zwei Abrufen. Nutzungsbedingungen: https://www.destatis.de/DE/Service/Impressum/copyright-allgemein.html"
   },
   {
@@ -67,6 +76,7 @@
     "name": "BFS – Medienmitteilungen",
     "url": "https://d-nsbc-p.admin.ch/v1/rss?org-nr=318&lang=de",
     "language": "de",
+    "region": "europe",
     "terms_note": "Nutzung mit Quellenangabe „Bundesamt für Statistik (BFS)“ erlaubt, kommerzielle Nutzung nur mit vorheriger schriftlicher Bewilligung des BFS. Feed des News Service Bund mit Meldungen bis 2022 zurück. Nutzungsbedingungen: https://www.bfs.admin.ch/bfs/de/home/bfs/oeffentliche-statistik/copyright.html"
   },
   {
@@ -74,6 +84,7 @@
     "name": "BLS – Arbeitsmarktbericht",
     "url": "https://www.bls.gov/feed/empsit.rss",
     "language": "en",
+    "region": "north_america",
     "terms_note": "Alle BLS-Veröffentlichungen sind gemeinfrei und ohne Genehmigung nutzbar; Quellenangabe BLS erbeten, fremde Fotos und Illustrationen sowie das BLS-Logo ausgenommen. Die BLS beantwortet nur Abrufe mit einem User-Agent samt E-Mail-Adresse (FETCH_CONTACT); eine URL genügt nicht. Nutzungsbedingungen: https://www.bls.gov/opub/copyright-information.htm"
   },
   {
@@ -82,6 +93,7 @@
     "url": "https://news.cision.com/de/ListItems?format=rss",
     "fetch_interval_minutes": 15,
     "language": "de",
+    "region": "europe",
     "terms_note": "Die Seite enthält nur allgemeine Copyright-Hinweise und keine Regeln zur Weiterverwendung von Pressemitteilungen – Nutzungsbedingungen unklar, vor Nutzung prüfen. Copyright-Hinweise: https://www.cision.com/legal/copyright-resources/"
   },
   {
@@ -90,6 +102,7 @@
     "url": "https://www.presseportal.de/rss/wirtschaft.rss2",
     "fetch_interval_minutes": 15,
     "language": "de",
+    "region": "europe",
     "terms_note": "Inhalte dürfen redaktionell frei verwendet werden; jede darüber hinausgehende Verwendung, insbesondere für eigene Geschäftszwecke, nur mit schriftlicher Genehmigung der news aktuell GmbH. Nutzungsbedingungen: https://www.presseportal.de/nutzungsbedingungen"
   },
   {
@@ -97,6 +110,7 @@
     "name": "DW – Top Stories",
     "url": "https://rss.dw.com/rdf/rss-en-all",
     "language": "en",
+    "region": "europe",
     "terms_note": "Text- und Data-Mining nur zu Forschungszwecken, nicht kommerziell, ohne Veröffentlichung oder Weitergabe; private Nutzung ohne Veröffentlichung erlaubt. Die robots.txt verlangt für automatisiertes Data Mining eine schriftliche Erlaubnis. Nutzungsbedingungen: https://corporate.dw.com/en/free-use-of-dw-content/a-77069962"
   },
   {
@@ -104,6 +118,7 @@
     "name": "Meduza – English",
     "url": "https://meduza.io/rss/en/all",
     "language": "en",
+    "region": "europe",
     "terms_note": "Alle Materialien gehören Meduza, Wiederveröffentlichung nur mit Zustimmung; ausgewählte Inhalte (Ukraine-Kriegsberichterstattung) unter CC BY mit Nennung von Autor und Quelle. Zu Abruf und Speicherung keine Aussage. Nutzungsbedingungen: https://meduza.io/en/pages/about"
   },
   {
@@ -111,6 +126,7 @@
     "name": "Ukrinform – News",
     "url": "https://www.ukrinform.net/rss/block-lastnews",
     "language": "en",
+    "region": "europe",
     "terms_note": "Beim Zitieren im Internet ist ein Link auf ukrinform.net spätestens im ersten Absatz Pflicht; Offline-Medien und Apps nur mit schriftlicher Zustimmung. Zu Abruf und Speicherung keine Aussage. Nutzungsbedingungen: https://www.ukrinform.net/"
   },
   {
@@ -118,6 +134,7 @@
     "name": "EU-Kommission – Presse",
     "url": "https://ec.europa.eu/commission/presscorner/api/rss?language=en",
     "language": "en",
+    "region": "europe",
     "terms_note": "EU-eigene Inhalte stehen, sofern nicht anders vermerkt, unter CC BY 4.0: Weiterverwendung mit Quellenangabe und Kennzeichnung von Änderungen; ausgenommen Drittinhalte, Logos und Marken. Nutzungsbedingungen: https://commission.europa.eu/legal-notice_en#copyright-notice"
   },
   {
@@ -125,6 +142,7 @@
     "name": "The Hindu – Business",
     "url": "https://www.thehindu.com/business/feeder/default.rss",
     "language": "en",
+    "region": "asia",
     "terms_note": "Die AGB gelten auch für den RSS-Feed: nur persönliche, nicht kommerzielle Nutzung, Weitergabe nur persönlich oder akademisch mit Nennung von THG Publishing; kein ausdrückliches Verbot automatisierten Abrufs. Nutzungsbedingungen: https://www.thehindugroup.com/termsofuse.html"
   },
   {
@@ -132,6 +150,7 @@
     "name": "ABC News Australia – Just In",
     "url": "https://www.abc.net.au/news/feed/51120/rss.xml",
     "language": "en",
+    "region": "oceania",
     "terms_note": "Inhalte nur zur persönlichen, nicht kommerziellen Nutzung; Vervielfältigen, Wiederveröffentlichen oder abgeleitete Werke nur mit schriftlicher Erlaubnis. Keine RSS- oder Scraping-Klausel. Nutzungsbedingungen: https://help.abc.net.au/hc/en-us/articles/360001548096-ABC-Terms-of-Use"
   },
   {
@@ -139,6 +158,7 @@
     "name": "Africanews",
     "url": "https://www.africanews.com/feed/rss",
     "language": "en",
+    "region": "africa",
     "terms_note": "Herunterladen nur zur persönlichen, nicht kommerziellen Nutzung; keine Mengen in eine Datenbank laden, die künftige Abrufe ersetzt; kein Weiterverbreiten. Keine RSS- oder Scraping-Klausel. Nutzungsbedingungen: https://www.africanews.com/terms-and-conditions/"
   },
   {
@@ -146,6 +166,7 @@
     "name": "AllAfrica – Latest",
     "url": "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
     "language": "en",
+    "region": "africa",
     "terms_note": "Schlagzeilen dürfen mit Quellenangabe und Link zu AllAfrica genutzt werden; die Artikel gehören meist Partnermedien, deren Weiterverwendung braucht deren Erlaubnis. Kein Verbot automatisierten Abrufs gefunden. Nutzungsbedingungen: https://allafrica.com/misc/tools/rss.html#Terms"
   },
   {
@@ -153,6 +174,7 @@
     "name": "MercoPress",
     "url": "https://en.mercopress.com/rss",
     "language": "en",
+    "region": "south_america",
     "terms_note": "Webmaster dürfen MercoPress-Meldungen einbinden, solange der Link zum Originalartikel erhalten bleibt. Volltextabruf und Speicherung sind nicht geregelt. Nutzungsbedingungen: https://en.mercopress.com/feeds"
   },
   {
@@ -160,6 +182,7 @@
     "name": "Agência Brasil – Últimas",
     "url": "https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml",
     "language": "pt",
+    "region": "south_america",
     "terms_note": "Wiedergabe zu journalistischen Zwecken mit Quellenangabe erlaubt, kommerzielle Wiedergabe nur mit Lizenz (licenciamento@ebc.com.br); Portal-Nutzung nur persönlich, nicht kommerziell. Nutzungsbedingungen: https://agenciabrasil.ebc.com.br/sobre"
   },
   {
@@ -167,6 +190,7 @@
     "name": "Middle East Eye",
     "url": "https://www.middleeasteye.net/rss",
     "language": "en",
+    "region": "middle_east",
     "terms_note": "Eine Kopie drucken und Auszüge zum persönlichen Nachschlagen herunterladen erlaubt, Urheberschaft stets nennen; kommerzielle Nutzung nur mit Lizenz, Wiederveröffentlichung nur mit schriftlicher Erlaubnis. Nutzungsbedingungen: https://www.middleeasteye.net/terms-and-conditions"
   },
   {
@@ -174,6 +198,7 @@
     "name": "gCaptain",
     "url": "https://gcaptain.com/feed/",
     "language": "en",
+    "region": "worldwide",
     "terms_note": "Keine Nutzungsbedingungen für die Website gefunden, nur Forum-AGB ohne Aussage zu RSS, Abruf oder Speicherung. Keine Erlaubnis zur Vervielfältigung: nur interne Nutzung ohne Weiterveröffentlichung. Nutzungsbedingungen: https://forum.gcaptain.com/tos"
   },
   {
@@ -181,6 +206,7 @@
     "name": "Splash247",
     "url": "https://splash247.com/feed/",
     "language": "en",
+    "region": "worldwide",
     "terms_note": "Keine Nutzungsbedingungen veröffentlicht, nur „All Rights Reserved“ (Splash Maritime Group): nur interne Nutzung ohne Weiterveröffentlichung. Nutzungsbedingungen: https://splash247.com/legal-agreement/"
   },
   {
@@ -188,6 +214,7 @@
     "name": "USGS – Bedeutende Erdbeben",
     "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.atom",
     "language": "en",
+    "region": "worldwide",
     "terms_note": "Von der USGS erstellte Daten sind gemeinfrei (U.S. Public Domain); Quellenangabe „U.S. Geological Survey“ erbeten. Nutzungsbedingungen: https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits"
   },
   {
@@ -195,6 +222,7 @@
     "name": "NOAA NHC – Atlantik",
     "url": "https://www.nhc.noaa.gov/index-at.xml",
     "language": "en",
+    "region": "north_america",
     "terms_note": "Informationen auf US-Regierungsservern sind gemeinfrei, sofern nicht anders gekennzeichnet; untersagt ist nur, veränderte Informationen als offizielles Regierungsmaterial auszugeben. Nutzungsbedingungen: https://www.nhc.noaa.gov/disclaimer.shtml"
   },
   {
@@ -202,6 +230,7 @@
     "name": "WHO – News",
     "url": "https://www.who.int/rss-feeds/news-english.xml",
     "language": "en",
+    "region": "worldwide",
     "terms_note": "Auszüge für Forschung oder private Studien erlaubt, nicht für kommerzielle Zwecke; WHO mit URL als Quelle nennen. Vervielfältigung wesentlicher Teile oder kommerzielle Nutzung nur mit schriftlicher Erlaubnis. Nutzungsbedingungen: https://www.who.int/about/policies/terms-of-use"
   },
   {
@@ -209,6 +238,7 @@
     "name": "WTO – News",
     "url": "https://www.wto.org/library/rss/latest_news_e.xml",
     "language": "en",
+    "region": "worldwide",
     "terms_note": "Vervielfältigung für nicht kommerzielle Zwecke erlaubt mit Quellenangabe und Information an die WTO; kommerzielle Nutzung braucht schriftliche Erlaubnis. Nutzungsbedingungen: https://www.wto.org/english/info_e/copyrights_permissions_e.htm"
   },
   {
@@ -216,6 +246,7 @@
     "name": "BleepingComputer",
     "url": "https://www.bleepingcomputer.com/feed/",
     "language": "en",
+    "region": "worldwide",
     "terms_note": "Inhalte dürfen nur für persönliche, nicht kommerzielle Zwecke gespeichert werden; Weitergabe nur mit schriftlicher Erlaubnis. Ob der Volltextabruf unter „Zugriff nur über die bereitgestellte Schnittstelle“ fällt, lassen die Bedingungen offen. Nutzungsbedingungen: https://www.bleepingcomputer.com/terms-of-use/"
   },
   {
@@ -223,6 +254,7 @@
     "name": "GDELT – Lieferketten-Störungen",
     "adapter_type": "gdelt",
     "url": "",
+    "region": "worldwide",
     "query": "(\"supply chain disruption\" OR \"port congestion\" OR \"shipping disruption\" OR \"factory shutdown\" OR \"chip shortage\" OR \"port strike\")",
     "fetch_interval_minutes": 15,
     "terms_note": "GDELT-Daten sind für akademische, kommerzielle und staatliche Nutzung unbeschränkt und gebührenfrei nutzbar; bei Weitergabe GDELT zitieren und auf gdeltproject.org verlinken. Die verlinkten Artikel unterliegen den Bedingungen ihrer Verlage. Nutzungsbedingungen: https://www.gdeltproject.org/about.html#termsofuse"
@@ -232,6 +264,7 @@
     "name": "GDELT – Bewaffnete Konflikte",
     "adapter_type": "gdelt",
     "url": "",
+    "region": "worldwide",
     "query": "(\"military offensive\" OR airstrike OR \"missile attack\" OR \"armed clashes\" OR invasion)",
     "fetch_interval_minutes": 15,
     "terms_note": "GDELT-Daten sind für akademische, kommerzielle und staatliche Nutzung unbeschränkt und gebührenfrei nutzbar; bei Weitergabe GDELT zitieren und auf gdeltproject.org verlinken. Die verlinkten Artikel unterliegen den Bedingungen ihrer Verlage. Nutzungsbedingungen: https://www.gdeltproject.org/about.html#termsofuse"
@@ -241,6 +274,7 @@
     "name": "GDELT – Naturkatastrophen",
     "adapter_type": "gdelt",
     "url": "",
+    "region": "worldwide",
     "query": "(earthquake OR hurricane OR typhoon OR cyclone OR \"flash flood\" OR wildfire OR \"volcanic eruption\")",
     "fetch_interval_minutes": 15,
     "terms_note": "GDELT-Daten sind für akademische, kommerzielle und staatliche Nutzung unbeschränkt und gebührenfrei nutzbar; bei Weitergabe GDELT zitieren und auf gdeltproject.org verlinken. Die verlinkten Artikel unterliegen den Bedingungen ihrer Verlage. Nutzungsbedingungen: https://www.gdeltproject.org/about.html#termsofuse"
@@ -250,6 +284,7 @@
     "name": "GDELT – Sanktionen und Handel",
     "adapter_type": "gdelt",
     "url": "",
+    "region": "worldwide",
     "query": "(sanctions OR embargo OR \"export controls\" OR \"export ban\" OR \"import ban\")",
     "fetch_interval_minutes": 15,
     "terms_note": "GDELT-Daten sind für akademische, kommerzielle und staatliche Nutzung unbeschränkt und gebührenfrei nutzbar; bei Weitergabe GDELT zitieren und auf gdeltproject.org verlinken. Die verlinkten Artikel unterliegen den Bedingungen ihrer Verlage. Nutzungsbedingungen: https://www.gdeltproject.org/about.html#termsofuse"
@@ -259,6 +294,7 @@
     "name": "GDELT – Cyberangriffe und Ausfälle",
     "adapter_type": "gdelt",
     "url": "",
+    "region": "worldwide",
     "query": "(ransomware OR cyberattack OR \"data breach\" OR \"global outage\" OR \"system outage\")",
     "fetch_interval_minutes": 15,
     "terms_note": "GDELT-Daten sind für akademische, kommerzielle und staatliche Nutzung unbeschränkt und gebührenfrei nutzbar; bei Weitergabe GDELT zitieren und auf gdeltproject.org verlinken. Die verlinkten Artikel unterliegen den Bedingungen ihrer Verlage. Nutzungsbedingungen: https://www.gdeltproject.org/about.html#termsofuse"
@@ -268,6 +304,7 @@
     "name": "GDELT – Energieversorgung",
     "adapter_type": "gdelt",
     "url": "",
+    "region": "worldwide",
     "query": "(\"oil supply\" OR \"gas supply\" OR \"pipeline explosion\" OR \"refinery fire\" OR blackout)",
     "fetch_interval_minutes": 15,
     "terms_note": "GDELT-Daten sind für akademische, kommerzielle und staatliche Nutzung unbeschränkt und gebührenfrei nutzbar; bei Weitergabe GDELT zitieren und auf gdeltproject.org verlinken. Die verlinkten Artikel unterliegen den Bedingungen ihrer Verlage. Nutzungsbedingungen: https://www.gdeltproject.org/about.html#termsofuse"
@@ -277,6 +314,7 @@
     "name": "SEC – Pressemitteilungen",
     "url": "https://www.sec.gov/news/pressreleases.rss",
     "language": "en",
+    "region": "north_america",
     "terms_note": "Inhalte von sec.gov dürfen ohne Erlaubnis der SEC kopiert und weitergegeben werden; Quellenangabe erbeten, Siegel und Logos ausgenommen. Automatisierter Zugriff höchstens 10 Anfragen pro Sekunde und nur als gekennzeichneter Bot: User-Agent mit E-Mail-Adresse (FETCH_CONTACT), sonst HTTP 403. Nutzungsbedingungen: https://www.sec.gov/about/privacy-information"
   }
 ]

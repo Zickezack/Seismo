@@ -317,6 +317,17 @@ a:focus-visible {
   gap: 0.5rem;
 }
 
+/* A choice for one bulk action and its button, kept together when the actions wrap, e.g. the region for
+   "Region setzen" (templates/sources.html). */
+.action-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.actions select {
+  width: auto;
+}
+
 /* Filter links, e.g. job status */
 
 .filters {

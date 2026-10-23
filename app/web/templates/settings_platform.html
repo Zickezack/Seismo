@@ -61,5 +61,15 @@
       <button class="button" type="submit" data-testid="import-sources"{% if sources_seed.imported == sources_seed.total %} disabled title="Alle Quellen des Katalogs sind schon importiert"{% endif %}>Starterkatalog importieren</button>
     </div>
   </form>
+  <form class="form-grid" method="post" action="/settings/platform/seed/source-regions" data-testid="seed-regions-form">
+    <div class="field field-wide">
+      <span class="field-label">Regionen aus dem Katalog</span>
+      <p class="hint" data-testid="seed-regions-status">{{ sources_without_region }} {{ "Quelle" if sources_without_region == 1 else "Quellen" }} ohne Region.</p>
+      <p class="hint">Gibt jeder Quelle ohne Region die Region ihres Katalogeintrags, erkannt an der URL und bei GDELT an der Suchanfrage. Eine gesetzte Region bleibt; Quellen ausserhalb des Katalogs bekommen ihre Region in der Quellenliste („Region setzen“).</p>
+    </div>
+    <div class="form-actions">
+      <button class="button button-secondary" type="submit" data-testid="take-regions"{% if not sources_without_region %} disabled title="Alle Quellen haben eine Region"{% endif %}>Regionen übernehmen</button>
+    </div>
+  </form>
 </details>
 {% endblock %}

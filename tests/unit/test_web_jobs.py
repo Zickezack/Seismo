@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.config import AuthSettings, Settings
 from app.db.models import JobStatus
-from app.services import job_service, platform_settings_service, seed_service
+from app.services import job_service, platform_settings_service, seed_service, source_service
 from app.services.job_service import BulkResult, JobListItem, JobOverview
 from app.services.platform_settings_service import PlatformSettings
 from app.services.seed_service import SeedStatus
@@ -74,6 +74,8 @@ def services(monkeypatch):
     monkeypatch.setattr(platform_settings_service, "current", lambda _engine: PlatformSettings(llm_max_parallel_calls=3))
     monkeypatch.setattr(platform_settings_service, "save", save)
     monkeypatch.setattr(seed_service, "sources_status", lambda _engine: SeedStatus(total=17, imported=0))
+    # The settings page counts the sources without a region.
+    monkeypatch.setattr(source_service, "list_sources", lambda _engine, region=None, sort=None: [])
     return calls
 
 

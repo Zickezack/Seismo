@@ -1,6 +1,6 @@
 """Quellen in PostgreSQL: sort order, unique names, all-or-nothing bulk actions."""
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.db.models import Source
 from app.repositories import source_repository
@@ -23,6 +23,7 @@ def form(name, **fields):
         "is_active": "on",
         "fetch_interval_minutes": "60",
         "language": "de",
+        "region": "europe",
         "terms_note": "",
         "raw_text_retention_days": "30",
     }
@@ -150,3 +151,38 @@ def test_defaults_of_the_table(database):
     assert (source.is_active, source.fetch_interval_minutes, source.raw_text_retention_days, source.language) == (
         True, 60, 30, None
     )
+
+
+def test_filter_by_region_or_without_one_and_sort_by_region_with_the_missing_last(database):
+    for name, region in [("Fed", "north_america"), ("EZB", "europe"), ("BIZ", "worldwide"), ("Africanews", "africa"),
+                         ("BoE", "europe"), ("Alt", "europe")]:
+        source_service.create(database, form(name, region=region))
+    with database.begin() as connection:
+        connection.execute(update(Source).where(Source.name == "Alt").values(region=None))
+
+    def listed(**options):
+        return [source.name for source in source_service.list_sources(database, **options)]
+
+    # In the order of the regions, by name within one.
+    assert listed(sort="region") == ["Africanews", "BoE", "EZB", "Fed", "BIZ", "Alt"]
+    assert listed(region="europe") == ["BoE", "EZB"]
+    assert listed(region=source_service.NO_REGION) == ["Alt"]
+    assert listed(region="mars", sort="colour") == ["Africanews", "Alt", "BIZ", "BoE", "EZB", "Fed"]
+    assert source_service.get(database, source_service.list_sources(database, region="europe")[0].id).region_label == "Europa"
+
+
+def test_set_region_is_all_or_nothing_and_knows_its_regions(database):
+    ezb, fed = create(database, "EZB", "Fed")
+
+    assert source_service.set_region(database, [ezb, fed], "worldwide").processed == 2
+    assert {source.region for source in source_service.list_sources(database)} == {"worldwide"}
+    blocked = source_service.set_region(database, [ezb, 999], "asia")
+    assert (blocked.processed, blocked.blocked) == (0, ["Quelle #999 (nicht gefunden)"])
+    assert source_service.get(database, ezb).region == "worldwide"
+    with pytest.raises(InvalidSource, match="^Region: bitte einen der angebotenen Werte wählen\\.$"):
+        source_service.set_region(database, [ezb], "mars")
+
+
+def test_a_source_needs_a_region(database):
+    with pytest.raises(InvalidSource, match="Region: bitte einen der angebotenen Werte wählen"):
+        source_service.create(database, form("EZB", region=""))

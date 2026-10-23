@@ -35,7 +35,7 @@ JSON = {"Accept": "application/json"}
 def source(source_id, name, **fields):
     values = dict(
         id=source_id, name=name, adapter_type="rss", url=f"https://example.org/{source_id}.xml", query=None, is_active=True,
-        fetch_interval_minutes=60, language="en", terms_note=None, raw_text_retention_days=30,
+        fetch_interval_minutes=60, language="en", region="europe", terms_note=None, raw_text_retention_days=30,
         min_request_interval_seconds=None, created_at=NOW, updated_at=NOW, last_fetched_at=None, last_error=None,
         last_error_at=None, consecutive_failures=0,
     )
@@ -60,6 +60,7 @@ FORM = {
     "language": "de",
     "terms_note": "",
     "raw_text_retention_days": "7",
+    "region": "asia",
 }
 
 
@@ -97,7 +98,11 @@ def services(monkeypatch):
         calls["import"] = True
         return calls.get("import_result", SeedResult(imported=17, skipped=0, name_taken=[]))
 
-    monkeypatch.setattr(source_service, "list_sources", lambda _engine: calls["sources"])
+    def list_sources(_engine, region=None, sort=None):
+        calls["list_sources"] = (region, sort)
+        return calls["sources"] if region in (None, "") else calls.get("sources_in_region", [])
+
+    monkeypatch.setattr(source_service, "list_sources", list_sources)
     monkeypatch.setattr(source_service, "get", lambda _engine, source_id: found.get(source_id))
     monkeypatch.setattr(source_service, "create", create)
     monkeypatch.setattr(source_service, "update", update)
@@ -108,6 +113,7 @@ def services(monkeypatch):
     monkeypatch.setattr(article_service, "blocked_by_source", lambda _engine: calls.get("blocked_counts", {}))
     monkeypatch.setattr(ingestion_service, "refetch_blocked", bulk("refetch_blocked"))
     monkeypatch.setattr(seed_service, "import_sources", import_sources)
+    monkeypatch.setattr(seed_service, "take_catalogue_regions", lambda _engine: calls.get("regions_given", 0))
     monkeypatch.setattr(seed_service, "sources_status", lambda _engine: calls.get("seed_status", SeedStatus(17, 0)))
     monkeypatch.setattr(platform_settings_service, "current", lambda _engine: PlatformSettings())
 
@@ -540,3 +546,90 @@ def test_no_warning_with_a_contact(services):
     with TestClient(create_app(replace(SETTINGS, fetch_contact="https://github.com/Zickezack"), AUTH), follow_redirects=False) as client:
         client.post("/login", data={"username": "admin", "password": "correct horse battery"})
         assert tag_of(client.get("/sources").text, "contact-missing") is None
+
+
+def test_list_shows_the_region_and_offers_filter_and_sort(client, services):
+    services["sources"] = [source(2, "EZB", region="europe"), source(7, "Alt", region=None)]
+
+    html = client.get("/sources").text
+
+    assert (text_of(html, "region-2"), text_of(html, "region-7")) == ("Europa", "Ohne Region")
+    assert 'method="get"' in tag_of(html, "source-filter") and 'action="/sources"' in tag_of(html, "source-filter")
+    assert services["list_sources"] == (None, None)
+    button = tag_of(html, "set-region")
+    assert 'formaction="/sources/set-region"' in button and " disabled" in button
+    assert 'name="region"' in tag_of(html, "bulk-region")
+
+
+def test_filter_and_sort_come_from_the_url_and_stay_selected(client, services):
+    services["sources_in_region"] = [source(2, "EZB", region="europe")]
+
+    html = client.get("/sources?region=europe&sort=region").text
+
+    assert services["list_sources"] == ("europe", "region")
+    assert re.search(r'<option value="europe" selected>Europa</option>', html)
+    assert re.search(r'<option value="region" selected>Region</option>', html)
+    assert re.findall(r'data-testid="source-(\d+)"', html) == ["2"]
+
+
+def test_an_empty_selection_offers_all_sources_again(client, services):
+    html = client.get("/sources?region=none").text
+
+    assert 'href="/sources"' in html and tag_of(html, "no-sources-in-region") is not None
+    assert tag_of(html, "no-sources") is None
+
+
+@pytest.mark.parametrize(
+    ("data", "result", "message"),
+    [
+        ({"source_id": ["2", "1"], "region": "asia"}, BulkResult(processed=2, blocked=[]), "2 Quellen der Region Asien zugeordnet."),
+        ({"source_id": ["9"], "region": "asia"}, BulkResult(processed=0, blocked=["Quelle #9 (nicht gefunden)"]),
+         "Nichts der Region Asien zugeordnet, blockiert: Quelle #9 (nicht gefunden)."),
+    ],
+)
+def test_set_region(client, services, monkeypatch, data, result, message):
+    seen = {}
+
+    def set_region(_engine, source_ids, region):
+        seen["call"] = (source_ids, region)
+        return result
+
+    monkeypatch.setattr(source_service, "set_region", set_region)
+
+    response = client.post("/sources/set-region", data=data)
+
+    assert seen["call"] == ([int(each) for each in data["source_id"]], data["region"])
+    assert flash_after(client, response)[0] == message
+
+
+def test_set_region_with_an_unknown_region_says_so(client, services):
+    response = client.post("/sources/set-region", data={"source_id": ["2"], "region": "mars"})
+
+    text, tag = flash_after(client, response)
+    assert text == "Region: bitte einen der angebotenen Werte wählen." and "message-error" in tag
+
+
+def test_form_asks_for_a_region(client, services):
+    new = client.get("/sources/new").text
+    edit = client.get("/sources/2").text
+
+    assert " required" in tag_of(new, "region")
+    assert '<option value="" selected disabled>Bitte wählen</option>' in new
+    assert '<option value="europe" selected>Europa</option>' in edit
+
+
+def test_settings_page_takes_regions_from_the_catalogue(client, services):
+    services["sources_in_region"] = [source(7, "Alt", region=None)]
+    html = client.get("/settings/platform").text
+
+    assert text_of(html, "seed-regions-status") == "1 Quelle ohne Region."
+    assert " disabled" not in tag_of(html, "take-regions")
+
+    services["regions_given"] = 31
+    response = client.post("/settings/platform/seed/source-regions")
+    assert response.headers["location"] == "/settings/platform#starterdaten"
+    assert flash_after(client, response)[0] == "31 Quellen haben die Region ihres Katalogeintrags erhalten."
+
+
+def test_region_takeover_is_disabled_once_every_source_has_one(client, services):
+    assert " disabled" in tag_of(client.get("/settings/platform").text, "take-regions")

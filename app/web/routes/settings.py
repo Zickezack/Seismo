@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from app.services import platform_settings_service, seed_service
+from app.services import platform_settings_service, seed_service, source_service
 from app.services.platform_settings_service import InvalidSetting
 from app.web.forms import form_values, wants_json
 from app.web.templating import flash, name_list, templates
@@ -21,6 +21,7 @@ def platform_settings(request: Request) -> Response:
         "settings": platform_settings_service.current(engine),
         "fields": platform_settings_service.FORM_FIELDS,
         "sources_seed": seed_service.sources_status(engine),
+        "sources_without_region": len(source_service.list_sources(engine, region=source_service.NO_REGION)),
     }
     return templates.TemplateResponse(request, "settings_platform.html", context)
 
@@ -55,4 +56,12 @@ def import_source_catalogue(request: Request) -> Response:
         flash(request, f"{text} Nicht importiert, Name schon vergeben: {name_list(result.name_taken)}.", "error")
     else:
         flash(request, text)
+    return RedirectResponse("/settings/platform#starterdaten", status_code=303)
+
+
+@router.post("/seed/source-regions")
+def take_catalogue_regions(request: Request) -> Response:
+    """Regions for sources from before regions existed; an explicit admin action like the import."""
+    given = seed_service.take_catalogue_regions(request.app.state.engine)
+    flash(request, f"{given} {'Quelle hat' if given == 1 else 'Quellen haben'} die Region ihres Katalogeintrags erhalten.")
     return RedirectResponse("/settings/platform#starterdaten", status_code=303)

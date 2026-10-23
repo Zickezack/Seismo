@@ -13,6 +13,7 @@ FORM = {
     "language": "en",
     "terms_note": "  Wiedergabe mit Quellenangabe erlaubt. ",
     "raw_text_retention_days": "30",
+    "region": "europe",
 }
 
 
@@ -28,6 +29,7 @@ def test_valid_form_is_trimmed():
         terms_note="Wiedergabe mit Quellenangabe erlaubt.",
         raw_text_retention_days=30,
         min_request_interval_seconds=None,
+        region="europe",
     )
 
 
@@ -139,6 +141,7 @@ def test_every_error_of_the_form_at_once():
         "Name: bitte angeben. Typ: bitte einen der angebotenen Werte wählen. "
         "URL: bitte eine vollständige Adresse mit http:// oder https:// angeben. "
         "Abrufintervall (Minuten): bitte eine ganze Zahl von 5 bis 1440 eingeben. "
+        "Region: bitte einen der angebotenen Werte wählen. "
         "Rohtext aufbewahren (Tage): bitte eine ganze Zahl von 0 bis 365 eingeben."
     )
 
@@ -146,7 +149,7 @@ def test_every_error_of_the_form_at_once():
 def test_form_for_a_new_source_starts_with_valid_defaults():
     form = {key: str(value) if not isinstance(value, bool) else "on" for key, value in NEW_SOURCE_FORM.items()}
 
-    values = source_service.parse(form | {"name": "Neu", "url": "https://example.org/feed"})
+    values = source_service.parse(form | {"name": "Neu", "url": "https://example.org/feed", "region": "worldwide"})
 
     assert (values.is_active, values.fetch_interval_minutes, values.raw_text_retention_days) == (True, 60, 30)
     assert values.min_request_interval_seconds is None

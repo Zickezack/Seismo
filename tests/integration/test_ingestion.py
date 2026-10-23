@@ -98,7 +98,7 @@ def item(key, published_at=NOW, **fields):
 def create(database, name, **fields):
     form = {
         "name": name, "adapter_type": "rss", "url": f"https://{name.lower()}.example/rss", "is_active": "on",
-        "fetch_interval_minutes": "60", "language": "en", "terms_note": "", "raw_text_retention_days": "30",
+        "fetch_interval_minutes": "60", "language": "en", "region": "europe", "terms_note": "", "raw_text_retention_days": "30",
     }
     return source_service.create(database, form | fields).id
 
@@ -390,7 +390,7 @@ def _form(source):
     return {
         "name": source.name, "adapter_type": source.adapter_type, "url": source.url,
         "is_active": "on" if source.is_active else "", "fetch_interval_minutes": str(source.fetch_interval_minutes),
-        "language": source.language or "", "terms_note": source.terms_note or "",
+        "language": source.language or "", "region": source.region or "", "terms_note": source.terms_note or "",
         "raw_text_retention_days": str(source.raw_text_retention_days),
     }
 

@@ -26,10 +26,17 @@ FormValues = Annotated[dict[str, str], Depends(form_values)]
 
 
 @router.get("")
-def source_list(request: Request) -> Response:
+def source_list(request: Request, region: str | None = None, sort: str | None = None) -> Response:
+    """A plain GET filter like the article list: works without JavaScript, the URL can be bookmarked."""
     engine = request.app.state.engine
     context = {
-        "sources": source_service.list_sources(engine),
+        "sources": source_service.list_sources(engine, region, sort),
+        "region_filter": region if region in source_service.REGIONS or region == source_service.NO_REGION else "",
+        "sort": sort if sort in source_service.SORT_ORDERS else "name",
+        "regions": source_service.REGIONS,
+        "no_region": source_service.NO_REGION,
+        "no_region_label": source_service.NO_REGION_LABEL,
+        "sort_orders": source_service.SORT_ORDERS,
         "article_counts": article_service.count_by_source(engine),
         "blocked_counts": article_service.blocked_by_source(engine),
         "contact_missing": not request.app.state.fetch_contact,
@@ -76,6 +83,16 @@ def deactivate_sources(request: Request, source_ids: SourceIds = []) -> Response
 def fetch_sources(request: Request, source_ids: SourceIds = []) -> Response:
     result = ingestion_service.fetch_now(request.app.state.engine, source_ids)
     return _after_bulk_action(request, result, "zum Abruf eingereiht")
+
+
+@router.post("/set-region")
+def set_region(request: Request, source_ids: SourceIds = [], region: Annotated[str, Form()] = "") -> Response:
+    try:
+        result = source_service.set_region(request.app.state.engine, source_ids, region)
+    except InvalidSource as error:
+        flash(request, str(error), "error")
+        return RedirectResponse("/sources", status_code=303)
+    return _after_bulk_action(request, result, f"der Region {source_service.REGIONS[region]} zugeordnet")
 
 
 @router.post("/refetch-blocked")
@@ -150,6 +167,7 @@ def _form_page(
         "error": error,
         "adapter_types": source_service.ADAPTER_TYPES,
         "languages": source_service.LANGUAGES,
+        "regions": source_service.REGIONS,
         "no_language_label": source_service.NO_LANGUAGE_LABEL,
         "fetch_interval": source_service.FETCH_INTERVAL_MINUTES,
         "retention": source_service.RAW_TEXT_RETENTION_DAYS,

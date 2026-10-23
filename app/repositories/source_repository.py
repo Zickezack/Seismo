@@ -2,7 +2,7 @@
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 
-from sqlalchemy import ColumnElement, Connection, Row, delete, func, insert, literal_column, select, update
+from sqlalchemy import ColumnElement, Connection, Row, case, delete, func, insert, literal_column, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Source
@@ -33,9 +33,40 @@ def get(connection: Connection, source_id: int) -> Row | None:
     return connection.execute(select(Source.__table__).where(Source.id == source_id)).one_or_none()
 
 
-def all_by_name(connection: Connection) -> Sequence[Row]:
-    statement = select(Source.__table__).order_by(Source.name.collate(NAME_COLLATION), Source.id)
+def all_by_name(
+    connection: Connection,
+    region: str | None = None,
+    without_region: bool = False,
+    region_order: Sequence[str] | None = None,
+) -> Sequence[Row]:
+    """The sources by name; only those of `region`, or `without_region`; first by `region_order` if given, the ones
+    without a region last."""
+    statement = select(Source.__table__)
+    if region is not None:
+        statement = statement.where(Source.region == region)
+    if without_region:
+        statement = statement.where(Source.region.is_(None))
+    if region_order:
+        position = case({code: index for index, code in enumerate(region_order)}, value=Source.region, else_=len(region_order))
+        statement = statement.order_by(position)
+    statement = statement.order_by(Source.name.collate(NAME_COLLATION), Source.id)
     return connection.execute(statement).all()
+
+
+def set_region(connection: Connection, source_ids: list[int], region: str) -> int:
+    statement = update(Source).where(Source.id.in_(source_ids)).values(region=region, updated_at=func.now())
+    return connection.execute(statement).rowcount
+
+
+def fill_region(connection: Connection, url: str, query: str | None, region: str) -> int:
+    """Give the sources with this URL and query - a GDELT source is known by its query - the region, where they have
+    none yet."""
+    statement = (
+        update(Source)
+        .where(Source.url == url, Source.query.is_not_distinct_from(query), Source.region.is_(None))
+        .values(region=region, updated_at=func.now())
+    )
+    return connection.execute(statement).rowcount
 
 
 def lock_sources(connection: Connection, source_ids: list[int]) -> Sequence[Row]:

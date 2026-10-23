@@ -29,6 +29,20 @@ LANGUAGES = {
     "ar": "Arabisch",
 }
 NO_LANGUAGE_LABEL = "Mehrsprachig oder unbekannt"
+# What a source reports on, in the order the list sorts them (userstories.md, Quellenadapter und Ingestion, story 8).
+REGIONS = {
+    "africa": "Afrika",
+    "asia": "Asien",
+    "europe": "Europa",
+    "middle_east": "Naher Osten",
+    "north_america": "Nordamerika",
+    "south_america": "Südamerika",
+    "oceania": "Ozeanien",
+    "worldwide": "Weltweit",
+}
+NO_REGION = "none"  # the list's filter value for sources from before regions existed
+NO_REGION_LABEL = "Ohne Region"
+SORT_ORDERS = {"name": "Name", "region": "Region"}
 
 MAX_NAME_LENGTH = 200
 MAX_URL_LENGTH = 2000
@@ -49,6 +63,7 @@ NEW_SOURCE_FORM = {
     "adapter_type": "rss",
     "url": "",
     "query": "",
+    "region": "",
     "is_active": True,
     "fetch_interval_minutes": DEFAULT_FETCH_INTERVAL_MINUTES,
     "language": "",
@@ -80,6 +95,7 @@ class SourceValues:
     terms_note: str | None
     raw_text_retention_days: int
     min_request_interval_seconds: int | None
+    region: str | None  # always set by the form; None only for sources from before regions existed
 
 
 @dataclass(frozen=True)
@@ -112,6 +128,10 @@ class Source(SourceValues):
     def language_label(self) -> str:
         return LANGUAGES.get(self.language, self.language) if self.language else NO_LANGUAGE_LABEL
 
+    @property
+    def region_label(self) -> str:
+        return REGIONS.get(self.region, self.region) if self.region else NO_REGION_LABEL
+
 
 def parse(form: Mapping[str, str]) -> SourceValues:
     """Check every field of the source form; all errors together in one InvalidSource."""
@@ -137,6 +157,7 @@ def parse(form: Mapping[str, str]) -> SourceValues:
             _whole_number, form.get("fetch_interval_minutes", ""), "Abrufintervall (Minuten)", FETCH_INTERVAL_MINUTES
         ),
         language=checked(_choice, form.get("language", ""), "Sprache", LANGUAGES, True),
+        region=checked(_choice, form.get("region", ""), "Region", REGIONS),
         terms_note=checked(_terms_note, form.get("terms_note", "")),
         raw_text_retention_days=checked(
             _whole_number, form.get("raw_text_retention_days", ""), "Rohtext aufbewahren (Tage)", RAW_TEXT_RETENTION_DAYS
@@ -154,10 +175,25 @@ def parse(form: Mapping[str, str]) -> SourceValues:
     return values
 
 
-def list_sources(engine: Engine) -> list[Source]:
-    """All sources, sorted by name as a German reader expects (requirements.md, "Lists and Ordering")."""
+def list_sources(engine: Engine, region: str | None = None, sort: str | None = None) -> list[Source]:
+    """The sources sorted by name as a German reader expects (requirements.md, "Lists and Ordering"), or by region
+    first (in the order of REGIONS, those without one last); all of them, those of one region, or those without
+    one (NO_REGION). An unknown filter or sort means none."""
+    region_order = list(REGIONS) if sort == "region" else None
     with engine.connect() as connection:
-        return [_source(row) for row in source_repository.all_by_name(connection)]
+        rows = source_repository.all_by_name(
+            connection,
+            region=region if region in REGIONS else None,
+            without_region=region == NO_REGION,
+            region_order=region_order,
+        )
+    return [_source(row) for row in rows]
+
+
+def set_region(engine: Engine, source_ids: Iterable[int], region: str) -> BulkResult:
+    """Give the selected sources one region, all or nothing; InvalidSource for a region that is none of REGIONS."""
+    region = _choice(region, "Region", REGIONS)
+    return _bulk(engine, source_ids, lambda connection, ids: source_repository.set_region(connection, ids, region))
 
 
 def get(engine: Engine, source_id: int) -> Source | None:
