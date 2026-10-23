@@ -35,9 +35,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.
 
-### Epic: Projektfundament und Laufzeitumgebung
-5. As an admin, I want scripted database backups and a documented restore that has been tested once, so data can be recovered after a failure.
-
 ### Epic: Quellenadapter und Ingestion
 1. As an admin, I want to manage the news sources (Quellen) - name, type, URL, active flag, fetch interval, language, terms-of-use note and raw-text retention period - and to import a starter catalogue of open business and central-bank feeds only when I trigger it, so I control what is ingested and under which rules.
 2. As an analyst, I want a uniform source adapter interface with RSS as the first adapter, storing source name, URL, publication time, fetch time and language separately, so new source types can be added without changing the event model.
@@ -107,3 +104,4 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 2. As a developer, I want the project in a Git repository with a remote and a `.gitignore` that keeps `.env`, local settings and other secrets out, so every change is versioned and the CI/CD pipeline (skill `deploy-setup`) can build on it.
 3. As an admin, I want to log in to the dashboard with the admin credentials from the env file, so the platform is not openly accessible.
 4. As an admin, I want a PostgreSQL-based job queue with leases, retries and a visible job status, plus a configurable limit for parallel LLM calls, so a restart never leaves jobs lost or stuck, a retried job has no duplicate effect, and the GPU is not overloaded.
+5. As an admin, I want scripted database backups and a documented restore that has been tested once, so data can be recovered after a failure.

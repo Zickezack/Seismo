@@ -2,6 +2,7 @@
 import threading
 import time
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -9,7 +10,7 @@ from sqlalchemy import select
 from app.db.models import Job, JobStatus
 from app.jobs import handlers
 from app.llm.limiter import LlmCallLimiter
-from app.services import job_service
+from app.services import backup_service, job_service
 from app.worker import main as worker
 from tests.integration.alembic_helpers import upgrade
 
@@ -22,14 +23,23 @@ def database(engine, monkeypatch):
 
 
 @pytest.fixture
-def start_worker(test_settings, tmp_path):
+def backup_dir(test_settings, tmp_path):
+    """The workers' backup directory, with a fresh backup in it, so none is due unless a test removes it."""
+    directory = tmp_path / "backups"
+    directory.mkdir()
+    (directory / backup_service.backup_name(test_settings.postgres_db, datetime.now(UTC))).touch()
+    return directory
+
+
+@pytest.fixture
+def start_worker(test_settings, tmp_path, backup_dir):
     """Start a worker process loop in a thread; returns its stop event, thread and heartbeat file."""
     started = []
 
     def start():
         stop_event = threading.Event()
         heartbeat = tmp_path / f"heartbeat-{len(started)}"
-        settings = replace(test_settings, worker_poll_interval_seconds=0.05)
+        settings = replace(test_settings, worker_poll_interval_seconds=0.05, backup_dir=backup_dir)
         thread = threading.Thread(target=worker.run, args=(settings, stop_event, heartbeat))
         thread.start()
         started.append((stop_event, thread))
@@ -95,3 +105,20 @@ def test_stopped_worker_hands_a_waiting_job_back_and_the_restarted_one_runs_it(d
 
     assert wait_for(lambda: job(database, job_id).status == JobStatus.SUCCEEDED)
     assert job(database, job_id).attempts == 1
+
+
+def test_worker_queues_and_runs_a_backup_when_none_is_there(database, start_worker, backup_dir, test_settings):
+    for path in backup_dir.iterdir():
+        path.unlink()
+
+    start_worker()
+
+    def backups():
+        return backup_service.list_backups(backup_dir, test_settings.postgres_db)
+
+    assert wait_for(lambda: len(backups()) == 1)
+    assert backups()[0].size_bytes > 0
+    with database.connect() as connection:
+        backup_job = connection.execute(select(Job.__table__).where(Job.kind == job_service.BACKUP_JOB_KIND)).one()
+    assert wait_for(lambda: job(database, backup_job.id).status == JobStatus.SUCCEEDED)
+    assert backup_job.max_attempts == job_service.BACKUP_MAX_ATTEMPTS

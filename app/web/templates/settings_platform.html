@@ -24,9 +24,17 @@
 </details>
 {% endmacro %}
 
+{% set sections = [
+  ("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls"]),
+  ("aufbewahrung", "Aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
+  ("backups", "Backups", ["backup_interval_hours", "backups_to_keep"]),
+] %}
+
 {% block content %}
 <h1>Plattform-Einstellungen</h1>
-{# A quick-navigation row follows once there are enough sections (requirements.md, "Basic UI Requirements / Styleguide", item 4). #}
-{{ section("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls"]) }}
-{{ section("aufbewahrung", "Aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]) }}
+{# Quick navigation for several sections (requirements.md, "Basic UI Requirements / Styleguide", item 4). #}
+<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
+  {% for id, title, _ in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+</nav>
+{% for id, title, names in sections %}{{ section(id, title, names) }}{% endfor %}
 {% endblock %}

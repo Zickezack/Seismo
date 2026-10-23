@@ -68,6 +68,8 @@ class PlatformSettingsRecord(Base):
     llm_max_parallel_calls: Mapped[int] = mapped_column(server_default="1")
     succeeded_jobs_retention_days: Mapped[int] = mapped_column(server_default="7")
     failed_jobs_retention_days: Mapped[int] = mapped_column(server_default="30")
+    backup_interval_hours: Mapped[int] = mapped_column(server_default="24")
+    backups_to_keep: Mapped[int] = mapped_column(server_default="14")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -75,4 +77,6 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(llm_max_parallel_calls >= 1, name="llm_max_parallel_calls"),
         CheckConstraint(succeeded_jobs_retention_days >= 1, name="succeeded_jobs_retention_days"),
         CheckConstraint(failed_jobs_retention_days >= 1, name="failed_jobs_retention_days"),
+        CheckConstraint(backup_interval_hours >= 1, name="backup_interval_hours"),
+        CheckConstraint(backups_to_keep >= 1, name="backups_to_keep"),
     )

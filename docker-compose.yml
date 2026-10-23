@@ -1,4 +1,4 @@
-# Services: db (PostgreSQL), migrate (one-shot Alembic upgrade), api, worker.
+# Services: db (PostgreSQL), migrate (one-shot Alembic upgrade), api, worker (jobs and backups).
 # All configuration comes from environment variables - locally from .env (see .env.example),
 # on Portainer from the stack environment.
 
@@ -71,6 +71,10 @@ services:
     <<: *app
     command: ["python", "-m", "app.worker"]
     restart: unless-stopped
+    volumes:
+      # Backups (README.md, "Backups"): the volume db-backups, or with BACKUP_HOST_DIR an absolute path
+      # on the host - e.g. a mounted NAS share, so a backup survives the loss of this host's disk.
+      - ${BACKUP_HOST_DIR:-db-backups}:/backups
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -83,3 +87,4 @@ services:
 
 volumes:
   db-data:
+  db-backups:

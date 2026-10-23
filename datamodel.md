@@ -101,6 +101,8 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | llm_max_parallel_calls | integer | yes | 1 | Most LLM calls running at once across all workers, 1 to 32. Enforced with PostgreSQL advisory locks, one per slot; read on every slot request, so a change applies without a restart. |
   | succeeded_jobs_retention_days | integer | yes | 7 | Days a succeeded job is kept after `finished_at`, 1 to 3650. |
   | failed_jobs_retention_days | integer | yes | 30 | Days a failed job is kept after `finished_at`, 1 to 3650. |
+  | backup_interval_hours | integer | yes | 24 | Hours from the newest backup file to the next automatic backup, 1 to 720. |
+  | backups_to_keep | integer | yes | 14 | Backup files kept; after each new backup the oldest beyond this number are deleted, 1 to 365. |
   | updated_at | timestamptz | yes | now() | |
 
 - Relationships: none

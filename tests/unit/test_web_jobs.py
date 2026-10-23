@@ -180,7 +180,16 @@ def test_settings_page_shows_every_setting_in_its_section(client, services):
     assert [(name, re.findall(r'name="(\w+)"', form)) for name, form in sections] == [
         ("verarbeitung", ["llm_max_parallel_calls"]),
         ("aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
+        ("backups", ["backup_interval_hours", "backups_to_keep"]),
     ]
+
+
+def test_settings_page_links_every_section_from_its_quick_navigation(client, services):
+    html = client.get("/settings/platform").text
+
+    links = re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html)
+    assert links == re.findall(r'<details class="card section" id="(\w+)"', html)
+    assert links == ["verarbeitung", "aufbewahrung", "backups"]
 
 
 def test_settings_save_in_place_answers_json(client, services):

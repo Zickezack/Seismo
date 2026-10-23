@@ -2,7 +2,8 @@
 
 Every tick checks readiness and writes a heartbeat file that the Docker health check reads. While a job
 runs, every lease renewal writes it as well, so a long job never makes the worker look dead. Once an
-hour the worker deletes finished jobs whose retention period has passed.
+hour the worker deletes finished jobs whose retention period has passed; once a minute it queues a
+backup job if a backup is due (app/services/backup_service.py).
 """
 import logging
 import os
@@ -24,6 +25,7 @@ from app.jobs.handlers import build_handlers
 from app.jobs.runner import Handler, run_next_job
 from app.llm.limiter import LlmCallLimiter
 from app.logging_config import configure_logging
+from app.services import backup_service
 from app.services.health_service import HealthReport, check_readiness
 from app.db.models import JobStatus
 from app.services.job_service import LEASE_SECONDS, purge_finished_jobs
@@ -34,6 +36,8 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "seismo-worker-heartbeat"
 # The retention periods are whole days; checking hourly keeps the job table small enough.
 PURGE_INTERVAL_SECONDS = 60 * 60
+# A backup starts at most this late; the check only lists the backup directory.
+BACKUP_CHECK_INTERVAL_SECONDS = 60
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:
@@ -46,7 +50,7 @@ def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> Health
 def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = HEARTBEAT_FILE) -> None:
     engine = create_db_engine(settings)
     expected_revision = head_revision()
-    handlers = build_handlers(LlmCallLimiter(engine, stop_event), stop_event)
+    handlers = build_handlers(engine, settings.backup_dir, LlmCallLimiter(engine, stop_event), stop_event)
     owner = worker_identity()
     # Several renewals per lease, and at least one heartbeat per poll interval (app/worker/healthcheck.py).
     renew_interval = min(settings.worker_poll_interval_seconds, LEASE_SECONDS / 3)
@@ -55,7 +59,7 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
         extra={"poll_interval_seconds": settings.worker_poll_interval_seconds, "job_kinds": sorted(handlers), "owner": owner},
     )
     was_ready = None
-    next_purge = time.monotonic()
+    next_purge = next_backup_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -66,6 +70,9 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and time.monotonic() >= next_purge:
                 next_purge = time.monotonic() + PURGE_INTERVAL_SECONDS
                 _purge_finished_jobs(engine)
+            if report.ready and time.monotonic() >= next_backup_check:
+                next_backup_check = time.monotonic() + BACKUP_CHECK_INTERVAL_SECONDS
+                _enqueue_backup_if_due(engine, settings.backup_dir)
             # After a job, take the next one at once; wait only while the queue is empty.
             if report.ready and _run_next_job(engine, handlers, owner, renew_interval, heartbeat_file):
                 continue
@@ -99,6 +106,17 @@ def _purge_finished_jobs(engine: Engine) -> None:
             "Finished jobs purged",
             extra={"succeeded": deleted[JobStatus.SUCCEEDED], "failed": deleted[JobStatus.FAILED]},
         )
+
+
+def _enqueue_backup_if_due(engine: Engine, backup_dir: Path) -> None:
+    try:
+        job_id = backup_service.enqueue_if_due(engine, backup_dir)
+    except (SQLAlchemyError, OSError) as error:
+        # Checked again at the next interval.
+        logger.warning("Backup check failed: %s", getattr(error, "orig", None) or error)
+        return
+    if job_id is not None:
+        logger.info("Backup job queued", extra={"job_id": job_id})
 
 
 def worker_identity() -> str:

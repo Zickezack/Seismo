@@ -20,6 +20,9 @@ desktop.ini
 *.key
 *.p12
 *.pfx
+# Database backups (README.md, "Backups") hold the whole database
+*.dump
+*.dump.partial
 
 # Python
 __pycache__/

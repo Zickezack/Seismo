@@ -3,6 +3,7 @@ import logging
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sqlalchemy import URL
 
@@ -26,6 +27,8 @@ class Settings:
     postgres_port: int = 5432
     log_level: str = "INFO"
     worker_poll_interval_seconds: float = 5.0
+    # The worker's backup volume (docker-compose.yml); outside it a backup would not survive a redeploy.
+    backup_dir: Path = Path("/backups")
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "Settings":
@@ -46,6 +49,7 @@ class Settings:
             worker_poll_interval_seconds=_positive_number(
                 environ, "WORKER_POLL_INTERVAL_SECONDS", cls.worker_poll_interval_seconds, float
             ),
+            backup_dir=Path(environ.get("BACKUP_DIR", "").strip() or cls.backup_dir),
         )
 
     @property

@@ -75,3 +75,15 @@ for (const form of document.querySelectorAll("[data-inline-save]")) {
     show(text, ok);
   });
 }
+
+// In-page navigation of a page with several sections (requirements.md, "Basic UI Requirements /
+// Styleguide", item 4): a link expands its section if it is collapsed; the browser then scrolls to it.
+for (const nav of document.querySelectorAll("[data-section-nav]")) {
+  nav.addEventListener("click", (event) => {
+    const link = event.target.closest("a[href^='#']");
+    const section = link && document.getElementById(link.hash.slice(1));
+    if (section instanceof HTMLDetailsElement) {
+      section.open = true;
+    }
+  });
+}

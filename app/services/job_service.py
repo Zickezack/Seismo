@@ -21,6 +21,10 @@ LIST_LIMIT = 100
 LEASE_EXPIRED_ERROR = "Lease abgelaufen: Worker beendet oder nicht erreichbar"
 
 TEST_JOB_KIND = "testjob"
+BACKUP_JOB_KIND = "backup"
+# With the doubling retry delay about three hours of attempts, so a backup that keeps failing
+# (app/services/backup_service.py) adds a failed job every few hours, not every few minutes.
+BACKUP_MAX_ATTEMPTS = 10
 
 STATUS_LABELS = {
     JobStatus.QUEUED: "Wartend",
@@ -28,7 +32,7 @@ STATUS_LABELS = {
     JobStatus.SUCCEEDED: "Erledigt",
     JobStatus.FAILED: "Fehlgeschlagen",
 }
-KIND_LABELS = {TEST_JOB_KIND: "Testjob"}
+KIND_LABELS = {TEST_JOB_KIND: "Testjob", BACKUP_JOB_KIND: "Datenbank-Backup"}
 
 
 @dataclass(frozen=True)

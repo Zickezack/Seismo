@@ -1,16 +1,26 @@
 """The job kinds the worker runs. A new kind: a handler here and its label in job_service.KIND_LABELS."""
 import threading
+from pathlib import Path
+
+from sqlalchemy import Engine
 
 from app.jobs.errors import JobInterrupted
 from app.jobs.runner import Handler
 from app.llm.limiter import LlmCallLimiter
-from app.services.job_service import TEST_JOB_KIND
+from app.repositories.backup_repository import ToolInterrupted
+from app.services import backup_service
+from app.services.job_service import BACKUP_JOB_KIND, TEST_JOB_KIND
 
 TEST_JOB_SECONDS = 5
 
 
-def build_handlers(limiter: LlmCallLimiter, stop_event: threading.Event) -> dict[str, Handler]:
-    return {TEST_JOB_KIND: lambda _job: run_test_job(limiter, stop_event)}
+def build_handlers(
+    engine: Engine, backup_dir: Path, limiter: LlmCallLimiter, stop_event: threading.Event
+) -> dict[str, Handler]:
+    return {
+        TEST_JOB_KIND: lambda _job: run_test_job(limiter, stop_event),
+        BACKUP_JOB_KIND: lambda _job: run_backup_job(engine, backup_dir, stop_event),
+    }
 
 
 def run_test_job(limiter: LlmCallLimiter, stop_event: threading.Event) -> None:
@@ -18,3 +28,11 @@ def run_test_job(limiter: LlmCallLimiter, stop_event: threading.Event) -> None:
     with limiter.slot():
         if stop_event.wait(TEST_JOB_SECONDS):
             raise JobInterrupted("Worker stoppt während des Testjobs")
+
+
+def run_backup_job(engine: Engine, backup_dir: Path, stop_event: threading.Event) -> None:
+    """The backup file is the whole result; no effect to write. A retry after a lost lease only adds a file."""
+    try:
+        backup_service.create_backup(engine, backup_dir, stop_event)
+    except ToolInterrupted:
+        raise JobInterrupted("Worker stoppt während des Backups") from None

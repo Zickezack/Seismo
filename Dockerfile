@@ -8,6 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# pg_dump and pg_restore for the backups (README.md, "Backups"); system packages change least often.
+COPY scripts/install-postgres-client.sh /tmp/
+RUN /tmp/install-postgres-client.sh && rm /tmp/install-postgres-client.sh
+
 # Dependencies first, so a code change does not reinstall them. The empty package lets the
 # editable install run before the code is copied; the real code is then picked up in place.
 COPY pyproject.toml ./
@@ -18,6 +22,8 @@ COPY migrations ./migrations
 COPY app ./app
 
 RUN useradd --system --uid 10001 --no-create-home app
+# Mount point of the worker's backup volume. A new volume takes over this owner, so the app user can write.
+RUN install -d -o app -g app /backups
 USER app
 
 EXPOSE 8000

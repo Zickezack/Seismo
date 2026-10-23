@@ -13,6 +13,8 @@ from app.services.platform_settings_service import FORM_FIELDS, InvalidSetting, 
         ("llm_max_parallel_calls", "32", 32),
         ("succeeded_jobs_retention_days", "1", 1),
         ("failed_jobs_retention_days", "3650", 3650),
+        ("backup_interval_hours", "720", 720),
+        ("backups_to_keep", "1", 1),
     ],
 )
 def test_valid_values(name, raw, expected):

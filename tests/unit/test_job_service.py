@@ -85,7 +85,7 @@ def test_every_status_has_a_german_label():
 
 def test_every_job_kind_the_worker_runs_has_a_german_label():
     # A kind without a handler (e.g. removed in a later version) still shows its technical name.
-    assert set(build_handlers(limiter=None, stop_event=None)) <= set(job_service.KIND_LABELS)
+    assert set(build_handlers(engine=None, backup_dir=None, limiter=None, stop_event=None)) <= set(job_service.KIND_LABELS)
 
 
 @pytest.mark.parametrize(("kind", "options"), [("", {}), ("testjob", {"max_attempts": 0})])

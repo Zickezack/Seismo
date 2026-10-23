@@ -37,6 +37,7 @@ Self-hosted platform that turns global news into a persistent, versioned event a
 - Environments and LLM: development runs on the developer's machine against an Ollama on its localhost (reached from inside a container as `host.docker.internal`); live runs in the local LAN against the dedicated Ollama server there. The Compose stack never contains Ollama, and its URL comes only from the environment (`OLLAMA_BASE_URL`), never from code or the image.
 - Run the test suite in CI before an image is built and pushed, so a broken build never reaches the deployment step.
 - Be explicit about which storage is actually persistent across a redeploy (typically only a database's own data volume) versus what is rebuilt from the image every time (the application container's own filesystem, including anything written to it at runtime). Anything meant to survive a redeploy must live in the persistent store, not be written to disk inside the app container.
+  Persistent here: the database volume `db-data`, and the worker's backup store `/backups` - the volume `db-backups`, or with `BACKUP_HOST_DIR` a host directory off the Docker host's disk (README.md, "Backups").
 - Setup procedure: skill `deploy-setup`.
 
 ## Stages and hardware sizing
@@ -79,6 +80,7 @@ Conventions for where new code goes. Procedure for implementing a feature: skill
   Dockerfile          one image for api and worker
   .env.example        variable names and placeholders only
   pyproject.toml
+  scripts/            install-postgres-client.sh: pg_dump/pg_restore for image and dev container
   app/
     config.py         settings from environment variables
     db/               SQLAlchemy models and session
@@ -88,6 +90,7 @@ Conventions for where new code goes. Procedure for implementing a feature: skill
     llm/              Ollama client, event schema
     jobs/             PostgreSQL job queue
     worker/           worker entry point
+    backup/           backup command line: python -m app.backup list | create | restore
     web/              thin FastAPI routes, Jinja templates, static files
   migrations/         Alembic
   tests/

@@ -19,6 +19,8 @@ IGNORED = [
     ".vscode/settings.json",
     "app/__pycache__/config.cpython-314.pyc",
     "example.egg-info/PKG-INFO",
+    "seismo-20261023T030000Z.dump",
+    "backups/seismo-20261023T030000Z.dump.partial",
 ]
 
 VERSIONED = [
@@ -30,6 +32,7 @@ VERSIONED = [
     ".devcontainer/devcontainer.json",
     "docker-compose.yml",
     "app/config.py",
+    "scripts/install-postgres-client.sh",
 ]
 
 

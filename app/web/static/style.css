@@ -145,6 +145,14 @@ a {
   color: var(--color-muted);
 }
 
+/* In-page navigation, one link per section (requirements.md, "Basic UI Requirements / Styleguide", item 4). */
+.section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem var(--space);
+  margin-bottom: var(--space);
+}
+
 /* Collapsible sections: a native <details>, expanded by default (requirements.md, item 5). */
 .section {
   margin-bottom: var(--space);

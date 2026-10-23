@@ -17,8 +17,9 @@
   // The image's site-packages belong to root, so the project is installed for the vscode user.
   // A workspace mounted from Windows belongs to root as well, and git refuses such a repository
   // ("dubious ownership"); system scope, because VS Code copies ~/.gitconfig from the host.
+  // pg_dump and pg_restore for the backup tests, the same script as in the Dockerfile.
   // Headless Chromium for browser checks (skill verify); Playwright runs apt through sudo itself.
-  "postCreateCommand": "sudo chown vscode:vscode /home/vscode/.claude && sudo git config --system --add safe.directory ${containerWorkspaceFolder} && pip install --user -e '.[dev]' && python -m playwright install --with-deps chromium",
+  "postCreateCommand": "sudo chown vscode:vscode /home/vscode/.claude && sudo git config --system --add safe.directory ${containerWorkspaceFolder} && sudo scripts/install-postgres-client.sh && pip install --user -e '.[dev]' && python -m playwright install --with-deps chromium",
   // First on PATH, so `alembic`, `uvicorn` and `pytest` are the project's, not the image's pipx tools.
   "remoteEnv": {
     "PATH": "/home/vscode/.local/bin:${containerEnv:PATH}"

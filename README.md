@@ -52,7 +52,7 @@ docker compose ps
 | `db`      | PostgreSQL 18; volume `db-data` is the only persistent storage         | `pg_isready`            |
 | `migrate` | Runs `alembic upgrade head` once, then exits; `api` and `worker` wait for it | exit code 0       |
 | `api`     | FastAPI and dashboard on `http://localhost:${API_PORT:-8000}`          | `GET /health/ready`     |
-| `worker`  | Background worker (job queue follows in a later story)                 | heartbeat file          |
+| `worker`  | Runs the jobs of the job queue, including the backups                  | heartbeat file          |
 
 - Everything except `/health/*`, `/login` and `/static/*` requires the admin login. A browser is
   sent to the login page and back afterwards; other clients get `401`. FastAPI's `/docs` and
@@ -60,7 +60,64 @@ docker compose ps
 - `GET /health/live`: the api process answers.
 - `GET /health/ready`: the database answers and its schema is at the newest migration (503 otherwise).
 - Logs are JSON lines on stdout: `docker compose logs -f api worker`.
-- Stop: `docker compose down`. The data stays in the `db-data` volume; `docker compose down -v` deletes it.
+- Stop: `docker compose down`. The data stays in the `db-data` volume, the backups in `db-backups`;
+  `docker compose down -v` deletes both.
+
+## Backups
+
+The worker backs up the database on its own, as a job `Datenbank-Backup` of the job queue: status,
+attempts and the last error show on the **Jobs** page. A backup is due once the newest backup file is
+older than the backup interval; after each new backup the oldest files beyond the number to keep are
+deleted. Both are set under **Einstellungen -> Backups** (default: every 24 hours, keep 14).
+
+- File: `<POSTGRES_DB>-<UTC time>.dump`, e.g. `seismo-20261023T030000Z.dump`, compressed `pg_dump`
+  format. A dump that broke off never gets this name.
+- Place: `/backups` in the worker container. By default that is the Docker volume `db-backups` on the
+  same disk as the database - it covers mistakes and broken migrations, not a lost disk. For that, set
+  `BACKUP_HOST_DIR` to an absolute host path, e.g. a mounted NAS share, writable for user id 10001:
+  `sudo install -d -o 10001 /mnt/nas/seismo-backups`.
+- `pg_dump` and `pg_restore` come from the PostgreSQL apt repository
+  ([`scripts/install-postgres-client.sh`](scripts/install-postgres-client.sh)), in the image and in the
+  dev container. Their major version must equal the `db` image's; a test checks it. Raise both together.
+
+Commands, in the worker container (on the host: `docker compose exec worker <command>`; on Portainer:
+the worker container's console):
+
+```sh
+python -m app.backup list      # the backups, newest first
+python -m app.backup create    # a backup now, e.g. before a risky change
+```
+
+### Restore
+
+A restore loads the backup into a database of its own first and replaces the current database only
+once the backup has loaded completely. The current database is never deleted: it stays as
+`<POSTGRES_DB>_before_restore_<time>` until you drop it.
+
+With Docker Compose, on the host:
+
+```sh
+docker compose stop api worker
+docker compose run --rm --no-deps worker python -m app.backup restore seismo-20261023T030000Z.dump
+docker compose up -d     # migrate brings a backup of an older version to the newest schema
+```
+
+On Portainer: stop the `api` container, open the console of the `worker` container, run
+`python -m app.backup restore <file>` and then `alembic upgrade head`, restart `worker`, start `api`.
+The restore ends the worker's open database sessions itself.
+
+The command asks for the database name as confirmation (`--yes` skips that) and prints the name the
+replaced database got. Once the restored data has been checked, drop the replaced database:
+
+```sh
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE \"seismo_before_restore_20261023093000\""'
+```
+
+### Restore tests
+
+| Date | Where | What | Result |
+|------|-------|------|--------|
+| 2026-10-23 | Dev container (Debian 13, `pg_dump`/`pg_restore` 18.6) against the dev stack's PostgreSQL 18.6; disposable database `seismo_restoretest` | 10'000 jobs and changed Plattform-Einstellungen. `create` (0.1 MB, 1 s), then half the jobs deleted and a setting changed; `restore` without confirmation, then with it (1 s). A second backup at the previous schema version `724a65db6143`, restored and migrated with `alembic upgrade head`. | Without confirmation nothing changed. After the restore 10'000 jobs with the same checksum as at backup time and the old setting; the replaced database kept with the later state. The older backup reached the newest schema and the readiness check passed. Not yet run in the Docker image on the AI-Station - due after the first deployment. |
 
 ## Develop in the dev container
 
@@ -96,7 +153,9 @@ python -m alembic upgrade head       # migrate the development database
 ```
 
 Browser checks (skill `verify`) use Playwright with headless Chromium; every dev container build
-installs it (`python -m playwright install --with-deps chromium`).
+installs it (`python -m playwright install --with-deps chromium`). Every build also installs `pg_dump`
+and `pg_restore` for the backup tests (`scripts/install-postgres-client.sh`); without them those tests fail.
+The `worker` of the dev stack makes backups only once its image is rebuilt (command above).
 
 New migration: `python -m alembic revision --autogenerate -m "<what changes>"`, then read and
 correct the generated file (procedure: skill `datenmodell-aendern`).

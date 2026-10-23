@@ -73,13 +73,18 @@ def no_database(monkeypatch):
 
     engine = FakeEngine()
     engine.purges = 0
+    engine.backup_checks = []
 
     def purge(_engine):
         engine.purges += 1
         return {JobStatus.SUCCEEDED: 0, JobStatus.FAILED: 0}
 
+    def enqueue_backup_if_due(_engine, backup_dir):
+        engine.backup_checks.append(backup_dir)
+
     monkeypatch.setattr(worker, "create_db_engine", lambda _settings: engine)
     monkeypatch.setattr(worker, "purge_finished_jobs", purge)
+    monkeypatch.setattr(worker.backup_service, "enqueue_if_due", enqueue_backup_if_due)
     monkeypatch.setattr(worker, "head_revision", lambda: "head")
     return engine
 
@@ -187,4 +192,32 @@ def test_failed_purge_is_logged_and_the_worker_keeps_running(readiness, queue, n
         worker.run(SETTINGS, stop_event, tmp_path / "heartbeat")
 
     assert "Purging finished jobs failed: connection lost" in caplog.text
+    assert len(renewal_callbacks) == 2
+
+
+def test_backup_check_runs_once_ready_and_then_only_every_minute(readiness, queue, no_database, tmp_path):
+    stop_event = threading.Event()
+    readiness(UNREACHABLE, READY, READY, READY, stop_event=stop_event)
+    queue()
+
+    worker.run(SETTINGS, stop_event, tmp_path / "heartbeat")
+
+    assert no_database.backup_checks == [SETTINGS.backup_dir]
+
+
+def test_failed_backup_check_is_logged_and_the_worker_keeps_running(
+    readiness, queue, no_database, tmp_path, caplog, monkeypatch
+):
+    def failing_check(_engine, _backup_dir):
+        raise PermissionError("[Errno 13] Permission denied: '/backups'")
+
+    monkeypatch.setattr(worker.backup_service, "enqueue_if_due", failing_check)
+    stop_event = threading.Event()
+    readiness(READY, READY, stop_event=stop_event)
+    renewal_callbacks = queue()
+
+    with caplog.at_level(logging.WARNING, logger=worker.__name__):
+        worker.run(SETTINGS, stop_event, tmp_path / "heartbeat")
+
+    assert "Backup check failed: [Errno 13] Permission denied: '/backups'" in caplog.text
     assert len(renewal_callbacks) == 2

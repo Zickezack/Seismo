@@ -17,6 +17,8 @@ class PlatformSettings:
     llm_max_parallel_calls: int = 1
     succeeded_jobs_retention_days: int = 7
     failed_jobs_retention_days: int = 30
+    backup_interval_hours: int = 24
+    backups_to_keep: int = 14
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,20 @@ FORM_FIELDS = {
             "Ab dem Fehlschlag. Ein erneut eingereihter Job ist davon ausgenommen.",
             1,
             3650,
+        ),
+        NumberField(
+            "backup_interval_hours",
+            "Backup-Intervall (Stunden)",
+            "Zeit vom letzten Backup bis zum nächsten automatischen Backup.",
+            1,
+            720,
+        ),
+        NumberField(
+            "backups_to_keep",
+            "Backups aufbewahren (Anzahl)",
+            "Nach jedem neuen Backup löscht der Worker die ältesten darüber hinaus.",
+            1,
+            365,
         ),
     )
 }

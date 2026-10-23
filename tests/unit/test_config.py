@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from app.config import AuthSettings, ConfigError, Settings
@@ -13,6 +15,7 @@ def test_required_variables_only_gives_defaults():
     assert settings.postgres_port == 5432
     assert settings.log_level == "INFO"
     assert settings.worker_poll_interval_seconds == 5.0
+    assert settings.backup_dir == Path("/backups")
 
 
 def test_optional_variables_override_defaults():
@@ -23,6 +26,7 @@ def test_optional_variables_override_defaults():
             "POSTGRES_PORT": "15432",
             "LOG_LEVEL": "debug",
             "WORKER_POLL_INTERVAL_SECONDS": "0.5",
+            "BACKUP_DIR": "/srv/backups",
         }
     )
 
@@ -30,6 +34,7 @@ def test_optional_variables_override_defaults():
     assert settings.postgres_port == 15432
     assert settings.log_level == "DEBUG"
     assert settings.worker_poll_interval_seconds == 0.5
+    assert settings.backup_dir == Path("/srv/backups")
 
 
 def test_missing_required_variables_are_all_named():
