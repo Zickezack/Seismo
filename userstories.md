@@ -33,6 +33,7 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 3. As an admin, mass import and export of settings and selected or all data, so I can quickly set up a new instance or back up an existing one.
 
 ### Epic: Quellenadapter und Ingestion
+8. As an analyst, I want every Quelle to carry its region - the continent it reports from, or worldwide - and the source list sortable and filterable by it, with the starter catalogue bringing the region of each source, so coverage stays balanced across continents and can be viewed per continent.
 
 ### Epic: Normalisierung, Deduplizierung und Clustering
 1. As an analyst, I want article HTML cleaned to plain text and the metadata normalised (canonical URL, title, UTC timestamps, detected language), so all later steps work on consistent data.

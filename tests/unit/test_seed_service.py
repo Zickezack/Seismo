@@ -25,7 +25,11 @@ def test_catalogue_items_use_https_and_link_their_terms_of_use():
     for item in seed_service.source_catalogue():
         assert urlsplit(item.values.url).scheme == "https", item.key
         assert item.values.terms_note and "https://" in item.values.terms_note, item.key
-        assert item.values.language in source_service.LANGUAGES, item.key
+        # A GDELT query spans every language: unknown, never a guess (datamodel.md, rule 5).
+        if item.values.adapter_type == "gdelt":
+            assert item.values.query and item.values.language is None, item.key
+        else:
+            assert item.values.language in source_service.LANGUAGES, item.key
 
 
 def test_unset_fields_get_the_defaults_of_a_new_source():

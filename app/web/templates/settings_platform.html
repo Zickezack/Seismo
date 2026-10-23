@@ -47,7 +47,7 @@
     <div class="field field-wide">
       <span class="field-label">Starterkatalog Quellen</span>
       <p class="hint" data-testid="seed-sources-status">{{ sources_seed.imported }} von {{ sources_seed.total }} Quellen importiert.</p>
-      <p class="hint">Feeds von Zentralbanken, Statistikämtern und Pressemitteilungen von Unternehmen, aktiv angelegt; die Notiz jeder Quelle verweist auf ihre Nutzungsbedingungen. Jede Quelle kommt nur einmal: eine umbenannte oder gelöschte Quelle legt ein weiterer Import nicht wieder an.</p>
+      <p class="hint">Feeds von Zentralbanken, Statistikämtern, Unternehmen, Medien aller Kontinente, Behörden und internationalen Organisationen, dazu GDELT-Themenabfragen (Lieferketten, Konflikte, Katastrophen, Sanktionen, Cyber, Energie), aktiv angelegt; die Notiz jeder Quelle verweist auf ihre Nutzungsbedingungen. Jede Quelle kommt nur einmal: eine umbenannte oder gelöschte Quelle legt ein weiterer Import nicht wieder an.</p>
     </div>
     <div class="form-actions">
       <button class="button" type="submit" data-testid="import-sources"{% if sources_seed.imported == sources_seed.total %} disabled title="Alle Quellen des Katalogs sind schon importiert"{% endif %}>Starterkatalog importieren</button>
