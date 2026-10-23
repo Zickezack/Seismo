@@ -28,7 +28,12 @@ FormValues = Annotated[dict[str, str], Depends(form_values)]
 @router.get("")
 def source_list(request: Request) -> Response:
     engine = request.app.state.engine
-    context = {"sources": source_service.list_sources(engine), "article_counts": article_service.count_by_source(engine)}
+    context = {
+        "sources": source_service.list_sources(engine),
+        "article_counts": article_service.count_by_source(engine),
+        "blocked_counts": article_service.blocked_by_source(engine),
+        "contact_missing": not request.app.state.fetch_contact,
+    }
     return templates.TemplateResponse(request, "sources.html", context)
 
 
@@ -71,6 +76,22 @@ def deactivate_sources(request: Request, source_ids: SourceIds = []) -> Response
 def fetch_sources(request: Request, source_ids: SourceIds = []) -> Response:
     result = ingestion_service.fetch_now(request.app.state.engine, source_ids)
     return _after_bulk_action(request, result, "zum Abruf eingereiht")
+
+
+@router.post("/refetch-blocked")
+def refetch_blocked(request: Request, source_ids: SourceIds = []) -> Response:
+    result = ingestion_service.refetch_blocked(request.app.state.engine, source_ids)
+    if result.blocked:
+        flash(request, f"Nichts eingereiht, blockiert: {name_list(result.blocked)}.", "error")
+    elif not source_ids:
+        flash(request, "Keine Quellen ausgewählt.", "error")
+    elif result.processed == 1:
+        flash(request, "1 blockierter Volltext erneut eingereiht.")
+    elif result.processed:
+        flash(request, f"{result.processed} blockierte Volltexte erneut eingereiht.")
+    else:
+        flash(request, "Die ausgewählten Quellen haben keine blockierten Volltexte.")
+    return RedirectResponse("/sources", status_code=303)
 
 
 @router.get("/{source_id}")

@@ -152,3 +152,26 @@ def test_jobs_queued_before_backfills_existed_are_live_work(engine):
     with engine.connect() as connection:
         assert connection.execute(text("SELECT priority FROM job")).scalar_one() == 0
         assert connection.execute(text("SELECT backfill_id FROM article")).scalar_one() is None
+
+
+def test_full_texts_refused_before_are_blocked_and_failed_again_on_downgrade(engine):
+    upgrade(engine, "d29ed1e9b63f")
+    with engine.begin() as connection:
+        for key, status, error in [("a", "failed", "HTTP 403"), ("b", "failed", "HTTP 401"), ("c", "failed", "HTTP 404"), ("d", "stored", None)]:
+            connection.execute(
+                text(
+                    "INSERT INTO article (source_name, source_url, item_key, url, full_text_status, full_text_error) "
+                    "VALUES ('BFS', 'https://example.org', :key, :url, :status, :error)"
+                ),
+                {"key": key, "url": f"https://example.org/{key}", "status": status, "error": error},
+            )
+
+    upgrade(engine)
+
+    def statuses():
+        with engine.connect() as connection:
+            return dict(connection.execute(text("SELECT item_key, full_text_status FROM article")).all())
+
+    assert statuses() == {"a": "blocked", "b": "blocked", "c": "failed", "d": "stored"}
+    downgrade(engine, "d29ed1e9b63f")
+    assert statuses() == {"a": "failed", "b": "failed", "c": "failed", "d": "stored"}

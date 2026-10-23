@@ -103,9 +103,9 @@ def create(database, name, **fields):
     return source_service.create(database, form | fields).id
 
 
-def run_jobs(database, *kinds):
+def run_jobs(database, *kinds, contact="ops@example.org"):
     """Run every due job of these kinds (default: all) with the worker's handlers; the number run."""
-    handlers = build_handlers(database, Path("/nonexistent"), None, None, "ops@example.org")
+    handlers = build_handlers(database, Path("/nonexistent"), None, None, contact)
     handlers = {kind: handler for kind, handler in handlers.items() if not kinds or kind in kinds}
     count = 0
     while run_next_job(database, handlers, "test", 10, on_renewed=lambda: None):
@@ -700,3 +700,69 @@ def test_gdelt_reason_for_rejecting_a_query_is_kept_but_never_logged(database, w
     [record] = [record for record in caplog.records if record.getMessage() == "Source fetch failed"]
     assert record.error == "GDELT lehnt die Suchanfrage ab"
     assert all("Muster" not in str(vars(record)) for record in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("contact", "error"),
+    [
+        ("ops@example.org", "HTTP 403: Zugriff verweigert, mit Kontakt im User-Agent"),
+        ("", "HTTP 403: Zugriff verweigert, ohne Kontakt im User-Agent (FETCH_CONTACT)"),
+    ],
+)
+def test_a_full_text_the_host_refuses_is_blocked_and_says_whether_a_contact_was_sent(database, adapter, web, contact, error):
+    web.pages["https://a.bank.example/a.html"] = (403, "text/html", b"Access Denied")
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database, contact=contact)
+
+    assert full_text(database, ids["a"]) == ("blocked", error)
+    [shown] = article_service.overview(database, None).articles
+    assert shown.full_text_label == "Blockiert"
+    assert article_service.blocked_by_source(database) == {shown.source_id: 1}
+
+
+def test_blocked_full_texts_are_fetched_again_once_the_host_lets_them_in(database, adapter, web):
+    for key in ("a", "b"):
+        web.pages[f"https://{key}.bank.example/{key}.html"] = (403, "text/html", b"Access Denied")
+    web.pages["https://c.bank.example/c.html"] = (404, "text/html", b"weg")
+    ids = fetch_articles(database, adapter, item("a"), item("b"), item("c"))
+    run_jobs(database)
+    [ezb] = [source.id for source in source_service.list_sources(database)]
+    with database.begin() as connection:
+        # b came from a backfill: fetched again behind live work.
+        connection.execute(text("INSERT INTO backfill (source_id, period_start, period_end, cursor) VALUES (:s, now() - interval '2 days', now(), now())"), {"s": ezb})
+        connection.execute(update(Article).where(Article.id == ids["b"]).values(backfill_id=text("(SELECT max(id) FROM backfill)")))
+    for key in ("a", "b"):
+        del web.pages[f"https://{key}.bank.example/{key}.html"]
+
+    result = ingestion_service.refetch_blocked(database, [ezb])
+
+    assert (result.processed, result.blocked) == (2, [])
+    assert full_text(database, ids["a"]) == ("pending", None)
+    waiting = {job.payload["article_id"]: job.priority for job in jobs(database, job_service.FETCH_ARTICLE_JOB_KIND) if job.status == JobStatus.QUEUED}
+    assert waiting == {ids["a"]: 0, ids["b"]: 1}
+
+    run_jobs(database)
+    with database.begin() as connection:
+        connection.execute(update(FetchHost).values(next_slot_at=text("now()"), last_request_at=text("now() - interval '1 minute'")))
+        connection.execute(update(Job).where(Job.status == JobStatus.QUEUED).values(run_after=text("now()")))
+    run_jobs(database)
+
+    # A full text that failed for another reason stays as it is.
+    assert [full_text(database, ids[key])[0] for key in ("a", "b", "c")] == ["stored", "stored", "failed"]
+    assert article_service.blocked_by_source(database) == {}
+
+
+def test_refetch_is_all_or_nothing_and_an_inactive_source_blocks_it(database, adapter, web):
+    web.pages["https://a.bank.example/a.html"] = (403, "text/html", b"Access Denied")
+    ids = fetch_articles(database, adapter, item("a"))
+    run_jobs(database)
+    fed = create(database, "Fed")
+    [ezb] = [source.id for source in source_service.list_sources(database) if source.name == "EZB"]
+    source_service.set_active(database, [fed], False)
+
+    result = ingestion_service.refetch_blocked(database, [ezb, fed, 999])
+
+    assert (result.processed, result.blocked) == (0, ["Fed (inaktiv)", "Quelle #999 (nicht gefunden)"])
+    assert full_text(database, ids["a"])[0] == "blocked"
+    assert ingestion_service.refetch_blocked(database, []).processed == 0

@@ -15,6 +15,7 @@ FULL_TEXT_LABELS = {
     FullTextStatus.DISALLOWED: "Gesperrt",
     FullTextStatus.UNSUPPORTED: "Nicht unterstützt",
     FullTextStatus.FAILED: "Fehlgeschlagen",
+    FullTextStatus.BLOCKED: "Blockiert",
     FullTextStatus.SKIPPED: "Übersprungen",
 }
 
@@ -80,3 +81,9 @@ def overview(engine: Engine, source: str | None) -> ArticleOverview:
 def count_by_source(engine: Engine) -> dict[int, int]:
     with engine.connect() as connection:
         return article_repository.count_by_source(connection)
+
+
+def blocked_by_source(engine: Engine) -> dict[int, int]:
+    """Articles per source whose full text the host refused (Blockiert)."""
+    with engine.connect() as connection:
+        return article_repository.count_by_source(connection, FullTextStatus.BLOCKED)

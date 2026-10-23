@@ -40,8 +40,11 @@ The dashboard needs an admin login; the api refuses to start without it:
 Only the `api` container gets these variables. Changing `ADMIN_PASSWORD` or `SESSION_SECRET` logs
 out every open session; a session otherwise lasts 12 hours from the login.
 
-`FETCH_CONTACT` (optional, worker only) is an e-mail address or URL sent in the User-Agent of every
-source fetch, so a source can reach the operator; some sources (e.g. the BLS) ask for it.
+`FETCH_CONTACT` (optional, strongly recommended) is an e-mail address or URL sent in the User-Agent of
+every source fetch, so a source can reach the operator; some sources ask for it - the BLS, and www.admin.ch
+(BFS) answers full-text requests without one with HTTP 403. The worker sends it; the api only shows a
+warning on the source list while it is missing. After setting it, recreate both containers
+(`docker compose up -d api worker`), then select the affected sources and use "Blockierte Volltexte abrufen".
 
 ## Run the stack
 

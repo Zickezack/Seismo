@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy import Connection, Engine
 
-from app.db.models import LIVE_PRIORITY, FullTextStatus
+from app.db.models import BACKFILL_PRIORITY, LIVE_PRIORITY, FullTextStatus
 from app.repositories import article_repository, raw_text_repository, source_repository
 from app.services import job_service, platform_settings_service, source_service
 from app.services.fetch_policy_service import PoliteHttp
@@ -26,7 +26,7 @@ from app.services.bulk import BulkResult
 from app.services.source_service import Source
 from app.sources import ADAPTERS
 from app.sources.base import FetchedItem
-from app.sources.errors import FetchDisallowed, HostBusy, SourceError, SourceRejected, SourceUnavailable
+from app.sources.errors import AccessDenied, FetchDisallowed, HostBusy, SourceError, SourceRejected, SourceUnavailable
 from app.sources.http import HttpClient
 
 logger = logging.getLogger(__name__)
@@ -52,20 +52,46 @@ def fetch_now(engine: Engine, source_ids: Iterable[int]) -> BulkResult:
     if not source_ids:
         return BulkResult(processed=0, blocked=[])
     with engine.begin() as connection:
-        found = {row.id: row for row in source_repository.lock_sources(connection, source_ids)}
-        blocked = []
-        for source_id in source_ids:
-            row = found.get(source_id)
-            if row is None:
-                blocked.append(f"Quelle #{source_id} (nicht gefunden)")
-            elif not row.is_active:
-                blocked.append(f"{row.name} (inaktiv)")
+        blocked = _missing_or_inactive(connection, source_ids)
         if blocked:
             return BulkResult(processed=0, blocked=blocked)
         source_repository.schedule_next_fetch(connection, source_ids)
         # A source whose fetch already waits or runs keeps that job (dedupe key).
         _enqueue(connection, source_ids)
     return BulkResult(processed=len(source_ids), blocked=[])
+
+
+def refetch_blocked(engine: Engine, source_ids: Iterable[int]) -> BulkResult:
+    """Fetch the full texts the hosts of the selected sources refused again, once an allowed route is settled - a
+    contact in the User-Agent, the publisher's permission (story 7). `processed` counts full texts.
+
+    All or nothing; an inactive source blocks it, its full texts would only be skipped. A backfill's article
+    waits behind live work again.
+    """
+    source_ids = sorted(set(source_ids))
+    if not source_ids:
+        return BulkResult(processed=0, blocked=[])
+    with engine.begin() as connection:
+        blocked = _missing_or_inactive(connection, source_ids)
+        if blocked:
+            return BulkResult(processed=0, blocked=blocked)
+        articles = article_repository.reset_blocked(connection, source_ids)
+        enqueue_full_texts(connection, [row.id for row in articles if row.backfill_id is None], LIVE_PRIORITY)
+        enqueue_full_texts(connection, [row.id for row in articles if row.backfill_id is not None], BACKFILL_PRIORITY)
+    return BulkResult(processed=len(articles), blocked=[])
+
+
+def _missing_or_inactive(connection: Connection, source_ids: list[int]) -> list[str]:
+    """What blocks a bulk action that fetches: the selected sources not found or inactive, locked meanwhile."""
+    found = {row.id: row for row in source_repository.lock_sources(connection, source_ids)}
+    blocked = []
+    for source_id in source_ids:
+        row = found.get(source_id)
+        if row is None:
+            blocked.append(f"Quelle #{source_id} (nicht gefunden)")
+        elif not row.is_active:
+            blocked.append(f"{row.name} (inaktiv)")
+    return blocked
 
 
 def fetch_source(
@@ -150,8 +176,8 @@ def fetch_full_text(
 ) -> Callable[[Connection], None] | None:
     """First phase of a full-text job: fetch the article's page. Returns the effect that records the outcome.
 
-    A lasting outcome (stored, disallowed by robots.txt, a content type not kept, HTTP 4xx, source inactive
-    or deleted) settles the article. A passing failure (timeout, HTTP 5xx) raises SourceUnavailable to be
+    A lasting outcome (stored, disallowed by robots.txt, a content type not kept, refused by the host, HTTP 4xx,
+    source inactive or deleted) settles the article. A passing failure (timeout, HTTP 5xx) raises SourceUnavailable to be
     retried; on the final attempt it settles the article as failed instead. HostBusy defers the job. A
     backfill's full text takes only a free request slot (fetch_policy_service).
     """
@@ -170,6 +196,10 @@ def fetch_full_text(
             response = polite.get(article.url, FULL_TEXT_ACCEPT)
     except FetchDisallowed as error:
         return _settle(article_id, FullTextStatus.DISALLOWED, str(error))
+    except AccessDenied as error:
+        # Some hosts let a crawler in only when it says how to reach its operator (www.admin.ch).
+        sent = "mit Kontakt im User-Agent" if contact else "ohne Kontakt im User-Agent (FETCH_CONTACT)"
+        return _settle(article_id, FullTextStatus.BLOCKED, f"{error}: Zugriff verweigert, {sent}")
     except SourceRejected as error:
         return _settle(article_id, FullTextStatus.FAILED, str(error))
     except SourceUnavailable as error:

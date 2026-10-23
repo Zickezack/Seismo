@@ -38,6 +38,7 @@ class FullTextStatus(StrEnum):
     DISALLOWED = "disallowed"  # by the host's robots.txt
     UNSUPPORTED = "unsupported"  # a content type the raw-data layer does not keep
     FAILED = "failed"
+    BLOCKED = "blocked"  # the host refused it (HTTP 401, 403), often a bot protection
     SKIPPED = "skipped"  # source inactive or deleted, or fetched before full texts existed
 
 

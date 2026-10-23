@@ -5,7 +5,7 @@ import httpx2
 import pytest
 
 from app.sources import http as source_http
-from app.sources.errors import SourceRejected, SourceUnavailable
+from app.sources.errors import AccessDenied, SourceRejected, SourceUnavailable
 from app.sources.http import HttpClient, retry_after_seconds, user_agent
 
 
@@ -50,10 +50,14 @@ def test_too_many_redirects_are_rejected():
         http.get("https://feed.example/start", "*/*")
 
 
-@pytest.mark.parametrize(("status", "error"), [(404, SourceRejected), (410, SourceRejected), (403, SourceRejected)])
+@pytest.mark.parametrize(("status", "error"), [(404, SourceRejected), (410, SourceRejected), (403, AccessDenied), (401, AccessDenied)])
 def test_client_errors_are_permanent(status, error):
-    with client(lambda _request: httpx2.Response(status)) as http, pytest.raises(error, match=f"^HTTP {status}$"):
+    with client(lambda _request: httpx2.Response(status)) as http, pytest.raises(error, match=f"^HTTP {status}$") as raised:
         http.get("https://feed.example/rss", "*/*")
+
+    # Refused or not, a feed fails at once (SourceRejected); only a refusal is an AccessDenied.
+    assert isinstance(raised.value, SourceRejected)
+    assert isinstance(raised.value, AccessDenied) == (status in (401, 403))
 
 
 @pytest.mark.parametrize("status", [408, 429, 500, 502, 503])

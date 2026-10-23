@@ -31,6 +31,11 @@ class FetchDisallowed(SourceRejected):
     """The host's robots.txt does not allow the request."""
 
 
+class AccessDenied(SourceRejected):
+    """The host refused the request (HTTP 401, 403), often a bot protection; an allowed route may open it
+    (a contact in the User-Agent, an official API, the publisher's permission), never a disguised fetcher."""
+
+
 class HostBusy(Exception):
     """The host's next request slot lies ahead; `slot` is reserved for this request (fetch_policy_service).
 

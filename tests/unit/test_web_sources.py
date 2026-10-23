@@ -3,6 +3,7 @@
 Logins and the 401 for every route without a session: tests/unit/test_web_auth.py.
 """
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -104,6 +105,8 @@ def services(monkeypatch):
     monkeypatch.setattr(source_service, "set_active", bulk("set_active"))
     monkeypatch.setattr(ingestion_service, "fetch_now", bulk("fetch_now"))
     monkeypatch.setattr(article_service, "count_by_source", lambda _engine: {2: 12})
+    monkeypatch.setattr(article_service, "blocked_by_source", lambda _engine: calls.get("blocked_counts", {}))
+    monkeypatch.setattr(ingestion_service, "refetch_blocked", bulk("refetch_blocked"))
     monkeypatch.setattr(seed_service, "import_sources", import_sources)
     monkeypatch.setattr(seed_service, "sources_status", lambda _engine: calls.get("seed_status", SeedStatus(17, 0)))
     monkeypatch.setattr(platform_settings_service, "current", lambda _engine: PlatformSettings())
@@ -494,3 +497,46 @@ def test_cancel_backfills(client, services, selected, result, message):
     assert response.headers["location"] == "/sources/5#backfill"
     assert services["cancel_backfills"] == (5, [int(each) for each in selected])
     assert flash_after(client, response)[0] == message
+
+
+def test_list_names_blocked_full_texts_and_offers_to_fetch_them_again(client, services):
+    services["blocked_counts"] = {2: 3, 4: 1}
+
+    html = client.get("/sources").text
+
+    assert text_of(html, "blocked-2") == "3 Volltexte blockiert"
+    assert text_of(html, "blocked-4") == "1 Volltext blockiert"
+    assert tag_of(html, "blocked-1") is None
+    button = tag_of(html, "refetch-blocked")
+    assert 'formaction="/sources/refetch-blocked"' in button and " disabled" in button
+
+
+@pytest.mark.parametrize(
+    ("selected", "result", "message"),
+    [
+        (["2"], BulkResult(processed=3, blocked=[]), "3 blockierte Volltexte erneut eingereiht."),
+        (["4"], BulkResult(processed=1, blocked=[]), "1 blockierter Volltext erneut eingereiht."),
+        (["1"], BulkResult(processed=0, blocked=[]), "Die ausgewählten Quellen haben keine blockierten Volltexte."),
+        (["1"], BulkResult(processed=0, blocked=["Zentralbank (inaktiv)"]), "Nichts eingereiht, blockiert: Zentralbank (inaktiv)."),
+        ([], BulkResult(processed=0, blocked=[]), "Keine Quellen ausgewählt."),
+    ],
+)
+def test_refetch_blocked(client, services, selected, result, message):
+    services["refetch_blocked_result"] = result
+
+    response = client.post("/sources/refetch-blocked", data={"source_id": selected})
+
+    assert services["refetch_blocked"] == ([int(each) for each in selected],)
+    assert flash_after(client, response)[0] == message
+
+
+def test_list_warns_while_no_contact_is_set(client, services):
+    html = client.get("/sources").text
+
+    assert re.search(r'data-testid="contact-missing">Kein Kontakt im User-Agent: Ohne <code>FETCH_CONTACT</code>', html)
+
+
+def test_no_warning_with_a_contact(services):
+    with TestClient(create_app(replace(SETTINGS, fetch_contact="https://github.com/Zickezack"), AUTH), follow_redirects=False) as client:
+        client.post("/login", data={"username": "admin", "password": "correct horse battery"})
+        assert tag_of(client.get("/sources").text, "contact-missing") is None

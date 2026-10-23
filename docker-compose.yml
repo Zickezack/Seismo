@@ -54,6 +54,8 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      # Only to warn on the source list when it is missing; the worker sends it.
+      FETCH_CONTACT: ${FETCH_CONTACT:-}
     restart: unless-stopped
     ports:
       - "${API_PORT:-8000}:8000"

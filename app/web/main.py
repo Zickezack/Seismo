@@ -30,6 +30,8 @@ def create_app(settings: Settings, auth_settings: AuthSettings) -> FastAPI:
     app.state.engine = engine
     app.state.expected_revision = head_revision()
     app.state.auth = auth_settings
+    # Only shown: whether the worker can name its operator in the User-Agent (routes/sources.py).
+    app.state.fetch_contact = settings.fetch_contact
     app.middleware("http")(log_requests)
     app.add_middleware(
         SessionMiddleware,

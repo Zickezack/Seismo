@@ -147,6 +147,11 @@ a {
   color: var(--color-muted);
 }
 
+/* A hint that asks the admin to act, e.g. blocked full texts (templates/sources.html). */
+.hint-error {
+  color: var(--color-error-text);
+}
+
 /* In-page navigation, one link per section (requirements.md, "Basic UI Requirements / Styleguide", item 4). */
 .section-nav {
   display: flex;
@@ -435,7 +440,8 @@ a:focus-visible {
   background: var(--color-warning-background);
 }
 
-.status-disallowed {
+.status-disallowed,
+.status-blocked {
   color: var(--color-error-text);
   background: var(--color-error-background);
 }
@@ -514,6 +520,11 @@ a:focus-visible {
 .message-success {
   color: var(--color-success-text);
   background: var(--color-success-background);
+}
+
+.message-warning {
+  color: var(--color-warning-text);
+  background: var(--color-warning-background);
 }
 
 /* Delete confirmation (templates/base.html, static/app.js) */

@@ -6,13 +6,15 @@ from importlib.metadata import version
 
 import httpx2
 
-from app.sources.errors import SourceRejected, SourceUnavailable
+from app.sources.errors import AccessDenied, SourceRejected, SourceUnavailable
 
 TIMEOUT_SECONDS = 30
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 MAX_REDIRECTS = 5
 # Worth another attempt later; every other 4xx answer stays the same however often it is asked.
 RETRYABLE_STATUS = {408, 425, 429}
+# The host refuses this client, not the resource: often a bot protection (AccessDenied).
+REFUSED_STATUS = {401, 403}
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,8 @@ class HttpClient:
         response = self.fetch(url, accept)
         if response.status >= 500 or response.status in RETRYABLE_STATUS:
             raise unavailable(response)
+        if response.status in REFUSED_STATUS:
+            raise AccessDenied(f"HTTP {response.status}")
         if response.status >= 400:
             raise SourceRejected(f"HTTP {response.status}")
         return response

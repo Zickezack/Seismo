@@ -73,6 +73,20 @@ def count(connection: Connection, source_id: int | None) -> int:
     return connection.execute(statement).scalar_one()
 
 
-def count_by_source(connection: Connection) -> dict[int, int]:
+def count_by_source(connection: Connection, full_text_status: FullTextStatus | None = None) -> dict[int, int]:
+    """Articles per existing source, all of them or those with this full-text status."""
     statement = select(Article.source_id, func.count()).where(Article.source_id.is_not(None)).group_by(Article.source_id)
+    if full_text_status is not None:
+        statement = statement.where(Article.full_text_status == full_text_status)
     return dict(connection.execute(statement).all())
+
+
+def reset_blocked(connection: Connection, source_ids: list[int]) -> Sequence[Row]:
+    """The blocked full texts of these sources back to pending; id and backfill of each article."""
+    statement = (
+        update(Article)
+        .where(Article.source_id.in_(source_ids), Article.full_text_status == FullTextStatus.BLOCKED)
+        .values(full_text_status=FullTextStatus.PENDING, full_text_error=None)
+        .returning(Article.id, Article.backfill_id)
+    )
+    return connection.execute(statement).all()
