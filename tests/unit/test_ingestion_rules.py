@@ -1,5 +1,8 @@
-"""Which fetched items become articles, and in what shape (ingestion_service.article_rows)."""
+"""Which fetched items become articles, and in what shape (ingestion_service.article_rows); the minimum interval
+of a source's requests."""
 from datetime import UTC, datetime
+
+import pytest
 
 from app.services import ingestion_service
 from app.services.source_service import Source
@@ -10,7 +13,8 @@ CUTOFF = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 SOURCE = Source(
     id=7, name="EZB – Pressemitteilungen", adapter_type="rss", url="https://www.ecb.europa.eu/rss/press.html",
     is_active=True, fetch_interval_minutes=60, language="en", terms_note=None, raw_text_retention_days=30,
-    created_at=NOW, updated_at=NOW, last_fetched_at=None,
+    min_request_interval_seconds=None, created_at=NOW, updated_at=NOW, last_fetched_at=None, last_error=None,
+    last_error_at=None, consecutive_failures=0,
 )
 
 
@@ -21,6 +25,11 @@ def item(key, published_at=NOW, **fields):
 
 def rows(*items):
     return ingestion_service.article_rows(SOURCE, items, CUTOFF)
+
+
+@pytest.mark.parametrize(("platform", "source", "expected"), [(10, None, 10), (10, 60, 60), (10, 5, 10)])
+def test_a_source_s_own_minimum_interval_only_raises_the_platform_s(platform, source, expected):
+    assert ingestion_service.request_interval(platform, source) == expected
 
 
 def test_row_copies_source_name_and_url_and_falls_back_to_the_source_language():

@@ -132,15 +132,22 @@ class Source(Base):
     language: Mapped[str | None] = mapped_column(String(10))
     terms_note: Mapped[str | None] = mapped_column(Text)
     raw_text_retention_days: Mapped[int] = mapped_column(server_default="30")
+    # Raises the platform's minimum interval for every request made for this source; None: the platform's.
+    min_request_interval_seconds: Mapped[int | None] = mapped_column()
     # When the worker queues the next fetch; empty or past means due now (app/services/ingestion_service.py).
     next_fetch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The last failed fetch; kept after a success, while consecutive_failures goes back to 0.
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consecutive_failures: Mapped[int] = mapped_column(server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         CheckConstraint(fetch_interval_minutes >= 1, name="fetch_interval_minutes"),
         CheckConstraint(raw_text_retention_days >= 0, name="raw_text_retention_days"),
+        CheckConstraint(min_request_interval_seconds >= 1, name="min_request_interval_seconds"),
         # Names are unique regardless of case: "EZB" and "ezb" would be the same source to the admin.
         Index("uq_source_name", func.lower(name), unique=True),
     )
@@ -207,6 +214,8 @@ class FetchHost(Base):
     # Start of the next free request slot; each reservation moves it one interval ahead.
     next_slot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_request_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Until when the host asked for a pause (Retry-After); no request goes there before.
+    paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     robots_status: Mapped[str | None] = mapped_column(String(20))
     robots_txt: Mapped[str | None] = mapped_column(Text)
     robots_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

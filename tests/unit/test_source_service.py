@@ -26,6 +26,7 @@ def test_valid_form_is_trimmed():
         language="en",
         terms_note="Wiedergabe mit Quellenangabe erlaubt.",
         raw_text_retention_days=30,
+        min_request_interval_seconds=None,
     )
 
 
@@ -83,6 +84,19 @@ def test_raw_text_retention_range(raw, valid):
             source_service.parse(FORM | {"raw_text_retention_days": raw})
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("", None), ("  ", None), ("1", 1), (" 600 ", 600), ("0", "error"), ("601", "error"), ("2.5", "error")]
+)
+def test_min_request_interval_is_optional_within_its_range(raw, expected):
+    if expected == "error":
+        with pytest.raises(
+            InvalidSource, match=r"^Mindestabstand \(Sekunden\): bitte eine ganze Zahl von 1 bis 600 eingeben oder leer lassen\.$"
+        ):
+            source_service.parse(FORM | {"min_request_interval_seconds": raw})
+    else:
+        assert source_service.parse(FORM | {"min_request_interval_seconds": raw}).min_request_interval_seconds == expected
+
+
 def test_every_error_of_the_form_at_once():
     with pytest.raises(InvalidSource) as error:
         source_service.parse({})
@@ -101,3 +115,4 @@ def test_form_for_a_new_source_starts_with_valid_defaults():
     values = source_service.parse(form | {"name": "Neu", "url": "https://example.org/feed"})
 
     assert (values.is_active, values.fetch_interval_minutes, values.raw_text_retention_days) == (True, 60, 30)
+    assert values.min_request_interval_seconds is None

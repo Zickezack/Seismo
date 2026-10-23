@@ -77,8 +77,20 @@ def schedule_next_fetch(connection: Connection, source_ids: list[int]) -> list[i
 
 
 def mark_fetched(connection: Connection, source_id: int) -> None:
-    # Leaves updated_at alone: that is the last change by the admin, not by a fetch.
-    connection.execute(update(Source).where(Source.id == source_id).values(last_fetched_at=func.now()))
+    # Leaves updated_at alone: that is the last change by the admin, not by a fetch. The last error stays visible.
+    statement = update(Source).where(Source.id == source_id).values(last_fetched_at=func.now(), consecutive_failures=0)
+    connection.execute(statement)
+
+
+def record_failure(connection: Connection, source_id: int, error: str) -> int | None:
+    """Keep a failed fetch; the number of failures since the last success, None when the source is gone."""
+    statement = (
+        update(Source)
+        .where(Source.id == source_id)
+        .values(last_error=error, last_error_at=func.now(), consecutive_failures=Source.consecutive_failures + 1)
+        .returning(Source.consecutive_failures)
+    )
+    return connection.execute(statement).scalar_one_or_none()
 
 
 def _schedule_next(connection: Connection, condition: ColumnElement[bool]) -> list[int]:

@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from app.services import article_service, ingestion_service, source_service
+from app.services import article_service, ingestion_service, platform_settings_service, source_service
 from app.services.bulk import BulkResult
 from app.services.source_service import InvalidSource, Source
 from app.web.forms import form_values, wants_json
@@ -102,6 +102,9 @@ def _form_page(
         "no_language_label": source_service.NO_LANGUAGE_LABEL,
         "fetch_interval": source_service.FETCH_INTERVAL_MINUTES,
         "retention": source_service.RAW_TEXT_RETENTION_DAYS,
+        "min_request_interval": source_service.MIN_REQUEST_INTERVAL_SECONDS,
+        # What an empty "Mindestabstand" means.
+        "platform_min_interval": platform_settings_service.current(request.app.state.engine).domain_min_interval_seconds,
         "max_lengths": {
             "name": source_service.MAX_NAME_LENGTH,
             "url": source_service.MAX_URL_LENGTH,

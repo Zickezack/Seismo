@@ -35,6 +35,9 @@ STATUS_LABELS = {
 }
 FETCH_SOURCE_JOB_KIND = "fetch_source"
 FETCH_ARTICLE_JOB_KIND = "fetch_article"
+# With the doubling retry delay about 24 hours of attempts, so a full text survives a host that is down for
+# hours (userstories.md, Quellenadapter und Ingestion, story 4). A deferral to a request slot counts none.
+FETCH_ARTICLE_MAX_ATTEMPTS = 31
 KIND_LABELS = {
     TEST_JOB_KIND: "Testjob",
     BACKUP_JOB_KIND: "Datenbank-Backup",

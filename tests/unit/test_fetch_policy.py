@@ -38,6 +38,15 @@ def test_robots_txt_that_says_nothing_yet_is_asked_again_later(status):
         robots_rules(answer(status))
 
 
+def test_robots_txt_answer_passes_on_the_pause_the_host_asked_for():
+    paused = HttpResponse(url="https://bank.example/robots.txt", content=b"", status=503, retry_after=600)
+
+    with pytest.raises(SourceUnavailable, match=r"^robots.txt: HTTP 503 \(Retry-After 600 s\)$") as error:
+        robots_rules(paused)
+
+    assert error.value.retry_after == 600
+
+
 def test_our_own_group_wins_over_the_wildcard():
     rules = robots_rules(answer(200, RULES.encode()))
 

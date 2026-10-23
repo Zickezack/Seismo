@@ -1,4 +1,4 @@
-"""Data access for the fetch state per host: robots.txt and request slots. Times from the database clock."""
+"""Data access for the fetch state per host: robots.txt, request slots and pauses. Times from the database clock."""
 from datetime import datetime, timedelta
 
 from sqlalchemy import Connection, Row, func, literal_column, select, update
@@ -10,9 +10,13 @@ _ONE_SECOND = literal_column("interval '1 second'")
 
 
 def get(connection: Connection, host: str, robots_max_age: timedelta) -> Row | None:
-    """The host's robots.txt state, with `robots_fresh` telling whether it is younger than `robots_max_age`."""
+    """The host's robots.txt state, with `robots_fresh` telling whether it is younger than `robots_max_age`,
+    and `paused` whether the host's pause (Retry-After) still lasts."""
     fresh = FetchHost.robots_fetched_at > func.now() - robots_max_age.total_seconds() * _ONE_SECOND
-    statement = select(FetchHost.robots_status, FetchHost.robots_txt, fresh.label("robots_fresh")).where(FetchHost.host == host)
+    paused = func.coalesce(FetchHost.paused_until > func.now(), False)
+    statement = select(
+        FetchHost.robots_status, FetchHost.robots_txt, fresh.label("robots_fresh"), paused.label("paused")
+    ).where(FetchHost.host == host)
     return connection.execute(statement).one_or_none()
 
 
@@ -25,11 +29,13 @@ def save_robots(connection: Connection, host: str, status: str, robots_txt: str 
 def reserve_slot(connection: Connection, host: str, interval_seconds: float) -> tuple[datetime, datetime]:
     """This caller's request slot and the current time.
 
-    The slot starts at the host's next free slot or now, whichever is later; the next free slot moves one
-    interval past it. The row lock serialises concurrent callers, so each gets a slot of its own.
+    The slot starts at the host's next free slot, the end of its pause or now, whichever is latest; the next
+    free slot moves one interval past it. The row lock serialises concurrent callers, so each gets a slot of
+    its own.
     """
     connection.execute(insert(FetchHost).values(host=host).on_conflict_do_nothing(index_elements=[FetchHost.host]))
-    slot = func.greatest(FetchHost.next_slot_at, func.now())
+    # GREATEST skips NULL: a host without a pause.
+    slot = func.greatest(FetchHost.next_slot_at, FetchHost.paused_until, func.now())
     statement = (
         update(FetchHost)
         .where(FetchHost.host == host)
@@ -38,6 +44,18 @@ def reserve_slot(connection: Connection, host: str, interval_seconds: float) -> 
     )
     next_slot_at, now = connection.execute(statement).one()
     return next_slot_at - timedelta(seconds=interval_seconds), now
+
+
+def pause(connection: Connection, host: str, seconds: float) -> None:
+    """No request to the host for `seconds` from now; a pause that lasts longer stays."""
+    until = func.now() + seconds * _ONE_SECOND
+    statement = insert(FetchHost).values(host=host, paused_until=until)
+    connection.execute(
+        statement.on_conflict_do_update(
+            index_elements=[FetchHost.host],
+            set_={"paused_until": func.greatest(FetchHost.paused_until, statement.excluded.paused_until)},
+        )
+    )
 
 
 def lock_last_request(connection: Connection, host: str) -> tuple[datetime | None, datetime]:

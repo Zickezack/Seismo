@@ -5,6 +5,9 @@ The interval is the Plattform-Einstellung "Mindestabstand pro Domain", or the ho
 is longer. A request whose slot lies ahead raises HostBusy with the slot reserved for it; its job is deferred
 to that slot and passes it back as `reserved_slot` (app/jobs/handlers.py), so a busy host never blocks the
 worker and each waiting request gets a slot of its own.
+
+A host that answers with Retry-After (e.g. 429, 503) is paused that long, at most a day: no request goes there
+before - robots.txt included - and every job for it is deferred to a slot after the pause (story 4).
 """
 import time
 from dataclasses import dataclass
@@ -12,12 +15,12 @@ from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 from urllib.robotparser import RobotFileParser
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, Row
 
 from app.db.models import RobotsStatus
 from app.repositories import fetch_host_repository
 from app.sources.errors import FetchDisallowed, HostBusy, SourceRejected, SourceUnavailable
-from app.sources.http import HttpClient, HttpResponse
+from app.sources.http import HttpClient, HttpResponse, unavailable
 
 ROBOTS_MAX_AGE = timedelta(hours=24)
 # RFC 9309 asks crawlers to read at least 500 KiB of a robots.txt.
@@ -26,6 +29,8 @@ ROBOTS_MAX_BYTES = 500 * 1024
 USER_AGENT_TOKEN = "Seismo"
 # A reserved slot this close counts as now; deferring the job would take longer.
 SLOT_TOLERANCE = timedelta(seconds=1)
+# A longer Retry-After is taken as this: a mistake rather than a wish, and a feed paused for days loses items.
+MAX_PAUSE = timedelta(hours=24)
 
 
 @dataclass(frozen=True)
@@ -60,7 +65,7 @@ def robots_rules(response: HttpResponse) -> RobotsRules:
     if response.status in (401, 403):
         return RobotsRules(RobotsStatus.DISALLOW_ALL)
     if response.status >= 500 or response.status == 429:
-        raise SourceUnavailable(f"robots.txt: HTTP {response.status}")
+        raise unavailable(response, "robots.txt: ")
     if response.status >= 400:
         return RobotsRules(RobotsStatus.ALLOW_ALL)
     return RobotsRules(RobotsStatus.RULES, response.content.decode("utf-8", errors="replace"))
@@ -80,15 +85,26 @@ class PoliteHttp:
     def get(self, url: str, accept: str) -> HttpResponse:
         """Raises FetchDisallowed, HostBusy, or what HttpClient.get raises."""
         host, robots_url = _host_of(url)
-        rules = self._robots(host, robots_url)
-        if not rules.allows(url):
-            raise FetchDisallowed("Durch robots.txt gesperrt")
-        self._wait_for_turn(host, max(self._min_interval, rules.crawl_delay()))
-        return self._http.get(url, accept)
-
-    def _robots(self, host: str, robots_url: str) -> RobotsRules:
         with self._engine.connect() as connection:
             known = fetch_host_repository.get(connection, host, ROBOTS_MAX_AGE)
+        if known is not None and known.paused:
+            # A slot reserved before the pause began is void; the new one lies after it.
+            with self._engine.begin() as connection:
+                slot, _now = fetch_host_repository.reserve_slot(connection, host, self._min_interval)
+            raise HostBusy(slot)
+        try:
+            rules = self._robots(host, robots_url, known)
+            if not rules.allows(url):
+                raise FetchDisallowed("Durch robots.txt gesperrt")
+            self._wait_for_turn(host, max(self._min_interval, rules.crawl_delay()))
+            return self._http.get(url, accept)
+        except SourceUnavailable as error:
+            if error.retry_after:
+                with self._engine.begin() as connection:
+                    fetch_host_repository.pause(connection, host, min(error.retry_after, MAX_PAUSE.total_seconds()))
+            raise
+
+    def _robots(self, host: str, robots_url: str, known: Row | None) -> RobotsRules:
         if known is not None and known.robots_fresh:
             return RobotsRules(RobotsStatus(known.robots_status), known.robots_txt)
         rules = robots_rules(self._http.fetch(robots_url, "text/plain", ROBOTS_MAX_BYTES))

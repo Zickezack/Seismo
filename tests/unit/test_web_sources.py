@@ -25,15 +25,20 @@ JSON = {"Accept": "application/json"}
 def source(source_id, name, **fields):
     values = dict(
         id=source_id, name=name, adapter_type="rss", url=f"https://example.org/{source_id}.xml", is_active=True,
-        fetch_interval_minutes=60, language="en", terms_note=None, raw_text_retention_days=30, created_at=NOW,
-        updated_at=NOW, last_fetched_at=None,
+        fetch_interval_minutes=60, language="en", terms_note=None, raw_text_retention_days=30,
+        min_request_interval_seconds=None, created_at=NOW, updated_at=NOW, last_fetched_at=None, last_error=None,
+        last_error_at=None, consecutive_failures=0,
     )
     return Source(**values | fields)
 
 
 SOURCES = [
-    source(2, "Apfel <Feed>"),
+    source(2, "Apfel <Feed>", last_fetched_at=NOW),
     source(1, "Zentralbank", is_active=False, language=None, raw_text_retention_days=1, terms_note="Nur mit Quellenangabe"),
+    source(
+        4, "Ausfall", last_fetched_at=NOW, last_error="HTTP 503 (Retry-After 120 s)", last_error_at=NOW,
+        consecutive_failures=3, min_request_interval_seconds=60,
+    ),
 ]
 FORM = {
     "name": "Neu",
@@ -116,7 +121,7 @@ def flash_after(client, response):
 def test_list_shows_the_sources_in_the_order_the_service_returns(client, services):
     html = client.get("/sources").text
 
-    assert re.findall(r'data-testid="source-(\d+)"', html) == ["2", "1"]
+    assert re.findall(r'data-testid="source-(\d+)"', html) == ["2", "1", "4"]
     assert text_of(html, "name-2") == "Apfel &lt;Feed&gt;"
     assert text_of(html, "url-2") == "https://example.org/2.xml"
     assert text_of(html, "status-2") == "Aktiv"
@@ -130,6 +135,20 @@ def test_list_shows_the_sources_in_the_order_the_service_returns(client, service
     assert 'href="/articles?source=2"' in tag_of(html, "articles-2")
     assert text_of(html, "articles-1") == "0"
     assert text_of(html, "fetched-1") == "–"
+
+
+def test_list_shows_the_fetch_status_and_the_last_error_while_failing(client, services):
+    html = client.get("/sources").text
+
+    assert re.search(r'data-testid="fetch-status-2"><span class="status status-ok">OK<', html)
+    assert re.search(r'data-testid="fetch-status-1"><span class="status status-new">Noch nicht abgerufen<', html)
+    assert re.search(r'data-testid="fetch-status-4"><span class="status status-failing">3 Fehler in Folge<', html)
+    assert re.search(
+        r'data-testid="last-error-4"><time datetime="2026-10-23T09:30:00\+00:00" data-local-time>2026-10-23 09:30:00 UTC</time>: '
+        r"HTTP 503 \(Retry-After 120 s\)</span>",
+        html,
+    )
+    assert tag_of(html, "last-error-2") is None
 
 
 def test_bulk_buttons_start_disabled_and_delete_asks_first(client, services):
@@ -195,6 +214,20 @@ def test_edit_page_saves_in_place(client, services):
     # No language: no option is marked, so the browser shows the first one, "Mehrsprachig oder unbekannt".
     assert " selected" not in re.search(r'<select id="language".*?</select>', html, re.DOTALL).group(0)
     assert ">Nur mit Quellenangabe</textarea>" in html
+    # No own minimum interval: empty, not required, and the hint names the platform's value.
+    field = tag_of(html, "min_request_interval_seconds-input")
+    assert 'value=""' in field and " required" not in field
+    assert "Leer: Plattform-Wert (10 s)" in text_of(html, "min_request_interval_seconds-hint")
+    assert text_of(html, "fetch-status-label") == "Noch nicht abgerufen"
+    assert tag_of(html, "last-error") is None
+
+
+def test_edit_page_shows_the_fetch_status_and_the_own_minimum_interval(client, services):
+    html = client.get("/sources/4").text
+
+    assert text_of(html, "fetch-status-label") == "3 Fehler in Folge"
+    assert text_of(html, "last-error") == "HTTP 503 (Retry-After 120 s)"
+    assert 'value="60"' in tag_of(html, "min_request_interval_seconds-input")
 
 
 def test_edit_page_of_a_missing_source_goes_back_to_the_list(client, services):

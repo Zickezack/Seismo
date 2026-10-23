@@ -19,7 +19,7 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 
 | UI term | Technical name | Meaning | Privacy |
 |---------|----------------|---------|---------|
-| Quelle | `source` | A news source with its adapter type (RSS, GDELT, ...), fetch rules, terms-of-use note and raw-text retention period. | none |
+| Quelle | `source` | A news source with its adapter type (RSS, GDELT, ...), fetch rules, terms-of-use note, raw-text retention period and Abrufstatus (last success, last error, failures in a row). | none |
 | Artikel | `article` | One fetched report. Its metadata (source, URL, publication time, fetch time, language) is kept permanently. | none |
 | Rohtext | `raw_text` | An article's full text in the temporary raw-data layer. | none |
 | Extraktion | `extraction` | One LLM run on an article, with model version, schema version, extraction time and validation result. | none |
@@ -40,7 +40,7 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Alert | `alert_rule` | A rule that notifies about new events or material changes. | none |
 | Job | `job` | A unit of work in the PostgreSQL job queue, with status, lease and retry count. | none |
 | Plattform-Einstellungen | `platform_settings` | Settings that apply to the whole instance, edited by the admin (`requirements.md`, "Settings"). | none |
-| Domain | `fetch_host` | The fetch state of one host: its robots.txt and its request slots. Not shown in the UI. | none |
+| Domain | `fetch_host` | The fetch state of one host: its robots.txt, its request slots and a pause it asked for. Not shown in the UI. | none |
 | Seed-Protokoll | `seed_log` | Which items of a seed source (e.g. the starter catalogue of Quellen) were imported once (`architecture.md`, "Seed Data"). Not shown in the UI. | none |
 
 ## Model-wide rules
@@ -78,7 +78,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | dedupe_key | varchar(200) | no | | While a job with this key waits or runs, no second one is queued (partial unique index `uq_job_dedupe_key_active`). |
   | status | varchar(20) | yes | `queued` | `queued`, `running`, `succeeded`, `failed` (check constraint). UI: Wartend, Läuft, Erledigt, Fehlgeschlagen. |
   | attempts | integer | yes | 0 | Counted when a worker claims the job; not counted when a stopping worker hands it back. Reset to 0 when the admin requeues a failed job. |
-  | max_attempts | integer | yes | 5 | After the last attempt the job fails instead of being retried. |
+  | max_attempts | integer | yes | 5 | After the last attempt the job fails instead of being retried. Volltext abrufen: 31, about 24 hours with the growing delay. |
   | run_after | timestamptz | yes | now() | Earliest time of the next attempt; failed attempts wait 30 s, doubling up to 1 h. |
   | lease_token | uuid | no | | New on every claim. A worker writes to the job only while its token is still current (fencing). |
   | lease_owner | varchar(200) | no | | Worker holding the lease: container hostname and process id. |
@@ -128,13 +128,17 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | language | varchar(10) | no | | ISO 639-1 code; empty for a source in several or unknown languages (rule 5). The language of each article is stored separately. UI: Sprache. |
   | terms_note | text | no | | What the source's terms allow, with a link, at most 2000 characters. Checking them is the admin's job (`requirements.md`, "Data Sources and Data Rights"). UI: Nutzungsbedingungen. |
   | raw_text_retention_days | integer | yes | 30 | Days a raw text is kept after its processing has succeeded, 0 to 365; 0 deletes it right after (rule 8). UI: Rohtext aufbewahren. |
+  | min_request_interval_seconds | integer | no | | Minimum time between two requests to the same host for this source, feed and full texts alike, 1 to 600; empty: `domain_min_interval_seconds`. Only raises it, never lowers it. UI: Mindestabstand. |
   | next_fetch_at | timestamptz | no | | When the worker queues the next fetch; empty or past means due. Moves one interval ahead when a fetch is queued. |
-  | last_fetched_at | timestamptz | no | | Last successful fetch. UI: Letzter Abruf. |
+  | last_fetched_at | timestamptz | no | | Last successful fetch. UI: Letzter Erfolg. |
+  | last_error | text | no | | Message of the last failed fetch, at most 2000 characters, e.g. `HTTP 503 (Retry-After 120 s)`. Kept after a success. Shown to the admin; logged only when it is the adapter's own message. UI: Letzter Fehler. |
+  | last_error_at | timestamptz | no | | When the last fetch failed. |
+  | consecutive_failures | integer | yes | 0 | Failed fetch attempts since the last success, each retry counted; a success sets it to 0. A fetch waiting for its request slot is no failure. UI: Fehler in Folge. |
   | created_at | timestamptz | yes | now() | |
   | updated_at | timestamptz | yes | now() | Last change through the form or a bulk action. |
 
 - Relationships: has many Artikel (`article.source_id`).
-- Rules: bulk actions (Jetzt abrufen, Löschen, Aktivieren, Deaktivieren) are all or nothing; an inactive source blocks Jetzt abrufen. Deleting a source keeps its articles (they keep a copy of its name and URL). Seeded sources come only from the starter catalogue import (`app/seeds/sources.json`, Seed-Protokoll), active.
+- Rules: bulk actions (Jetzt abrufen, Löschen, Aktivieren, Deaktivieren) are all or nothing; an inactive source blocks Jetzt abrufen. Abrufstatus: OK (no failure since the last success), n Fehler in Folge, or Noch nicht abgerufen; it covers the feed fetch only, a full text's outcome is kept at its Artikel. Deleting a source keeps its articles (they keep a copy of its name and URL). Seeded sources come only from the starter catalogue import (`app/seeds/sources.json`, Seed-Protokoll), active.
 - Privacy: none
 
 ### Artikel (`article`)
@@ -185,12 +189,13 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | host | varchar(255) | yes | | Primary key: host name in lower case, with a port other than the default. |
   | next_slot_at | timestamptz | yes | now() | Start of the next free request slot; each reservation moves it one interval ahead. |
   | last_request_at | timestamptz | no | | When the last request was sent; a job running late waits until the interval has passed. |
+  | paused_until | timestamptz | no | | The host asked for a pause (Retry-After on 429, 503 and other retryable answers), at most 24 hours; no request goes there before, robots.txt included. A shorter pause never ends a longer one. |
   | robots_status | varchar(20) | no | | `rules`, `allow_all` (404 and other 4xx), `disallow_all` (401, 403); check constraint. Empty until asked. |
   | robots_txt | text | no | | The rules, while `robots_status` is `rules`. |
   | robots_fetched_at | timestamptz | no | | Asked again after 24 hours. |
 
 - Relationships: none; matched by the host of a URL.
-- Rules: every request to a source's host - feed or full text - checks robots.txt (group `Seismo`, else `*`) and takes a request slot (app/services/fetch_policy_service.py).
+- Rules: every request to a source's host - feed or full text - checks robots.txt (group `Seismo`, else `*`) and takes a request slot, never before the end of a pause (app/services/fetch_policy_service.py).
 - Privacy: none
 
 ### Seed-Protokoll (`seed_log`)

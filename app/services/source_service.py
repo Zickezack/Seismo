@@ -36,6 +36,8 @@ FETCH_INTERVAL_MINUTES = (5, 1440)
 # Full texts are kept only temporarily (requirements.md, "Data Sources and Data Rights"); 0 deletes
 # a raw text as soon as its processing has succeeded.
 RAW_TEXT_RETENTION_DAYS = (0, 365)
+# The range of the platform's "Mindestabstand pro Domain"; a source's own value only ever raises it.
+MIN_REQUEST_INTERVAL_SECONDS = (1, 600)
 DEFAULT_FETCH_INTERVAL_MINUTES = 60
 DEFAULT_RAW_TEXT_RETENTION_DAYS = 30
 
@@ -49,7 +51,12 @@ NEW_SOURCE_FORM = {
     "language": "",
     "terms_note": "",
     "raw_text_retention_days": DEFAULT_RAW_TEXT_RETENTION_DAYS,
+    "min_request_interval_seconds": "",
 }
+# Abrufstatus of a source: its CSS class (status-*) and label.
+FETCH_STATUS_NEW = "new"
+FETCH_STATUS_OK = "ok"
+FETCH_STATUS_FAILING = "failing"
 
 
 class InvalidSource(ValueError):
@@ -68,6 +75,7 @@ class SourceValues:
     language: str | None
     terms_note: str | None
     raw_text_retention_days: int
+    min_request_interval_seconds: int | None
 
 
 @dataclass(frozen=True)
@@ -76,6 +84,21 @@ class Source(SourceValues):
     created_at: datetime
     updated_at: datetime
     last_fetched_at: datetime | None
+    last_error: str | None
+    last_error_at: datetime | None
+    consecutive_failures: int
+
+    @property
+    def fetch_status(self) -> str:
+        if self.consecutive_failures:
+            return FETCH_STATUS_FAILING
+        return FETCH_STATUS_OK if self.last_fetched_at else FETCH_STATUS_NEW
+
+    @property
+    def fetch_status_label(self) -> str:
+        if self.consecutive_failures:
+            return f"{self.consecutive_failures} Fehler in Folge"
+        return "OK" if self.last_fetched_at else "Noch nicht abgerufen"
 
     @property
     def adapter_label(self) -> str:
@@ -110,6 +133,13 @@ def parse(form: Mapping[str, str]) -> SourceValues:
         terms_note=checked(_terms_note, form.get("terms_note", "")),
         raw_text_retention_days=checked(
             _whole_number, form.get("raw_text_retention_days", ""), "Rohtext aufbewahren (Tage)", RAW_TEXT_RETENTION_DAYS
+        ),
+        min_request_interval_seconds=checked(
+            _whole_number,
+            form.get("min_request_interval_seconds", ""),
+            "Mindestabstand (Sekunden)",
+            MIN_REQUEST_INTERVAL_SECONDS,
+            True,
         ),
     )
     if errors:
@@ -217,9 +247,12 @@ def _choice(raw: str, label: str, choices: Mapping[str, str], optional: bool = F
     return value
 
 
-def _whole_number(raw: str, label: str, limits: tuple[int, int]) -> int:
+def _whole_number(raw: str, label: str, limits: tuple[int, int], optional: bool = False) -> int | None:
     minimum, maximum = limits
-    error = InvalidSource(f"{label}: bitte eine ganze Zahl von {minimum} bis {maximum} eingeben.")
+    if optional and not raw.strip():
+        return None
+    empty = " oder leer lassen" if optional else ""
+    error = InvalidSource(f"{label}: bitte eine ganze Zahl von {minimum} bis {maximum} eingeben{empty}.")
     try:
         value = int(raw.strip())
     except ValueError:

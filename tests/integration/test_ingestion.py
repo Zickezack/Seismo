@@ -1,5 +1,6 @@
 """Live ingestion in PostgreSQL: due sources are queued, fetch jobs store articles once, articles outlive their
 source, and each new article's full text lands in the raw-data layer. The network is simulated (Web)."""
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from app.sources.rss import RssAdapter
 from tests.integration.alembic_helpers import upgrade
 
 FEEDS = Path(__file__).parents[1] / "unit" / "feeds"
+RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Bank</title>
+<item><guid>a</guid><link>https://www.bank.example/a.html</link><title>A</title></item></channel></rss>"""
 NOW = datetime.now(UTC).replace(microsecond=0)
 
 
@@ -40,10 +43,11 @@ class FakeAdapter:
 
 
 class Web:
-    """The network: robots.txt per host and answers per URL; any other page is a small HTML page."""
+    """The network: robots.txt per host and answers per URL, with extra headers per URL; any other page is a
+    small HTML page."""
 
     def __init__(self):
-        self.robots, self.pages, self.requests = {}, {}, []
+        self.robots, self.pages, self.headers, self.requests = {}, {}, {}, []
 
     def __call__(self, request):
         url = str(request.url)
@@ -52,7 +56,8 @@ class Web:
             status, body = self.robots.get(request.url.host, (404, ""))
             return httpx2.Response(status, text=body)
         status, content_type, body = self.pages.get(url, (200, "text/html; charset=utf-8", f"<p>{url}</p>".encode()))
-        return httpx2.Response(status, content=body, headers={"content-type": content_type} if content_type else {})
+        headers = {"content-type": content_type} if content_type else {}
+        return httpx2.Response(status, content=body, headers=headers | self.headers.get(url, {}))
 
 
 @pytest.fixture(autouse=True)
@@ -181,6 +186,84 @@ def test_items_older_than_the_maximum_age_are_skipped(database, adapter):
     run_jobs(database)
 
     assert [row.item_key for row in articles(database)] == ["new"]
+
+
+def source_status(database, source_id):
+    columns = (Source.last_fetched_at, Source.last_error, Source.last_error_at, Source.consecutive_failures)
+    with database.connect() as connection:
+        return connection.execute(select(*columns).where(Source.id == source_id)).one()
+
+
+def make_jobs_due(database):
+    with database.begin() as connection:
+        connection.execute(update(Job).where(Job.status == JobStatus.QUEUED).values(run_after=text("now()")))
+
+
+def test_failed_fetches_count_at_the_source_until_a_success(database, adapter, caplog):
+    caplog.set_level(logging.WARNING, logger=ingestion_service.__name__)
+    ezb = create(database, "EZB")
+    ingestion_service.enqueue_due_fetches(database)
+
+    adapter.error = SourceUnavailable("HTTP 503")
+    run_jobs(database)
+    adapter.error = SourceUnavailable("Keine Antwort innerhalb von 30 s")
+    make_jobs_due(database)
+    run_jobs(database)
+
+    status = source_status(database, ezb)
+    assert (status.last_fetched_at, status.last_error, status.consecutive_failures) == (None, "Keine Antwort innerhalb von 30 s", 2)
+    assert status.last_error_at is not None
+    logged = [record for record in caplog.records if record.getMessage() == "Source fetch failed"]
+    assert [(r.source_id, r.error_type, r.error, r.consecutive_failures) for r in logged] == [
+        (ezb, "SourceUnavailable", "HTTP 503", 1),
+        (ezb, "SourceUnavailable", "Keine Antwort innerhalb von 30 s", 2),
+    ]
+
+    adapter.error, adapter.items = None, [item("a")]
+    make_jobs_due(database)
+    run_jobs(database, job_service.FETCH_SOURCE_JOB_KIND)
+
+    # The count starts again; the last error stays visible with its time.
+    after = source_status(database, ezb)
+    assert after.last_fetched_at is not None
+    assert (after.last_error, after.last_error_at, after.consecutive_failures) == (status.last_error, status.last_error_at, 0)
+    assert [job.status for job in jobs(database)] == [JobStatus.SUCCEEDED]
+
+
+@pytest.mark.parametrize(
+    ("error", "kept", "logged"),
+    [
+        (SourceRejected("HTTP 404"), "HTTP 404", "HTTP 404"),
+        # Not our own message: kept for the admin, but never logged (datamodel.md, rule 13).
+        (ValueError("<title>Wartung</title>"), "ValueError: <title>Wartung</title>", None),
+    ],
+)
+def test_every_failed_fetch_is_kept_but_only_our_own_messages_are_logged(database, adapter, caplog, error, kept, logged):
+    caplog.set_level(logging.WARNING, logger=ingestion_service.__name__)
+    ezb = create(database, "EZB")
+    adapter.error = error
+    ingestion_service.enqueue_due_fetches(database)
+
+    run_jobs(database)
+
+    status = source_status(database, ezb)
+    assert (status.last_error, status.consecutive_failures) == (kept, 1)
+    [record] = [record for record in caplog.records if record.getMessage() == "Source fetch failed"]
+    assert (record.error_type, getattr(record, "error", None)) == (type(error).__name__, logged)
+
+
+def test_a_fetch_waiting_for_its_request_slot_is_no_failure(database, web, monkeypatch):
+    monkeypatch.setitem(ADAPTERS, "rss", RssAdapter())
+    # Two feeds on one host: the second waits for its slot.
+    web.pages["https://feeds.example/a"] = web.pages["https://feeds.example/b"] = (200, "application/rss+xml", RSS)
+    ids = [create(database, name, url=f"https://feeds.example/{name.lower()}") for name in ("A", "B")]
+    ingestion_service.enqueue_due_fetches(database)
+
+    run_jobs(database, job_service.FETCH_SOURCE_JOB_KIND)
+
+    assert sorted(job.status for job in jobs(database)) == [JobStatus.QUEUED, JobStatus.SUCCEEDED]
+    statuses = [source_status(database, source_id) for source_id in ids]
+    assert [(status.last_error, status.consecutive_failures) for status in statuses] == [(None, 0), (None, 0)]
 
 
 def test_rejected_source_fails_at_once_with_its_message(database, adapter):
@@ -475,3 +558,68 @@ def test_a_retry_queues_up_again_instead_of_using_its_old_slot(database, adapter
     assert retried.payload["host_slot"]["attempt"] == 2
     assert timedelta(seconds=19) < retried.run_after - datetime.now(UTC) <= timedelta(seconds=20)
     assert web.requests.count(url.format("a")) == 1
+
+
+def next_slot_in(database, host):
+    with database.connect() as connection:
+        return connection.execute(select(FetchHost.next_slot_at - text("now()")).where(FetchHost.host == host)).scalar_one()
+
+
+@pytest.mark.parametrize(("own", "interval"), [("60", 60), ("5", 10), ("", 10)])
+def test_a_source_s_own_minimum_interval_holds_for_its_feed_and_full_texts(database, web, monkeypatch, own, interval):
+    monkeypatch.setitem(ADAPTERS, "rss", RssAdapter())
+    web.pages["https://ezb.example/rss"] = (200, "application/rss+xml", RSS)
+    create(database, "EZB", min_request_interval_seconds=own)
+    ingestion_service.enqueue_due_fetches(database)
+
+    run_jobs(database)
+
+    [article] = articles(database)
+    assert full_text(database, article.id) == ("stored", None)
+    # Each request reserved the slot after its own one interval ahead: the source's, if larger than the platform's.
+    for host in ("ezb.example", "www.bank.example"):
+        assert timedelta(seconds=interval - 2) < next_slot_in(database, host) <= timedelta(seconds=interval)
+    [job] = jobs(database, job_service.FETCH_ARTICLE_JOB_KIND)
+    assert job.max_attempts == job_service.FETCH_ARTICLE_MAX_ATTEMPTS
+
+
+def test_a_host_that_asks_for_a_pause_gets_no_request_until_its_end(database, adapter, web, monkeypatch):
+    url = "https://www.bank.example/{}.html"
+    web.pages[url.format("a")] = (429, "text/html", b"langsamer")
+    web.headers[url.format("a")] = {"retry-after": "120"}
+    ids = fetch_articles(database, adapter, item("a", url=url.format("a")), item("b", url=url.format("b")))
+
+    run_jobs(database)  # a: 429, the host pauses for 120 s; b: deferred to its slot 10 s later
+
+    by_article = {job.payload["article_id"]: job for job in jobs(database, job_service.FETCH_ARTICLE_JOB_KIND)}
+    assert (by_article[ids["a"]].attempts, by_article[ids["a"]].last_error) == (1, "SourceUnavailable: HTTP 429 (Retry-After 120 s)")
+
+    # Both are due now - a's retry and b at its slot: each is deferred behind the pause, without a request
+    # and without using up an attempt.
+    make_jobs_due(database)
+    run_jobs(database)
+
+    now = datetime.now(UTC)
+    by_article = {job.payload["article_id"]: job for job in jobs(database, job_service.FETCH_ARTICLE_JOB_KIND)}
+    assert all(job.run_after - now > timedelta(seconds=118) for job in by_article.values())
+    assert (by_article[ids["a"]].attempts, by_article[ids["b"]].attempts) == (1, 0)
+    assert web.requests.count(url.format("a")) == 1 and url.format("b") not in web.requests
+    assert {key: full_text(database, article_id)[0] for key, article_id in ids.items()} == {"a": "pending", "b": "pending"}
+
+    # Once the pause is over, both are fetched - the second one an interval after the first, which the test
+    # moves back instead of waiting.
+    del web.pages[url.format("a")]
+    monkeypatch.setattr(
+        "app.services.fetch_policy_service.time.sleep",
+        lambda _seconds: _set_host(database, last_request_at=text("now() - interval '1 minute'")),
+    )
+    _set_host(database, paused_until=text("now()"))
+    make_jobs_due(database)
+    run_jobs(database)
+
+    assert {key: full_text(database, article_id)[0] for key, article_id in ids.items()} == {"a": "stored", "b": "stored"}
+
+
+def _set_host(database, **values):
+    with database.begin() as connection:
+        connection.execute(update(FetchHost).values(**values))

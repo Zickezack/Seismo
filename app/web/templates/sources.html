@@ -24,10 +24,11 @@
           <th>URL</th>
           <th>Sprache</th>
           <th>Status</th>
+          <th>Abrufstatus</th>
           <th>Abrufintervall</th>
           <th>Rohtext aufbewahren</th>
           <th>Artikel</th>
-          <th>Letzter Abruf</th>
+          <th>Letzter Erfolg</th>
         </tr>
       </thead>
       <tbody>
@@ -39,6 +40,7 @@
           <td class="cell-url" data-testid="url-{{ source.id }}">{{ source.url }}</td>
           <td data-testid="language-{{ source.id }}">{{ source.language_label }}</td>
           <td><span class="status status-{{ 'active' if source.is_active else 'inactive' }}" data-testid="status-{{ source.id }}">{{ "Aktiv" if source.is_active else "Inaktiv" }}</span></td>
+          <td class="cell-wrap" data-testid="fetch-status-{{ source.id }}"><span class="status status-{{ source.fetch_status }}">{{ source.fetch_status_label }}</span>{% if source.consecutive_failures %}<span class="hint" data-testid="last-error-{{ source.id }}">{{ source.last_error_at|local_time }}: {{ source.last_error }}</span>{% endif %}</td>
           <td data-testid="interval-{{ source.id }}">alle {{ source.fetch_interval_minutes }} Min.</td>
           <td data-testid="retention-{{ source.id }}">{{ source.raw_text_retention_days }} {{ "Tag" if source.raw_text_retention_days == 1 else "Tage" }}</td>
           <td><a href="/articles?source={{ source.id }}" data-testid="articles-{{ source.id }}">{{ article_counts.get(source.id, 0) }}</a></td>

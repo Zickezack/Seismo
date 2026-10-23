@@ -5,6 +5,10 @@ The worker queues a fetch job for every due source once a minute (app/worker/mai
 source outside any transaction and stores the new articles - with a full-text job for each - in the
 transaction that marks it done, so a retried job never stores an article twice (app/jobs/runner.py). Every
 request goes through the fetch policy: robots.txt and a minimum interval per host (fetch_policy_service).
+
+Every failed fetch of a source is kept at the source - last error, failures in a row; a success resets the
+count - and logged (story 4). A full-text job keeps trying for about a day before the full text counts as
+failed, so a host that is down for hours loses nothing.
 """
 import hashlib
 import logging
@@ -22,7 +26,7 @@ from app.services.bulk import BulkResult
 from app.services.source_service import Source
 from app.sources import ADAPTERS
 from app.sources.base import FetchedItem
-from app.sources.errors import FetchDisallowed, SourceRejected, SourceUnavailable
+from app.sources.errors import FetchDisallowed, HostBusy, SourceRejected, SourceUnavailable
 from app.sources.http import HttpClient
 
 logger = logging.getLogger(__name__)
@@ -70,17 +74,25 @@ def fetch_source(
     """First phase of a fetch job, outside any transaction: read the source through its adapter.
 
     Returns the effect that stores the new articles, or None when the source is gone or inactive by now.
-    Raises SourceRejected (a retry would not help), SourceUnavailable or HostBusy (app/sources/errors.py).
+    Raises SourceRejected (a retry would not help), SourceUnavailable or HostBusy (app/sources/errors.py);
+    every error but HostBusy is first recorded at the source.
     """
     source = source_service.get(engine, source_id)
     if source is None or not source.is_active:
         return None
-    adapter = ADAPTERS.get(source.adapter_type)
-    if adapter is None:
-        raise SourceRejected(f"Kein Adapter für den Typ „{source.adapter_type}“")
     settings = platform_settings_service.current(engine)
-    with HttpClient(contact) as http:
-        items = adapter.fetch(source, PoliteHttp(engine, http, settings.domain_min_interval_seconds, reserved_slot))
+    min_interval = request_interval(settings.domain_min_interval_seconds, source.min_request_interval_seconds)
+    try:
+        adapter = ADAPTERS.get(source.adapter_type)
+        if adapter is None:
+            raise SourceRejected(f"Kein Adapter für den Typ „{source.adapter_type}“")
+        with HttpClient(contact) as http:
+            items = adapter.fetch(source, PoliteHttp(engine, http, min_interval, reserved_slot))
+    except HostBusy:
+        raise
+    except Exception as error:
+        _record_failure(engine, source_id, error)
+        raise
     rows = article_rows(source, items, datetime.now(UTC) - timedelta(days=settings.article_max_age_days))
 
     def store(connection: Connection) -> None:
@@ -90,12 +102,36 @@ def fetch_source(
         article_ids = article_repository.insert_new(connection, rows)
         for article_id in article_ids:
             kind = job_service.FETCH_ARTICLE_JOB_KIND
-            job_service.enqueue(connection, kind, {"article_id": article_id}, dedupe_key=f"{kind}:{article_id}")
+            job_service.enqueue(
+                connection,
+                kind,
+                {"article_id": article_id},
+                dedupe_key=f"{kind}:{article_id}",
+                max_attempts=job_service.FETCH_ARTICLE_MAX_ATTEMPTS,
+            )
         source_repository.mark_fetched(connection, source_id)
         # IDs and counts only, never titles (datamodel.md, rule 13).
         logger.info("Source fetched", extra={"source_id": source_id, "items": len(items), "new_articles": len(article_ids)})
 
     return store
+
+
+def _record_failure(engine: Engine, source_id: int, error: Exception) -> None:
+    ours = isinstance(error, (SourceRejected, SourceUnavailable))
+    message = str(error)[: job_service.MAX_ERROR_LENGTH] if ours else job_service.describe_error(error)
+    with engine.begin() as connection:
+        failures = source_repository.record_failure(connection, source_id, message)
+    fields = {"source_id": source_id, "error_type": type(error).__name__, "consecutive_failures": failures}
+    # Only our own messages (HTTP status, timeout, robots.txt); others may quote what the source sent
+    # (datamodel.md, rule 13).
+    if ours:
+        fields["error"] = message
+    logger.warning("Source fetch failed", extra=fields)
+
+
+def request_interval(platform_seconds: int, source_seconds: int | None) -> int:
+    """The minimum interval for a request made for a source: its own one only ever raises the platform's."""
+    return max(platform_seconds, source_seconds or 0)
 
 
 def fetch_full_text(
@@ -114,7 +150,8 @@ def fetch_full_text(
     if not article.source_active:
         reason = "Quelle gelöscht" if article.source_active is None else "Quelle inaktiv"
         return _settle(article_id, FullTextStatus.SKIPPED, reason)
-    min_interval = platform_settings_service.current(engine).domain_min_interval_seconds
+    platform_interval = platform_settings_service.current(engine).domain_min_interval_seconds
+    min_interval = request_interval(platform_interval, article.source_min_request_interval_seconds)
     try:
         with HttpClient(contact) as http:
             response = PoliteHttp(engine, http, min_interval, reserved_slot).get(article.url, FULL_TEXT_ACCEPT)

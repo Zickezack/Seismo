@@ -1,4 +1,4 @@
-"""Fetch policy in PostgreSQL: request slots per host and the robots.txt cache."""
+"""Fetch policy in PostgreSQL: request slots per host, the robots.txt cache and pauses (Retry-After)."""
 import threading
 from datetime import UTC, datetime, timedelta
 
@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from app.repositories import fetch_host_repository
 from app.services.fetch_policy_service import PoliteHttp
-from app.sources.errors import HostBusy
+from app.sources.errors import HostBusy, SourceUnavailable
 from app.sources.http import HttpClient
 from tests.integration.alembic_helpers import upgrade
 
@@ -110,3 +110,59 @@ def _move_back(database):
     # Instead of really waiting: the previous request now lies an interval back.
     with database.begin() as connection:
         connection.execute(text("UPDATE fetch_host SET last_request_at = now() - interval '10 seconds'"))
+
+
+def paused_for(database, host="bank.example"):
+    with database.connect() as connection:
+        return connection.execute(text("SELECT paused_until - now() FROM fetch_host WHERE host = :host"), {"host": host}).scalar_one()
+
+
+def test_a_reservation_during_a_pause_lies_after_it(database):
+    with database.begin() as connection:
+        fetch_host_repository.pause(connection, "bank.example", 120)
+
+    assert timedelta(seconds=119) < reserve(database) <= timedelta(seconds=120)
+    assert timedelta(seconds=129) < reserve(database) <= timedelta(seconds=130)
+
+
+def test_a_shorter_pause_never_ends_a_longer_one(database):
+    with database.begin() as connection:
+        fetch_host_repository.pause(connection, "bank.example", 600)
+        fetch_host_repository.pause(connection, "bank.example", 60)
+
+    assert timedelta(seconds=599) < paused_for(database) <= timedelta(seconds=600)
+
+
+@pytest.mark.parametrize(("retry_after", "pause"), [("120", timedelta(seconds=120)), ("999999", timedelta(hours=24))])
+def test_retry_after_pauses_the_host_at_most_a_day(database, retry_after, pause):
+    requests = []
+
+    def answer(request):
+        requests.append(str(request.url))
+        if request.url.path == "/robots.txt":
+            return httpx2.Response(404)
+        return httpx2.Response(429, headers={"retry-after": retry_after})
+
+    http = HttpClient("", httpx2.MockTransport(answer))
+    with pytest.raises(SourceUnavailable) as error:
+        PoliteHttp(database, http, 10).get("https://bank.example/a", "*/*")
+    assert error.value.retry_after == int(retry_after)
+    assert pause - timedelta(seconds=1) < paused_for(database) <= pause
+
+    # Nothing goes to the host during the pause - robots.txt neither, even once it is due again.
+    with database.begin() as connection:
+        connection.execute(text("UPDATE fetch_host SET robots_fetched_at = now() - interval '25 hours'"))
+    with pytest.raises(HostBusy) as busy:
+        PoliteHttp(database, http, 10, reserved_slot=datetime.now(UTC)).get("https://bank.example/b", "*/*")
+    assert busy.value.slot - datetime.now(UTC) > pause - timedelta(seconds=2)
+    assert requests == ["https://bank.example/robots.txt", "https://bank.example/a"]
+
+
+def test_a_robots_txt_that_asks_for_a_pause_pauses_the_host(database):
+    def answer(_request):
+        return httpx2.Response(503, headers={"retry-after": "300"})
+
+    with pytest.raises(SourceUnavailable, match=r"^robots.txt: HTTP 503 \(Retry-After 300 s\)$"):
+        PoliteHttp(database, HttpClient("", httpx2.MockTransport(answer)), 10).get("https://bank.example/a", "*/*")
+
+    assert timedelta(seconds=299) < paused_for(database) <= timedelta(seconds=300)

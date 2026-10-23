@@ -1,5 +1,7 @@
 """HTTP for the source adapters: one User-Agent, timeouts, a size limit and a few redirects."""
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from importlib.metadata import version
 
 import httpx2
@@ -19,6 +21,7 @@ class HttpResponse:
     content: bytes
     status: int = 200
     content_type: str | None = None
+    retry_after: float | None = None  # seconds, from the Retry-After header
 
 
 def user_agent(contact: str) -> str:
@@ -49,7 +52,7 @@ class HttpClient:
         """A successful answer; any other raises SourceRejected or SourceUnavailable."""
         response = self.fetch(url, accept)
         if response.status >= 500 or response.status in RETRYABLE_STATUS:
-            raise SourceUnavailable(f"HTTP {response.status}")
+            raise unavailable(response)
         if response.status >= 400:
             raise SourceRejected(f"HTTP {response.status}")
         return response
@@ -69,6 +72,7 @@ class HttpClient:
                     content=bytes(content),
                     status=response.status_code,
                     content_type=response.headers.get("content-type"),
+                    retry_after=retry_after_seconds(response.headers.get("retry-after")),
                 )
         except (httpx2.InvalidURL, httpx2.UnsupportedProtocol):
             raise SourceRejected("Ungültige URL") from None
@@ -78,6 +82,30 @@ class HttpClient:
             raise SourceUnavailable(f"Keine Antwort innerhalb von {TIMEOUT_SECONDS} s") from None
         except httpx2.TransportError as error:
             raise SourceUnavailable(f"Verbindung fehlgeschlagen: {type(error).__name__}") from None
+
+
+def unavailable(response: HttpResponse, prefix: str = "") -> SourceUnavailable:
+    """The error for an answer worth another attempt later, with the pause the host asked for, if any."""
+    message = f"{prefix}HTTP {response.status}"
+    if response.retry_after:
+        message += f" (Retry-After {round(response.retry_after)} s)"
+    return SourceUnavailable(message, response.retry_after)
+
+
+def retry_after_seconds(value: str | None, now: datetime | None = None) -> float | None:
+    """The seconds a Retry-After header asks to wait - as a number or an HTTP date; None for none or a past date."""
+    value = (value or "").strip()
+    if value.isdigit():
+        seconds = float(value)
+    else:
+        try:
+            moment = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        # A date with "-0000" comes back without a time zone; HTTP dates are always UTC.
+        moment = moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+        seconds = (moment - (now or datetime.now(UTC))).total_seconds()
+    return seconds if seconds > 0 else None
 
 
 def _size(max_bytes: int) -> str:

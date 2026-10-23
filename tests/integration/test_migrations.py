@@ -106,3 +106,20 @@ def test_articles_stored_before_full_texts_existed_are_skipped(engine):
     with engine.connect() as connection:
         status = connection.execute(text("SELECT full_text_status, full_text_error FROM article")).one()
     assert tuple(status) == ("skipped", "Abgerufen, bevor es Volltexte gab")
+
+
+def test_existing_sources_and_hosts_start_without_failures_or_pause(engine):
+    upgrade(engine, "80e736473827")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO source (name, adapter_type, url) VALUES ('EZB', 'rss', 'https://example.org')"))
+        connection.execute(text("INSERT INTO fetch_host (host) VALUES ('example.org')"))
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        status = connection.execute(
+            text("SELECT min_request_interval_seconds, last_error, last_error_at, consecutive_failures FROM source")
+        ).one()
+        paused_until = connection.execute(text("SELECT paused_until FROM fetch_host")).scalar_one()
+    assert tuple(status) == (None, None, None, 0)
+    assert paused_until is None

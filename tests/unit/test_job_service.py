@@ -40,6 +40,12 @@ def test_retry_delay_doubles_from_thirty_seconds_up_to_an_hour():
     assert job_service.retry_delay_seconds(50) == 3600
 
 
+def test_full_text_attempts_span_about_a_day():
+    waited = sum(job_service.retry_delay_seconds(attempt) for attempt in range(1, job_service.FETCH_ARTICLE_MAX_ATTEMPTS))
+
+    assert 24 * 3600 <= waited < 25 * 3600
+
+
 def test_failed_attempt_with_attempts_left_is_retried(writes):
     calls, _state = writes
 

@@ -7,7 +7,14 @@ class SourceRejected(Exception):
 
 
 class SourceUnavailable(Exception):
-    """The source could not be reached (timeout, connection error, HTTP 5xx); a later attempt may succeed."""
+    """The source could not be reached (timeout, connection error, HTTP 5xx); a later attempt may succeed.
+
+    `retry_after`: the seconds the host asked to wait (Retry-After header), if it did.
+    """
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class FetchDisallowed(SourceRejected):

@@ -21,9 +21,16 @@ def insert_new(connection: Connection, rows: list[dict]) -> list[int]:
 
 
 def get_for_full_text(connection: Connection, article_id: int) -> Row | None:
-    """URL and full-text status of the article, and whether its source still exists and is active."""
+    """URL and full-text status of the article, whether its source still exists and is active, and the source's
+    own minimum interval between requests."""
     statement = (
-        select(Article.id, Article.url, Article.full_text_status, Source.is_active.label("source_active"))
+        select(
+            Article.id,
+            Article.url,
+            Article.full_text_status,
+            Source.is_active.label("source_active"),
+            Source.min_request_interval_seconds.label("source_min_request_interval_seconds"),
+        )
         .outerjoin(Source, Source.id == Article.source_id)
         .where(Article.id == article_id)
     )

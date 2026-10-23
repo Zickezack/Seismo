@@ -2,18 +2,24 @@
 {% set heading = source.name if source else "Neue Quelle" %}
 {% block title %}{{ heading }}{% endblock %}
 
-{% macro number_field(name, label, limits, hint) %}
+{% macro number_field(name, label, limits, hint, required=True) %}
 <div class="field">
   <label for="{{ name }}">{{ label }}</label>
   <input id="{{ name }}" name="{{ name }}" type="number" inputmode="numeric" min="{{ limits[0] }}" max="{{ limits[1] }}"
-         step="1" required value="{{ values[name] }}" aria-describedby="{{ name }}-hint">
-  <p class="hint" id="{{ name }}-hint">{{ hint }}</p>
+         step="1"{% if required %} required{% endif %} value="{{ values[name] if values[name] is not none else '' }}" aria-describedby="{{ name }}-hint" data-testid="{{ name }}-input">
+  <p class="hint" id="{{ name }}-hint" data-testid="{{ name }}-hint">{{ hint }}</p>
 </div>
 {% endmacro %}
 
 {% block content %}
 <p><a href="/sources" data-testid="back">Zurück zu den Quellen</a></p>
 <h1 data-testid="heading">{{ heading }}</h1>
+{% if source %}
+<p class="fetch-status" data-testid="fetch-status">
+  <span class="status status-{{ source.fetch_status }}" data-testid="fetch-status-label">{{ source.fetch_status_label }}</span>
+  <span class="hint">Letzter Erfolg {{ source.last_fetched_at|local_time }}{% if source.last_error_at %} · Letzter Fehler {{ source.last_error_at|local_time }}: <span data-testid="last-error">{{ source.last_error }}</span>{% endif %}</span>
+</p>
+{% endif %}
 {% if error %}
 <p class="message message-error" role="alert" data-testid="form-error">{{ error }}</p>
 {% endif %}
@@ -55,6 +61,7 @@
       <p class="hint" id="is_active-hint">Nur aktive Quellen werden abgerufen.</p>
     </div>
     {{ number_field("fetch_interval_minutes", "Abrufintervall (Minuten)", fetch_interval, "Zeit zwischen zwei Abrufen der Quelle.") }}
+    {{ number_field("min_request_interval_seconds", "Mindestabstand (Sekunden)", min_request_interval, "Zwischen zwei Anfragen an denselben Host, für Feed und Volltexte dieser Quelle. Leer: Plattform-Wert (%d s); ein kleinerer Wert wirkt nicht." % platform_min_interval, required=False) }}
     {{ number_field("raw_text_retention_days", "Rohtext aufbewahren (Tage)", retention, "Ab der erfolgreichen Verarbeitung; 0 löscht den Volltext gleich danach. Metadaten und Belege bleiben.") }}
     <div class="field field-wide">
       <label for="terms_note">Nutzungsbedingungen</label>

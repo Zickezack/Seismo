@@ -399,6 +399,7 @@ a:focus-visible {
   display: inline-block;
   padding: 0.125rem 0.5rem;
   font-weight: 600;
+  white-space: nowrap;
   border-radius: var(--radius);
   background: var(--color-background);
 }
@@ -462,6 +463,28 @@ a:focus-visible {
 
 .status-inactive {
   color: var(--color-muted);
+}
+
+/* Abrufstatus of a source (templates/sources.html, source_form.html) */
+.status-ok {
+  color: var(--color-success-text);
+  background: var(--color-success-background);
+}
+
+.status-failing {
+  color: var(--color-error-text);
+  background: var(--color-error-background);
+}
+
+.status-new {
+  color: var(--color-muted);
+}
+
+.fetch-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
 }
 
 /* Messages */
