@@ -6,12 +6,9 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app.services import job_service
-from app.web.templating import flash, templates
+from app.web.templating import flash, name_list, templates
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
-
-# Flash messages travel in the session cookie, which must stay below the browsers' 4 KB limit.
-MAX_NAMES_IN_MESSAGE = 10
 
 
 @router.get("")
@@ -29,7 +26,7 @@ def requeue(
 ) -> Response:
     result = job_service.requeue_failed(request.app.state.engine, job_ids)
     if result.blocked:
-        flash(request, f"Nichts eingereiht, blockiert: {_names(result.blocked)}.", "error")
+        flash(request, f"Nichts eingereiht, blockiert: {name_list(result.blocked)}.", "error")
     elif result.processed:
         flash(request, f"{_jobs(result.processed)} erneut eingereiht.")
     else:
@@ -47,12 +44,6 @@ def enqueue_test_job(request: Request) -> Response:
 def _back_to_list(status: str | None) -> RedirectResponse:
     status = job_service.parse_status(status)
     return RedirectResponse(f"/jobs?{urlencode({'status': status})}" if status else "/jobs", status_code=303)
-
-
-def _names(names: list[str]) -> str:
-    shown = ", ".join(names[:MAX_NAMES_IN_MESSAGE])
-    hidden = len(names) - MAX_NAMES_IN_MESSAGE
-    return f"{shown} und {hidden} weitere" if hidden > 0 else shown
 
 
 def _jobs(count: int) -> str:

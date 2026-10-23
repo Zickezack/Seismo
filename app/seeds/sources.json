@@ -1,0 +1,95 @@
+[
+  {
+    "key": "ecb-press-releases",
+    "name": "EZB – Pressemitteilungen",
+    "url": "https://www.ecb.europa.eu/rss/press.html",
+    "language": "en",
+    "terms_note": "Freie Nutzung erlaubt, sofern die Inhalte korrekt wiedergegeben werden und die EZB als Quelle genannt wird; Dokumente mit Autorennamen (z. B. Working Papers) nur mit schriftlicher Genehmigung. Enthält auch Reden und Interviews. Nutzungsbedingungen: https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html"
+  },
+  {
+    "key": "fed-press-releases",
+    "name": "Fed – Pressemitteilungen",
+    "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+    "language": "en",
+    "terms_note": "Inhalte sind, sofern nicht anders gekennzeichnet, gemeinfrei und dürfen ohne Genehmigung kopiert und verbreitet werden; Quellenangabe (Board) erbeten, Siegel und Logos ausgenommen. Nutzungsbedingungen: https://www.federalreserve.gov/disclaimer.htm"
+  },
+  {
+    "key": "boe-news",
+    "name": "Bank of England – News",
+    "url": "https://www.bankofengland.co.uk/rss/news",
+    "language": "en",
+    "terms_note": "Herunterladen, Anzeigen und Drucken nur für persönliche oder organisationsinterne, nicht-kommerzielle Zwecke erlaubt; jede Weiterverwendung erfordert eine Genehmigung der Bank of England. Nutzungsbedingungen: https://www.bankofengland.co.uk/legal"
+  },
+  {
+    "key": "snb-press-releases",
+    "name": "SNB – Medienmitteilungen",
+    "url": "https://www.snb.ch/public/rss/en/pressrel",
+    "language": "en",
+    "terms_note": "Speichern, Übersetzen (mit Quellenangabe), Weitergeben und sonstige Nutzung nur für nicht-kommerzielle Zwecke erlaubt. Nutzungsbedingungen: https://www.snb.ch/en/srv/disclaimer_copyright"
+  },
+  {
+    "key": "bundesbank-latest-en",
+    "name": "Bundesbank – Aktuelles",
+    "url": "https://www.bundesbank.de/service/rss/en/633306/feed.rss",
+    "language": "en",
+    "terms_note": "Speichern, Weitergeben und Vervielfältigen für persönlichen oder geschäftlichen Gebrauch erlaubt, unverändert und mit Angabe „Source: Deutsche Bundesbank“; Bilder und Videos ausgenommen. Nutzungsbedingungen: https://www.bundesbank.de/en/homepage/user-information/terms-of-use-642972?index=2"
+  },
+  {
+    "key": "bis-press-releases",
+    "name": "BIZ – Pressemitteilungen",
+    "url": "https://www.bis.org/doclist/all_pressrels.rss",
+    "language": "en",
+    "terms_note": "Herunterladen und Weiterverbreiten nur für nicht-kommerzielle Zwecke erlaubt; in anderen Produkten nur begrenzte Auszüge (höchstens etwa 400 Wörter) mit Quellenangabe, sonst schriftliche Genehmigung nötig. Feed im Format RSS 1.0. Nutzungsbedingungen: https://www.bis.org/about/terms-conditions"
+  },
+  {
+    "key": "bis-central-bank-speeches",
+    "name": "BIZ – Reden von Zentralbankern",
+    "url": "https://www.bis.org/doclist/cbspeeches.rss",
+    "language": "en",
+    "terms_note": "Herunterladen und Weiterverbreiten nur für nicht-kommerzielle Zwecke erlaubt; in anderen Produkten nur begrenzte Auszüge (höchstens etwa 400 Wörter) mit Quellenangabe, sonst schriftliche Genehmigung nötig. Die Reden stammen von Vertretern vieler Zentralbanken. Feed im Format RSS 1.0. Nutzungsbedingungen: https://www.bis.org/about/terms-conditions"
+  },
+  {
+    "key": "boc-press-releases",
+    "name": "Bank of Canada – Pressemitteilungen",
+    "url": "https://www.bankofcanada.ca/content_type/press-releases/feed/",
+    "language": "en",
+    "terms_note": "Freie Nutzung, Vervielfältigung und Verbreitung erlaubt mit Quellenangabe „Bank of Canada“ und Kennzeichnung von Änderungen; Banknotenbilder und Logo ausgenommen. Feed im Format RSS 1.0. Nutzungsbedingungen: https://www.bankofcanada.ca/terms/"
+  },
+  {
+    "key": "destatis-press-releases",
+    "name": "Destatis – Pressemitteilungen",
+    "url": "https://www.destatis.de/SiteGlobals/Functions/RSSFeed/DE/RSSNewsfeed/Aktuell.xml",
+    "language": "de",
+    "terms_note": "Vervielfältigung und Verbreitung, auch auszugsweise und gewerblich, mit Quellenangabe „Statistisches Bundesamt (Destatis)“ ohne Genehmigung erlaubt; Änderungen sind kenntlich zu machen. robots.txt verlangt 30 Sekunden zwischen zwei Abrufen. Nutzungsbedingungen: https://www.destatis.de/DE/Service/Impressum/copyright-allgemein.html"
+  },
+  {
+    "key": "bfs-press-releases",
+    "name": "BFS – Medienmitteilungen",
+    "url": "https://d-nsbc-p.admin.ch/v1/rss?org-nr=318&lang=de",
+    "language": "de",
+    "terms_note": "Nutzung mit Quellenangabe „Bundesamt für Statistik (BFS)“ erlaubt, kommerzielle Nutzung nur mit vorheriger schriftlicher Bewilligung des BFS. Feed des News Service Bund mit Meldungen bis 2022 zurück. Nutzungsbedingungen: https://www.bfs.admin.ch/bfs/de/home/bfs/oeffentliche-statistik/copyright.html"
+  },
+  {
+    "key": "bls-employment-situation",
+    "name": "BLS – Arbeitsmarktbericht",
+    "url": "https://www.bls.gov/feed/empsit.rss",
+    "language": "en",
+    "terms_note": "Alle BLS-Veröffentlichungen sind gemeinfrei und ohne Genehmigung nutzbar; Quellenangabe BLS erbeten, fremde Fotos und Illustrationen sowie das BLS-Logo ausgenommen. Die BLS beantwortet nur Abrufe mit einem User-Agent samt Kontaktangabe. Nutzungsbedingungen: https://www.bls.gov/opub/copyright-information.htm"
+  },
+  {
+    "key": "cision-news-de",
+    "name": "Cision – Unternehmensmeldungen",
+    "url": "https://news.cision.com/de/ListItems?format=rss",
+    "fetch_interval_minutes": 15,
+    "language": "de",
+    "terms_note": "Die Seite enthält nur allgemeine Copyright-Hinweise und keine Regeln zur Weiterverwendung von Pressemitteilungen – Nutzungsbedingungen unklar, vor Nutzung prüfen. Copyright-Hinweise: https://www.cision.com/legal/copyright-resources/"
+  },
+  {
+    "key": "presseportal-wirtschaft",
+    "name": "Presseportal – Wirtschaft",
+    "url": "https://www.presseportal.de/rss/wirtschaft.rss2",
+    "fetch_interval_minutes": 15,
+    "language": "de",
+    "terms_note": "Inhalte dürfen redaktionell frei verwendet werden; jede darüber hinausgehende Verwendung, insbesondere für eigene Geschäftszwecke, nur mit schriftlicher Genehmigung der news aktuell GmbH. Nutzungsbedingungen: https://www.presseportal.de/nutzungsbedingungen"
+  }
+]

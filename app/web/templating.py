@@ -11,11 +11,20 @@ from app.web.access import current_admin
 WEB_DIR = Path(__file__).parent
 STATIC_DIR = WEB_DIR / "static"
 FLASH_KEY = "flash"
+# Flash messages travel in the session cookie, which must stay below the browsers' 4 KB limit.
+MAX_NAMES_IN_MESSAGE = 10
 
 
 def flash(request: Request, text: str, kind: str = "success") -> None:
     """A message for the next page shown, typically after a redirect (templates/base.html)."""
     request.session[FLASH_KEY] = {"text": text, "kind": kind}
+
+
+def name_list(names: list[str]) -> str:
+    """Names for a flash message, the ones beyond MAX_NAMES_IN_MESSAGE only counted."""
+    shown = ", ".join(names[:MAX_NAMES_IN_MESSAGE])
+    hidden = len(names) - MAX_NAMES_IN_MESSAGE
+    return f"{shown} und {hidden} weitere" if hidden > 0 else shown
 
 
 def _admin(request: Request) -> dict:

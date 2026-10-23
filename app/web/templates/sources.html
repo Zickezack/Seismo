@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Quellen{% endblock %}
+{% block content %}
+<h1>Quellen</h1>
+
+<form class="stack" method="post" action="/sources/delete" data-bulk-form data-testid="source-list">
+  <div class="toolbar">
+    <div class="actions">
+      <button class="button button-secondary" type="submit" formaction="/sources/activate" data-bulk-action data-testid="activate" disabled>Aktivieren</button>
+      <button class="button button-secondary" type="submit" formaction="/sources/deactivate" data-bulk-action data-testid="deactivate" disabled>Deaktivieren</button>
+      <button class="button button-danger" type="submit" formaction="/sources/delete" data-bulk-action data-confirm-delete="Quelle|Quellen" data-testid="delete" disabled>Löschen</button>
+    </div>
+    <a class="button" href="/sources/new" data-testid="new-source">Quelle hinzufügen</a>
+  </div>
+  {% if sources %}
+  <div class="table-container">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Quellen auswählen" data-testid="select-all"></th>
+          <th>Name</th>
+          <th>Typ</th>
+          <th>URL</th>
+          <th>Sprache</th>
+          <th>Status</th>
+          <th>Abrufintervall</th>
+          <th>Rohtext aufbewahren</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for source in sources %}
+        <tr data-testid="source-{{ source.id }}">
+          <td class="cell-select"><input type="checkbox" name="source_id" value="{{ source.id }}" data-select-row data-name="{{ source.name }}" aria-label="{{ source.name }} auswählen" data-testid="select-{{ source.id }}"></td>
+          <td><a href="/sources/{{ source.id }}" data-testid="name-{{ source.id }}">{{ source.name }}</a></td>
+          <td>{{ source.adapter_label }}</td>
+          <td class="cell-url" data-testid="url-{{ source.id }}">{{ source.url }}</td>
+          <td data-testid="language-{{ source.id }}">{{ source.language_label }}</td>
+          <td><span class="status status-{{ 'active' if source.is_active else 'inactive' }}" data-testid="status-{{ source.id }}">{{ "Aktiv" if source.is_active else "Inaktiv" }}</span></td>
+          <td data-testid="interval-{{ source.id }}">alle {{ source.fetch_interval_minutes }} Min.</td>
+          <td data-testid="retention-{{ source.id }}">{{ source.raw_text_retention_days }} {{ "Tag" if source.raw_text_retention_days == 1 else "Tage" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p data-testid="no-sources">Noch keine Quellen. Lege eine an oder importiere den Starterkatalog in den <a href="/settings/platform#starterdaten">Plattform-Einstellungen</a>.</p>
+  {% endif %}
+</form>
+{% endblock %}

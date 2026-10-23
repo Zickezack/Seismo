@@ -15,6 +15,8 @@
   --color-success-text: #1d6b3a;
   --color-warning-background: #fff4dc;
   --color-warning-text: #7a5300;
+  --color-danger: #b42318;
+  --color-danger-hover: #912018;
   --radius: 6px;
   --space: 1rem;
   --content-width: 72rem;
@@ -197,11 +199,22 @@ a {
   grid-column: 1 / -1;
 }
 
-label {
+label,
+.field-label {
   font-weight: 600;
 }
 
-input:not([type="checkbox"]) {
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  font-weight: normal;
+}
+
+input:not([type="checkbox"]),
+select,
+textarea {
   width: 100%;
   padding: 0.5rem 0.75rem;
   font: inherit;
@@ -218,7 +231,13 @@ input[type="checkbox"] {
   accent-color: var(--color-primary);
 }
 
+textarea {
+  resize: vertical;
+}
+
 input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
 .button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -228,6 +247,7 @@ a:focus-visible {
 /* Buttons */
 
 .button {
+  display: inline-block;
   padding: 0.5rem 1.25rem;
   font: inherit;
   font-weight: 600;
@@ -235,6 +255,7 @@ a:focus-visible {
   background: var(--color-primary);
   border: 1px solid var(--color-primary);
   border-radius: var(--radius);
+  text-decoration: none;
   cursor: pointer;
 }
 
@@ -251,6 +272,16 @@ a:focus-visible {
 .button-secondary:hover {
   color: var(--color-primary-hover);
   background: var(--color-background);
+}
+
+.button-danger {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.button-danger:hover {
+  background: var(--color-danger-hover);
+  border-color: var(--color-danger-hover);
 }
 
 .button:disabled,
@@ -272,6 +303,13 @@ a:focus-visible {
 
 .save-status-error {
   color: var(--color-error-text);
+}
+
+/* A group of buttons, e.g. the bulk actions of a list */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 /* Filter links, e.g. job status */
@@ -344,6 +382,13 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.table .cell-url {
+  min-width: 12rem;
+  max-width: 20rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .status {
   display: inline-block;
   padding: 0.125rem 0.5rem;
@@ -372,6 +417,15 @@ a:focus-visible {
   background: var(--color-warning-background);
 }
 
+.status-active {
+  color: var(--color-success-text);
+  background: var(--color-success-background);
+}
+
+.status-inactive {
+  color: var(--color-muted);
+}
+
 /* Messages */
 
 .message {
@@ -388,4 +442,34 @@ a:focus-visible {
 .message-success {
   color: var(--color-success-text);
   background: var(--color-success-background);
+}
+
+/* Delete confirmation (templates/base.html, static/app.js) */
+
+.dialog {
+  width: min(32rem, calc(100% - 2 * var(--space)));
+  padding: 1.5rem;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.dialog::backdrop {
+  background: rgb(29 35 48 / 0.5);
+}
+
+.dialog-names {
+  max-height: 12rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }

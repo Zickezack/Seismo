@@ -35,6 +35,22 @@
 {# Quick navigation for several sections (requirements.md, "Basic UI Requirements / Styleguide", item 4). #}
 <nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
   {% for id, title, _ in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+  <a href="#starterdaten" data-testid="section-nav-starterdaten">Starterdaten</a>
 </nav>
 {% for id, title, names in sections %}{{ section(id, title, names) }}{% endfor %}
+
+{# Seed data comes in only through this button (architecture.md, "Seed Data"). #}
+<details class="card section" id="starterdaten" open data-testid="section-starterdaten">
+  <summary><h2>Starterdaten</h2></summary>
+  <form class="form-grid" method="post" action="/settings/platform/seed/sources" data-testid="seed-sources-form">
+    <div class="field field-wide">
+      <span class="field-label">Starterkatalog Quellen</span>
+      <p class="hint" data-testid="seed-sources-status">{{ sources_seed.imported }} von {{ sources_seed.total }} Quellen importiert.</p>
+      <p class="hint">Feeds von Zentralbanken, Statistikämtern und Pressemitteilungen von Unternehmen, aktiv angelegt; die Notiz jeder Quelle verweist auf ihre Nutzungsbedingungen. Jede Quelle kommt nur einmal: eine umbenannte oder gelöschte Quelle legt ein weiterer Import nicht wieder an.</p>
+    </div>
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="import-sources"{% if sources_seed.imported == sources_seed.total %} disabled title="Alle Quellen des Katalogs sind schon importiert"{% endif %}>Starterkatalog importieren</button>
+    </div>
+  </form>
+</details>
 {% endblock %}

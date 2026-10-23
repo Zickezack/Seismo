@@ -9,6 +9,7 @@ from app.db.models import JobStatus
 from app.repositories import job_repository, llm_slot_repository
 from app.repositories.job_repository import ClaimedJob
 from app.services import platform_settings_service
+from app.services.bulk import BulkResult
 
 DEFAULT_MAX_ATTEMPTS = 5
 # The running worker renews its lease every few seconds (app/jobs/runner.py), so this is only how
@@ -77,12 +78,6 @@ class JobOverview:
     @property
     def matching(self) -> int:
         return self.counts[self.status] if self.status else self.total
-
-
-@dataclass(frozen=True)
-class BulkResult:
-    processed: int
-    blocked: list[str]  # display names of the jobs that kept the whole action from running
 
 
 def enqueue(

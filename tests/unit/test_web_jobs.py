@@ -11,9 +11,10 @@ from fastapi.testclient import TestClient
 
 from app.config import AuthSettings, Settings
 from app.db.models import JobStatus
-from app.services import job_service, platform_settings_service
+from app.services import job_service, platform_settings_service, seed_service
 from app.services.job_service import BulkResult, JobListItem, JobOverview
 from app.services.platform_settings_service import PlatformSettings
+from app.services.seed_service import SeedStatus
 from app.web.main import create_app
 
 SETTINGS = Settings(postgres_user="u", postgres_password="p", postgres_db="d")
@@ -72,6 +73,7 @@ def services(monkeypatch):
     monkeypatch.setattr(job_service, "enqueue_test_job", lambda _engine: 42)
     monkeypatch.setattr(platform_settings_service, "current", lambda _engine: PlatformSettings(llm_max_parallel_calls=3))
     monkeypatch.setattr(platform_settings_service, "save", save)
+    monkeypatch.setattr(seed_service, "sources_status", lambda _engine: SeedStatus(total=17, imported=0))
     return calls
 
 
@@ -189,7 +191,7 @@ def test_settings_page_links_every_section_from_its_quick_navigation(client, ser
 
     links = re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html)
     assert links == re.findall(r'<details class="card section" id="(\w+)"', html)
-    assert links == ["verarbeitung", "aufbewahrung", "backups"]
+    assert links == ["verarbeitung", "aufbewahrung", "backups", "starterdaten"]
 
 
 def test_settings_save_in_place_answers_json(client, services):

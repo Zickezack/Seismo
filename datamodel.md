@@ -40,6 +40,7 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Alert | `alert_rule` | A rule that notifies about new events or material changes. | none |
 | Job | `job` | A unit of work in the PostgreSQL job queue, with status, lease and retry count. | none |
 | Plattform-Einstellungen | `platform_settings` | Settings that apply to the whole instance, edited by the admin (`requirements.md`, "Settings"). | none |
+| Seed-Protokoll | `seed_log` | Which items of a seed source (e.g. the starter catalogue of Quellen) were imported once (`architecture.md`, "Seed Data"). Not shown in the UI. | none |
 
 ## Model-wide rules
 
@@ -107,6 +108,42 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
 - Relationships: none
 - Rules: every setting is read with its default, so a missing row or column never breaks a page. Admin only. Benutzer-Einstellungen are stored separately once user management exists.
+- Privacy: none
+
+### Quelle (`source`)
+- Store: SQL table `source`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | name | varchar(200) | yes | | Unique regardless of case (unique index `uq_source_name` on `lower(name)`). Sorted with the ICU collation `de-x-icu`. UI: Name. |
+  | adapter_type | varchar(20) | yes | | Adapter that fetches the source: `rss`. Checked in the service, not by a constraint, so a new adapter needs no migration. UI: Typ. |
+  | url | varchar(2000) | yes | | Feed address, `http` or `https` with a host. Not unique: one endpoint can serve several sources. |
+  | is_active | boolean | yes | true | Only active sources are fetched. UI: Aktiv / Inaktiv. |
+  | fetch_interval_minutes | integer | yes | 60 | Time between two fetches, 5 to 1440. UI: Abrufintervall. |
+  | language | varchar(10) | no | | ISO 639-1 code; empty for a source in several or unknown languages (rule 5). The language of each article is stored separately. UI: Sprache. |
+  | terms_note | text | no | | What the source's terms allow, with a link, at most 2000 characters. Checking them is the admin's job (`requirements.md`, "Data Sources and Data Rights"). UI: Nutzungsbedingungen. |
+  | raw_text_retention_days | integer | yes | 30 | Days a raw text is kept after its processing has succeeded, 0 to 365; 0 deletes it right after (rule 8). UI: Rohtext aufbewahren. |
+  | created_at | timestamptz | yes | now() | |
+  | updated_at | timestamptz | yes | now() | Last change through the form or a bulk action. |
+
+- Relationships: none yet; articles will reference their source.
+- Rules: bulk actions (Löschen, Aktivieren, Deaktivieren) are all or nothing. Seeded sources come only from the starter catalogue import (`app/seeds/sources.json`, Seed-Protokoll), active.
+- Privacy: none
+
+### Seed-Protokoll (`seed_log`)
+- Store: SQL table `seed_log`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | seed_source | varchar(100) | yes | | Seed source, e.g. `sources` for `app/seeds/sources.json`. Primary key with `item_key`. |
+  | item_key | varchar(200) | yes | | The item's stable key in its seed file, independent of its display name. |
+  | imported_at | timestamptz | yes | now() | |
+
+- Relationships: none; an entry records only that the item was imported once, not which record it became.
+- Rules: an item with an entry is never imported again, even after its record was renamed or deleted. Entry and record are written in one transaction; an item whose name is already taken is neither imported nor logged. Written only by the admin's import action, never by a migration, start or page load.
 - Privacy: none
 
 <!-- Template - copy once per entity:

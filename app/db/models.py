@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, Identity, Index, SmallInteger, String, Text, func, text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, Identity, Index, SmallInteger, String, Text, func, text, true
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -80,3 +80,40 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(backup_interval_hours >= 1, name="backup_interval_hours"),
         CheckConstraint(backups_to_keep >= 1, name="backups_to_keep"),
     )
+
+
+class Source(Base):
+    """A news source (UI term: Quelle) with its adapter type and fetch rules."""
+
+    __tablename__ = "source"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    # Which adapter fetches it (app/sources/); checked in the service, so a new adapter needs no migration.
+    adapter_type: Mapped[str] = mapped_column(String(20))
+    url: Mapped[str] = mapped_column(String(2000))
+    is_active: Mapped[bool] = mapped_column(server_default=true())
+    fetch_interval_minutes: Mapped[int] = mapped_column(server_default="60")
+    # ISO 639-1 code; None for a source in several or unknown languages (datamodel.md, rule 5).
+    language: Mapped[str | None] = mapped_column(String(10))
+    terms_note: Mapped[str | None] = mapped_column(Text)
+    raw_text_retention_days: Mapped[int] = mapped_column(server_default="30")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(fetch_interval_minutes >= 1, name="fetch_interval_minutes"),
+        CheckConstraint(raw_text_retention_days >= 0, name="raw_text_retention_days"),
+        # Names are unique regardless of case: "EZB" and "ezb" would be the same source to the admin.
+        Index("uq_source_name", func.lower(name), unique=True),
+    )
+
+
+class SeedLogEntry(Base):
+    """A seed item imported once (architecture.md, "Seed Data"), whatever became of its record since."""
+
+    __tablename__ = "seed_log"
+
+    seed_source: Mapped[str] = mapped_column(String(100), primary_key=True)
+    item_key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

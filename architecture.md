@@ -70,7 +70,7 @@ Conventions for where new code goes. Procedure for implementing a feature: skill
 - Services own their transaction and take an `Engine`. A function meant to run inside its caller's transaction takes a `Connection` instead (e.g. `job_service.enqueue` inside a job's effect).
 - Background work runs as jobs in the PostgreSQL queue (`app/jobs/`). Handlers are two-phase: `handler(job) -> effect | None`. Slow work (an LLM call, a fetch) happens outside any transaction; the returned effect writes the result in the transaction that marks the job done, after the lease check, so a retried job has no duplicate effect. A new job kind: a handler in `app/jobs/handlers.py` and its German label in `job_service.KIND_LABELS`.
 - Every LLM call runs inside `LlmCallLimiter.slot()` (`app/llm/limiter.py`), which caps parallel calls across all workers with PostgreSQL advisory locks (Plattform-Einstellung).
-- Shared browser behaviour lives in `app/web/static/app.js`, attached through data attributes (`data-bulk-form`, `data-inline-save`, `data-local-time`), never as a page's own script. A message after a redirect goes through `flash()` (`app/web/templating.py`). An in-place save answers an invalid entry with 200 and `{"error": ...}`, never with 4xx: browsers log every 4xx answer as a console error.
+- Shared browser behaviour lives in `app/web/static/app.js`, attached through data attributes (`data-bulk-form`, `data-inline-save`, `data-local-time`, `data-confirm-delete`), never as a page's own script. Every delete goes through the one confirmation dialog in `templates/base.html` (`data-confirm-delete`). An all-or-nothing bulk action returns `BulkResult` (`app/services/bulk.py`). A message after a redirect goes through `flash()` (`app/web/templating.py`). An in-place save answers an invalid entry with 200 and `{"error": ...}`, never with 4xx: browsers log every 4xx answer as a console error.
 - Timestamps are stored in UTC and shown in the viewer's local time (template filter `local_time`; without JavaScript they stay in UTC).
 - Directory layout: one Python package and one Docker image. Compose runs that image as the `api` and the `worker` service with different commands, so both share the domain code and still scale independently.
 
@@ -91,6 +91,7 @@ Conventions for where new code goes. Procedure for implementing a feature: skill
     jobs/             PostgreSQL job queue
     worker/           worker entry point
     backup/           backup command line: python -m app.backup list | create | restore
+    seeds/            seed files, e.g. sources.json (starter catalogue of Quellen); imported only by the admin action ("Seed Data")
     web/              thin FastAPI routes, Jinja templates, static files
   migrations/         Alembic
   tests/

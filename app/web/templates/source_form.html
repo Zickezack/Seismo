@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% set heading = source.name if source else "Neue Quelle" %}
+{% block title %}{{ heading }}{% endblock %}
+
+{% macro number_field(name, label, limits, hint) %}
+<div class="field">
+  <label for="{{ name }}">{{ label }}</label>
+  <input id="{{ name }}" name="{{ name }}" type="number" inputmode="numeric" min="{{ limits[0] }}" max="{{ limits[1] }}"
+         step="1" required value="{{ values[name] }}" aria-describedby="{{ name }}-hint">
+  <p class="hint" id="{{ name }}-hint">{{ hint }}</p>
+</div>
+{% endmacro %}
+
+{% block content %}
+<p><a href="/sources" data-testid="back">Zurück zu den Quellen</a></p>
+<h1 data-testid="heading">{{ heading }}</h1>
+{% if error %}
+<p class="message message-error" role="alert" data-testid="form-error">{{ error }}</p>
+{% endif %}
+
+<section class="card stack">
+  {# An existing source saves in place (static/app.js); a new one goes back to the list. #}
+  <form class="form-grid" method="post" action="{{ '/sources/%d' % source.id if source else '/sources' }}"{% if source %} data-inline-save{% endif %} data-testid="source-form">
+    <div class="field">
+      <label for="name">Name</label>
+      <input id="name" name="name" type="text" required maxlength="{{ max_lengths.name }}" value="{{ values.name }}">
+    </div>
+    <div class="field">
+      <label for="adapter_type">Typ</label>
+      <select id="adapter_type" name="adapter_type" aria-describedby="adapter_type-hint">
+        {% for code, label in adapter_types.items() %}
+        <option value="{{ code }}"{% if values.adapter_type == code %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <p class="hint" id="adapter_type-hint">Bestimmt, wie die Quelle abgerufen wird.</p>
+    </div>
+    <div class="field field-wide">
+      <label for="url">URL</label>
+      <input id="url" name="url" type="url" required maxlength="{{ max_lengths.url }}" value="{{ values.url }}" aria-describedby="url-hint">
+      <p class="hint" id="url-hint">Adresse des Feeds, mit http:// oder https://.</p>
+    </div>
+    <div class="field">
+      <label for="language">Sprache</label>
+      <select id="language" name="language" aria-describedby="language-hint">
+        <option value="">{{ no_language_label }}</option>
+        {% for code, label in languages.items() %}
+        <option value="{{ code }}"{% if values.language == code %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <p class="hint" id="language-hint">Sprache der Artikel. Die Sprache jedes Artikels wird zusätzlich erkannt.</p>
+    </div>
+    <div class="field">
+      <span class="field-label">Abruf</span>
+      <label class="checkbox-label"><input id="is_active" name="is_active" type="checkbox"{% if values.is_active %} checked{% endif %} aria-describedby="is_active-hint" data-testid="is_active"> Aktiv</label>
+      <p class="hint" id="is_active-hint">Nur aktive Quellen werden abgerufen.</p>
+    </div>
+    {{ number_field("fetch_interval_minutes", "Abrufintervall (Minuten)", fetch_interval, "Zeit zwischen zwei Abrufen der Quelle.") }}
+    {{ number_field("raw_text_retention_days", "Rohtext aufbewahren (Tage)", retention, "Ab der erfolgreichen Verarbeitung; 0 löscht den Volltext gleich danach. Metadaten und Belege bleiben.") }}
+    <div class="field field-wide">
+      <label for="terms_note">Nutzungsbedingungen</label>
+      <textarea id="terms_note" name="terms_note" rows="4" maxlength="{{ max_lengths.terms_note }}" aria-describedby="terms_note-hint">{{ values.terms_note or "" }}</textarea>
+      <p class="hint" id="terms_note-hint">Was die Quelle zur Nutzung ihrer Inhalte erlaubt, am besten mit Link. Die Prüfung liegt beim Admin.</p>
+    </div>
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="save">{{ "Speichern" if source else "Anlegen" }}</button>
+      {% if source %}<span class="save-status" data-save-status role="status" data-testid="save-status"></span>{% endif %}
+    </div>
+  </form>
+  {% if source %}
+  <p class="hint" data-testid="timestamps">Angelegt {{ source.created_at|local_time }} · Zuletzt geändert {{ source.updated_at|local_time }}</p>
+  {% endif %}
+</section>
+{% endblock %}

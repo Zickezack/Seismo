@@ -87,3 +87,53 @@ for (const nav of document.querySelectorAll("[data-section-nav]")) {
     }
   });
 }
+
+// Delete confirmation (requirements.md, "Destructive and Bulk Actions", item 1): a delete button of a
+// bulk form opens the dialog of templates/base.html, which names what goes and unlocks its confirm
+// button only after a short countdown. data-confirm-delete holds the item word, "singular|plural".
+const CONFIRM_DELAY_SECONDS = 3;
+const MAX_NAMES_IN_DIALOG = 10;
+const confirmDialog = document.querySelector("[data-confirm-dialog]");
+if (confirmDialog) {
+  const title = confirmDialog.querySelector("[data-confirm-title]");
+  const nameList = confirmDialog.querySelector("[data-confirm-names]");
+  const confirmButton = confirmDialog.querySelector("[data-confirm-button]");
+  let pendingButton = null;
+  let timer = null;
+
+  const countDown = (seconds) => {
+    confirmButton.disabled = seconds > 0;
+    confirmButton.textContent = seconds > 0 ? `Löschen (${seconds})` : "Löschen";
+    if (seconds > 0) {
+      timer = setTimeout(() => countDown(seconds - 1), 1000);
+    }
+  };
+
+  for (const button of document.querySelectorAll("[data-confirm-delete]")) {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      const [singular, plural] = button.dataset.confirmDelete.split("|");
+      const names = [...button.form.querySelectorAll("[data-select-row]:checked")].map((box) => box.dataset.name);
+      title.textContent = `${names.length} ${names.length === 1 ? singular : plural} löschen?`;
+      const shown = names.slice(0, MAX_NAMES_IN_DIALOG);
+      if (names.length > shown.length) {
+        shown.push(`und ${names.length - shown.length} weitere`);
+      }
+      nameList.replaceChildren(...shown.map((name) => Object.assign(document.createElement("li"), { textContent: name })));
+      pendingButton = button;
+      // Escape keeps the previous return value; a stale "confirm" must never delete.
+      confirmDialog.returnValue = "";
+      confirmDialog.showModal();
+      countDown(CONFIRM_DELAY_SECONDS);
+    });
+  }
+
+  confirmDialog.addEventListener("close", () => {
+    clearTimeout(timer);
+    if (confirmDialog.returnValue === "confirm" && pendingButton) {
+      // Submits with the button's formaction; no click event, so this handler does not run again.
+      pendingButton.form.requestSubmit(pendingButton);
+    }
+    pendingButton = null;
+  });
+}
