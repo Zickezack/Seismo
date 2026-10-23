@@ -46,6 +46,35 @@ def reserve_slot(connection: Connection, host: str, interval_seconds: float) -> 
     return next_slot_at - timedelta(seconds=interval_seconds), now
 
 
+def take_free_slot(connection: Connection, host: str, interval_seconds: float) -> datetime | None:
+    """Send a request now if the host is free - no slot reserved ahead, no pause, the previous request at least
+    an interval back - and record it; else when it is free next, for a backfill that leaves every slot to live
+    requests. None when the request may go."""
+    connection.execute(insert(FetchHost).values(host=host).on_conflict_do_nothing(index_elements=[FetchHost.host]))
+    free_at = _free_at(interval_seconds)
+    taken = (
+        update(FetchHost)
+        .where(FetchHost.host == host, free_at <= func.now())
+        .values(next_slot_at=func.now() + interval_seconds * _ONE_SECOND, last_request_at=func.now())
+        .returning(FetchHost.host)
+    )
+    if connection.execute(taken).first() is not None:
+        return None
+    return free_at_of(connection, host, interval_seconds)
+
+
+def free_at_of(connection: Connection, host: str, interval_seconds: float) -> datetime:
+    """When the host is free for a request that reserves no slot."""
+    statement = select(func.greatest(_free_at(interval_seconds), func.now())).where(FetchHost.host == host)
+    return connection.execute(statement).scalar_one_or_none() or connection.execute(select(func.now())).scalar_one()
+
+
+def _free_at(interval_seconds: float):
+    # GREATEST skips NULL: a host without a pause or without a request yet.
+    last_request_ends = FetchHost.last_request_at + interval_seconds * _ONE_SECOND
+    return func.greatest(FetchHost.next_slot_at, FetchHost.paused_until, last_request_ends)
+
+
 def pause(connection: Connection, host: str, seconds: float) -> None:
     """No request to the host for `seconds` from now; a pause that lasts longer stays."""
     until = func.now() + seconds * _ONE_SECOND

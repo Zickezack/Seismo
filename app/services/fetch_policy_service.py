@@ -8,6 +8,9 @@ worker and each waiting request gets a slot of its own.
 
 A host that answers with Retry-After (e.g. 429, 503) is paused that long, at most a day: no request goes there
 before - robots.txt included - and every job for it is deferred to a slot after the pause (story 4).
+
+A backfill request (story 6) reserves no slot: it goes only while the host is free and otherwise comes back when
+it is, so live requests always get the next slot.
 """
 import time
 from dataclasses import dataclass
@@ -75,12 +78,18 @@ class PoliteHttp:
     """An HttpClient for one job: asks robots.txt first and keeps the host's minimum interval."""
 
     def __init__(
-        self, engine: Engine, http: HttpClient, min_interval_seconds: float, reserved_slot: datetime | None = None
+        self,
+        engine: Engine,
+        http: HttpClient,
+        min_interval_seconds: float,
+        reserved_slot: datetime | None = None,
+        backfill: bool = False,
     ) -> None:
         self._engine = engine
         self._http = http
         self._min_interval = min_interval_seconds
         self._reserved_slot = reserved_slot
+        self._backfill = backfill
 
     def get(self, url: str, accept: str) -> HttpResponse:
         """Raises FetchDisallowed, HostBusy, or what HttpClient.get raises."""
@@ -88,6 +97,9 @@ class PoliteHttp:
         with self._engine.connect() as connection:
             known = fetch_host_repository.get(connection, host, ROBOTS_MAX_AGE)
         if known is not None and known.paused:
+            if self._backfill:
+                with self._engine.connect() as connection:
+                    raise HostBusy(fetch_host_repository.free_at_of(connection, host, self._min_interval), reserved=False)
             # A slot reserved before the pause began is void; the new one lies after it.
             with self._engine.begin() as connection:
                 slot, _now = fetch_host_repository.reserve_slot(connection, host, self._min_interval)
@@ -112,7 +124,16 @@ class PoliteHttp:
             fetch_host_repository.save_robots(connection, host, rules.status, rules.robots_txt)
         return rules
 
+    def _take_free_slot(self, host: str, interval: float) -> None:
+        with self._engine.begin() as connection:
+            free_at = fetch_host_repository.take_free_slot(connection, host, interval)
+        if free_at is not None:
+            raise HostBusy(free_at, reserved=False)
+
     def _wait_for_turn(self, host: str, interval: float) -> None:
+        if self._backfill:
+            self._take_free_slot(host, interval)
+            return
         if self._reserved_slot is None:
             with self._engine.begin() as connection:
                 slot, now = fetch_host_repository.reserve_slot(connection, host, interval)

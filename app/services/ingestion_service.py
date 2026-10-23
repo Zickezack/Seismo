@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy import Connection, Engine
 
-from app.db.models import FullTextStatus
+from app.db.models import LIVE_PRIORITY, FullTextStatus
 from app.repositories import article_repository, raw_text_repository, source_repository
 from app.services import job_service, platform_settings_service, source_service
 from app.services.fetch_policy_service import PoliteHttp
@@ -100,20 +100,26 @@ def fetch_source(
         if not source_repository.lock_sources(connection, [source_id]):
             return
         article_ids = article_repository.insert_new(connection, rows)
-        for article_id in article_ids:
-            kind = job_service.FETCH_ARTICLE_JOB_KIND
-            job_service.enqueue(
-                connection,
-                kind,
-                {"article_id": article_id},
-                dedupe_key=f"{kind}:{article_id}",
-                max_attempts=job_service.FETCH_ARTICLE_MAX_ATTEMPTS,
-            )
+        enqueue_full_texts(connection, article_ids, LIVE_PRIORITY)
         source_repository.mark_fetched(connection, source_id)
         # IDs and counts only, never titles (datamodel.md, rule 13).
         logger.info("Source fetched", extra={"source_id": source_id, "items": len(items), "new_articles": len(article_ids)})
 
     return store
+
+
+def enqueue_full_texts(connection: Connection, article_ids: Iterable[int], priority: int) -> None:
+    """A full-text job for each new article, in the transaction that stores them; a backfill's behind live work."""
+    kind = job_service.FETCH_ARTICLE_JOB_KIND
+    for article_id in article_ids:
+        job_service.enqueue(
+            connection,
+            kind,
+            {"article_id": article_id},
+            dedupe_key=f"{kind}:{article_id}",
+            max_attempts=job_service.FETCH_ARTICLE_MAX_ATTEMPTS,
+            priority=priority,
+        )
 
 
 def _record_failure(engine: Engine, source_id: int, error: Exception) -> None:
@@ -135,13 +141,19 @@ def request_interval(platform_seconds: int, source_seconds: int | None) -> int:
 
 
 def fetch_full_text(
-    engine: Engine, article_id: int, contact: str, reserved_slot: datetime | None = None, final_attempt: bool = False
+    engine: Engine,
+    article_id: int,
+    contact: str,
+    reserved_slot: datetime | None = None,
+    final_attempt: bool = False,
+    backfill: bool = False,
 ) -> Callable[[Connection], None] | None:
     """First phase of a full-text job: fetch the article's page. Returns the effect that records the outcome.
 
     A lasting outcome (stored, disallowed by robots.txt, a content type not kept, HTTP 4xx, source inactive
     or deleted) settles the article. A passing failure (timeout, HTTP 5xx) raises SourceUnavailable to be
-    retried; on the final attempt it settles the article as failed instead. HostBusy defers the job.
+    retried; on the final attempt it settles the article as failed instead. HostBusy defers the job. A
+    backfill's full text takes only a free request slot (fetch_policy_service).
     """
     with engine.connect() as connection:
         article = article_repository.get_for_full_text(connection, article_id)
@@ -154,7 +166,8 @@ def fetch_full_text(
     min_interval = request_interval(platform_interval, article.source_min_request_interval_seconds)
     try:
         with HttpClient(contact) as http:
-            response = PoliteHttp(engine, http, min_interval, reserved_slot).get(article.url, FULL_TEXT_ACCEPT)
+            polite = PoliteHttp(engine, http, min_interval, reserved_slot, backfill=backfill)
+            response = polite.get(article.url, FULL_TEXT_ACCEPT)
     except FetchDisallowed as error:
         return _settle(article_id, FullTextStatus.DISALLOWED, str(error))
     except SourceRejected as error:

@@ -25,7 +25,7 @@ JSON = {"Accept": "application/json"}
 
 def job(job_id, status, **fields):
     values = dict(
-        id=job_id, kind="testjob", status=status, attempts=1, max_attempts=5, created_at=NOW, updated_at=NOW,
+        id=job_id, kind="testjob", status=status, attempts=1, max_attempts=5, priority=0, created_at=NOW, updated_at=NOW,
         run_after=NOW, lease_expires_at=None, lease_owner=None, last_error=None,
     )
     return JobListItem(**values | fields)

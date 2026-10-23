@@ -41,6 +41,13 @@ class FullTextStatus(StrEnum):
     SKIPPED = "skipped"  # source inactive or deleted, or fetched before full texts existed
 
 
+class BackfillStatus(StrEnum):
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"  # by the admin, or the source was deactivated
+
+
 class RobotsStatus(StrEnum):
     RULES = "rules"  # robots_txt holds the rules
     ALLOW_ALL = "allow_all"  # no robots.txt (404 and other 4xx)
@@ -49,6 +56,9 @@ class RobotsStatus(StrEnum):
 
 # A job with a dedupe key exists only once while it is waiting or running.
 ACTIVE_JOB_STATUSES = (JobStatus.QUEUED, JobStatus.RUNNING)
+# Job.priority: a worker claims due jobs with a lower number first.
+LIVE_PRIORITY = 0
+BACKFILL_PRIORITY = 1
 
 
 class Job(Base):
@@ -64,6 +74,8 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String(20), server_default=JobStatus.QUEUED.value)
     attempts: Mapped[int] = mapped_column(server_default="0")
     max_attempts: Mapped[int] = mapped_column(server_default="5")
+    # Claimed in this order, then by run_after: live work (0) before backfill (1).
+    priority: Mapped[int] = mapped_column(SmallInteger, server_default=str(LIVE_PRIORITY))
     run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # Set on every claim; a worker may only write to the job while its token is still the current one.
     lease_token: Mapped[uuid.UUID | None]
@@ -79,7 +91,9 @@ class Job(Base):
         CheckConstraint(status.in_([s.value for s in JobStatus]), name="status"),
         CheckConstraint(attempts >= 0, name="attempts"),
         CheckConstraint(max_attempts >= 1, name="max_attempts"),
-        Index("ix_job_status_run_after", status, run_after),
+        CheckConstraint(priority >= 0, name="priority"),
+        # The claim's order (job_repository.claim_next).
+        Index("ix_job_status_priority_run_after", status, priority, run_after),
         Index(
             "uq_job_dedupe_key_active",
             dedupe_key,
@@ -155,6 +169,31 @@ class Source(Base):
     )
 
 
+class Backfill(Base):
+    """A period of a source fetched after the fact (UI term: Backfill), behind live work (datamodel.md)."""
+
+    __tablename__ = "backfill"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("source.id", ondelete="CASCADE"), index=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Everything from here to period_end is fetched; the next request ends here. Moves back towards period_start.
+    cursor: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), server_default=BackfillStatus.RUNNING.value)
+    articles_found: Mapped[int] = mapped_column(server_default="0")
+    articles_new: Mapped[int] = mapped_column(server_default="0")
+    # Shown to the admin, never logged (datamodel.md, rule 13).
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(status.in_([s.value for s in BackfillStatus]), name="status"),
+        CheckConstraint(period_start < period_end, name="period"),
+    )
+
+
 class SeedLogEntry(Base):
     """A seed item imported once (architecture.md, "Seed Data"), whatever became of its record since."""
 
@@ -186,6 +225,8 @@ class Article(Base):
     full_text_status: Mapped[str] = mapped_column(String(20), server_default=FullTextStatus.PENDING.value)
     # Why the full text is not stored: shown to the admin, never logged (datamodel.md, rule 13).
     full_text_error: Mapped[str | None] = mapped_column(Text)
+    # The backfill that found it; empty for live articles and once the backfill record is gone.
+    backfill_id: Mapped[int | None] = mapped_column(ForeignKey("backfill.id", ondelete="SET NULL"), index=True)
 
     __table_args__ = (
         UniqueConstraint(source_id, item_key),

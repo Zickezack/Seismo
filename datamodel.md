@@ -40,6 +40,7 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Alert | `alert_rule` | A rule that notifies about new events or material changes. | none |
 | Job | `job` | A unit of work in the PostgreSQL job queue, with status, lease and retry count. | none |
 | Plattform-Einstellungen | `platform_settings` | Settings that apply to the whole instance, edited by the admin (`requirements.md`, "Settings"). | none |
+| Backfill | `backfill` | A past period of a Quelle fetched after the fact, page by page, always behind live work. | none |
 | Domain | `fetch_host` | The fetch state of one host: its robots.txt, its request slots and a pause it asked for. Not shown in the UI. | none |
 | Seed-Protokoll | `seed_log` | Which items of a seed source (e.g. the starter catalogue of Quellen) were imported once (`architecture.md`, "Seed Data"). Not shown in the UI. | none |
 
@@ -79,6 +80,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | status | varchar(20) | yes | `queued` | `queued`, `running`, `succeeded`, `failed` (check constraint). UI: Wartend, Läuft, Erledigt, Fehlgeschlagen. |
   | attempts | integer | yes | 0 | Counted when a worker claims the job; not counted when a stopping worker hands it back. Reset to 0 when the admin requeues a failed job. |
   | max_attempts | integer | yes | 5 | After the last attempt the job fails instead of being retried. Volltext abrufen: 31, about 24 hours with the growing delay. |
+  | priority | smallint | yes | 0 | A worker claims due jobs with a lower number first: 0 live work, 1 backfill (its pages and the full texts of its articles). Index `ix_job_status_priority_run_after`. UI: "(Backfill)" after the kind. |
   | run_after | timestamptz | yes | now() | Earliest time of the next attempt; failed attempts wait 30 s, doubling up to 1 h. |
   | lease_token | uuid | no | | New on every claim. A worker writes to the job only while its token is still current (fencing). |
   | lease_owner | varchar(200) | no | | Worker holding the lease: container hostname and process id. |
@@ -160,6 +162,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | language | varchar(10) | no | | ISO 639 code as the source states it for the item or the feed (GDELT: its English language name, translated), else the language of the Quelle; empty if neither has one. |
   | full_text_status | varchar(20) | yes | `pending` | `pending`, `stored`, `disallowed` (robots.txt), `unsupported` (content type), `failed`, `skipped` (source inactive or deleted, or stored before full texts existed); check constraint. Set once, from `pending`. UI: Volltext - Ausstehend, Gespeichert, Gesperrt, Nicht unterstützt, Fehlgeschlagen, Übersprungen. |
   | full_text_error | text | no | | Why the full text is not stored, e.g. `HTTP 404`. Shown to the admin, never logged. |
+  | backfill_id | bigint | no | | The Backfill that found it, foreign key `ON DELETE SET NULL`; empty for an article of the live fetch, also when a backfill finds it again. |
 
 - Relationships: belongs to a Quelle while it exists; has at most one Rohtext.
 - Rules: metadata is kept permanently. A source adapter (`app/sources/`) returns items in one shape; only items within the maximum age (Plattform-Einstellungen) and with a web link become articles.
@@ -179,6 +182,28 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
 - Relationships: belongs to one Artikel.
 - Rules: the temporary raw-data layer: deleted after its source's retention period once processing has succeeded (rule 8, epic Verdichtung und Daten-Lifecycle); nothing deletes it yet. The normalisation turns it into plain text.
+- Privacy: none
+
+### Backfill (`backfill`)
+- Store: SQL table `backfill`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | source_id | bigint | yes | | Foreign key to `source`, `ON DELETE CASCADE`: a backfill goes with its source, its articles stay. |
+  | period_start | timestamptz | yes | | Start of the first day, UTC. Not before the adapter's reach (GDELT: 3 months). UI: Zeitraum. |
+  | period_end | timestamptz | yes | | End of the last day, UTC, at most the moment it was started; after `period_start` (check constraint). |
+  | cursor | timestamptz | yes | | Everything from here to `period_end` is fetched; the next page ends here. Starts at `period_end`, moves back to `period_start`. UI: Fortschritt. |
+  | status | varchar(20) | yes | `running` | `running`, `done`, `failed`, `cancelled` (check constraint). UI: Läuft, Abgeschlossen, Fehlgeschlagen, Abgebrochen. |
+  | articles_found | integer | yes | 0 | Articles of all pages, also those known before. |
+  | articles_new | integer | yes | 0 | Articles stored by it. UI: Artikel - "n neu von m". |
+  | last_error | text | no | | Why it failed or ended, e.g. `Quelle inaktiv`. Shown to the admin, never logged. |
+  | created_at | timestamptz | yes | now() | UI: Gestartet. |
+  | finished_at | timestamptz | no | | |
+
+- Relationships: belongs to a Quelle; has many Artikel (`article.backfill_id`).
+- Rules: started by the admin for an active source, over whole days up to today. One job per page (`Backfill abrufen`, priority 1): the newest page of what is left; a full page continues one second past its oldest item, a page that is not full ends it (a feed: one request). Its jobs and the full texts of its new articles wait behind every live job and take only free request slots. Cancelling (all or nothing, running ones only) stops further pages; queued full texts still come. A deactivated source cancels it, a source error fails it.
 - Privacy: none
 
 ### Domain (`fetch_host`)

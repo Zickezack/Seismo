@@ -255,6 +255,18 @@ def test_only_due_jobs_of_the_worker_kinds_are_claimed(queue):
     assert claim(queue, kinds=("other-kind",)) is not None
 
 
+def test_live_work_is_claimed_before_backfill_however_long_the_backfill_waited(queue):
+    backfill = enqueue(queue, priority=job_service.BACKFILL_PRIORITY)
+    with queue.begin() as connection:
+        connection.execute(update(Job).where(Job.id == backfill).values(run_after=func.now() - timedelta(hours=1)))
+    live = enqueue(queue)
+
+    first, second = claim(queue), claim(queue)
+
+    assert (first.id, first.priority) == (live, job_service.LIVE_PRIORITY)
+    assert (second.id, second.priority) == (backfill, job_service.BACKFILL_PRIORITY)
+
+
 def test_lease_is_renewed_while_the_handler_runs(queue):
     job_id = enqueue(queue)
     job = claim(queue)

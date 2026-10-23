@@ -48,8 +48,8 @@ class FakeAdapter:
 
 
 class Web:
-    """The network: robots.txt per host and answers per URL - or per URL without its parameters, e.g. for an API -
-    with extra headers per URL; any other page is a small HTML page."""
+    """The network: robots.txt per host and answers per URL - or per URL without its parameters, e.g. for an API,
+    then also as a function of the URL - with extra headers per URL; any other page is a small HTML page."""
 
     def __init__(self):
         self.robots, self.pages, self.headers, self.requests = {}, {}, {}, []
@@ -61,7 +61,9 @@ class Web:
             status, body = self.robots.get(request.url.host, (404, ""))
             return httpx2.Response(status, text=body)
         default = (200, "text/html; charset=utf-8", f"<p>{url}</p>".encode())
-        status, content_type, body = self.pages.get(url) or self.pages.get(url.split("?")[0], default)
+        answer = self.pages.get(url) or self.pages.get(url.split("?")[0], default)
+        # An answer may depend on the parameters, e.g. an API's period.
+        status, content_type, body = answer(url) if callable(answer) else answer
         headers = {"content-type": content_type} if content_type else {}
         return httpx2.Response(status, content=body, headers=headers | self.headers.get(url, {}))
 

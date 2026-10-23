@@ -1,11 +1,14 @@
-"""Quellen: the list with its bulk actions, a form for a new source, a page that edits one in place."""
+"""Quellen: the list with its bulk actions, a form for a new source, a page that edits one in place and starts
+and cancels its backfills."""
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from app.services import article_service, ingestion_service, platform_settings_service, source_service
+from app.services import article_service, backfill_service, ingestion_service, platform_settings_service, source_service
+from app.services.backfill_service import InvalidBackfill
 from app.services.bulk import BulkResult
 from app.services.source_service import InvalidSource, Source
 from app.web.forms import form_values, wants_json
@@ -16,6 +19,9 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 SAVED = "Gespeichert"
 NOT_FOUND = "Quelle nicht gefunden."
 SourceIds = Annotated[list[int], Form(alias="source_id")]
+BackfillIds = Annotated[list[int], Form(alias="backfill_id")]
+# What the backfill form suggests: the last month, within the source's reach.
+DEFAULT_BACKFILL_DAYS = 30
 FormValues = Annotated[dict[str, str], Depends(form_values)]
 
 
@@ -76,6 +82,29 @@ def edit_source(request: Request, source_id: int) -> Response:
     return _form_page(request, source, source=source)
 
 
+@router.post("/{source_id}/backfills")
+def start_backfill(request: Request, source_id: int, form: FormValues) -> Response:
+    try:
+        backfill = backfill_service.start(request.app.state.engine, source_id, form)
+    except InvalidBackfill as error:
+        flash(request, f"Backfill nicht gestartet: {error}", "error")
+    else:
+        flash(request, f"Backfill gestartet: {backfill.first_day:%d.%m.%Y} bis {backfill.last_day:%d.%m.%Y}.")
+    return RedirectResponse(f"/sources/{source_id}#backfill", status_code=303)
+
+
+@router.post("/{source_id}/backfills/cancel")
+def cancel_backfills(request: Request, source_id: int, backfill_ids: BackfillIds = []) -> Response:
+    result = backfill_service.cancel(request.app.state.engine, source_id, backfill_ids)
+    if result.blocked:
+        flash(request, f"Nichts abgebrochen, blockiert: {name_list(result.blocked)}.", "error")
+    elif result.processed:
+        flash(request, f"{result.processed} {'Backfill' if result.processed == 1 else 'Backfills'} abgebrochen.")
+    else:
+        flash(request, "Keine Backfills ausgewählt.", "error")
+    return RedirectResponse(f"/sources/{source_id}#backfill", status_code=303)
+
+
 @router.post("/{source_id}")
 def save_source(request: Request, source_id: int, form: FormValues) -> Response:
     """static/app.js saves in place and gets JSON; without JavaScript the page is shown again with a message."""
@@ -92,7 +121,8 @@ def save_source(request: Request, source_id: int, form: FormValues) -> Response:
 def _form_page(
     request: Request, values: Mapping[str, object] | Source, *, source: Source | None = None, error: str | None = None
 ) -> Response:
-    """The form for a new source (without `source`) or the edit page of one."""
+    """The form for a new source (without `source`) or the edit page of one, with its backfills."""
+    engine = request.app.state.engine
     context = {
         "values": values,
         "source": source,
@@ -104,7 +134,7 @@ def _form_page(
         "retention": source_service.RAW_TEXT_RETENTION_DAYS,
         "min_request_interval": source_service.MIN_REQUEST_INTERVAL_SECONDS,
         # What an empty "Mindestabstand" means.
-        "platform_min_interval": platform_settings_service.current(request.app.state.engine).domain_min_interval_seconds,
+        "platform_min_interval": platform_settings_service.current(engine).domain_min_interval_seconds,
         "max_lengths": {
             "name": source_service.MAX_NAME_LENGTH,
             "url": source_service.MAX_URL_LENGTH,
@@ -112,6 +142,17 @@ def _form_page(
             "terms_note": source_service.MAX_TERMS_NOTE_LENGTH,
         },
     }
+    if source is not None:
+        now = datetime.now(UTC)
+        earliest = backfill_service.earliest_day(source, now)
+        today = now.date()
+        suggested_start = today - timedelta(days=DEFAULT_BACKFILL_DAYS)
+        context |= {
+            "backfills": backfill_service.list_for_source(engine, source.id),
+            "backfill_earliest": earliest,
+            "backfill_today": today,
+            "backfill_start": max(suggested_start, earliest) if earliest else suggested_start,
+        }
     return templates.TemplateResponse(request, "source_form.html", context)
 
 

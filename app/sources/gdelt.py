@@ -24,6 +24,8 @@ FIRST_WINDOW = timedelta(hours=24)
 # GDELT's shortest window; the longest is the live one, anything older belongs to the backfill (story 6).
 MIN_WINDOW = timedelta(minutes=15)
 MAX_WINDOW = timedelta(days=7)
+# How far back the DOC API searches: the last 3 months.
+BACKFILL_REACH = timedelta(days=90)
 MAX_DETAIL_LENGTH = 300
 # Exactly this shape: strptime alone would read a shortened "T1415Z" as 14:01:05.
 _SEENDATE = re.compile(r"\d{8}T\d{6}Z")
@@ -48,11 +50,20 @@ class GdeltAdapter:
     label = "GDELT"
     needs_query = True
     default_url = API_URL
+    page_size = MAX_RECORDS
+    backfill_reach = BACKFILL_REACH
 
     def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
+        return self._articles(source, http, request_url(source, datetime.now(UTC)))
+
+    def fetch_period(self, source: SourceSettings, http: Http, start: datetime, end: datetime) -> list[FetchedItem]:
+        # As GDELT returns them: a full page means there may be more, older ones (backfill_service).
+        return self._articles(source, http, period_url(source, start, end))
+
+    def _articles(self, source: SourceSettings, http: Http, url: str) -> list[FetchedItem]:
         if not source.query:
             raise SourceRejected("Keine Suchanfrage")
-        response = http.get(request_url(source, datetime.now(UTC)), ACCEPT)
+        response = http.get(url, ACCEPT)
         try:
             # strict=False: titles may hold control characters.
             answer = json.loads(response.content.decode("utf-8", errors="replace"), strict=False)
@@ -71,16 +82,24 @@ def request_url(source: SourceSettings, now: datetime) -> str:
     """The API request for the articles GDELT saw since the last successful fetch, newest first."""
     since = source.last_fetched_at - OVERLAP if source.last_fetched_at else now - FIRST_WINDOW
     window = min(max(now - since, MIN_WINDOW), MAX_WINDOW)
+    return _url(source, {"timespan": f"{math.ceil(window.total_seconds() / 60)}min"})
+
+
+def period_url(source: SourceSettings, start: datetime, end: datetime) -> str:
+    """The API request for the articles GDELT saw from `start` to `end` (UTC), newest first."""
+    return _url(source, {"startdatetime": _gdelt_time(start), "enddatetime": _gdelt_time(end)})
+
+
+def _url(source: SourceSettings, window: dict) -> str:
     parameters = {
-        "query": source.query,
-        "mode": "ArtList",
-        "format": "json",
-        "maxrecords": MAX_RECORDS,
-        "sort": "DateDesc",
-        "timespan": f"{math.ceil(window.total_seconds() / 60)}min",
+        "query": source.query, "mode": "ArtList", "format": "json", "maxrecords": MAX_RECORDS, "sort": "DateDesc",
     }
     separator = "&" if urlsplit(source.url).query else "?"
-    return f"{source.url}{separator}{urlencode(parameters, quote_via=quote)}"
+    return f"{source.url}{separator}{urlencode(parameters | window, quote_via=quote)}"
+
+
+def _gdelt_time(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime("%Y%m%d%H%M%S")
 
 
 def seen_at(raw: object) -> datetime | None:

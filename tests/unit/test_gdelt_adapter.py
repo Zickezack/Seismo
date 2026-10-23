@@ -1,5 +1,5 @@
 """GDELT adapter against a sample answer of the DOC 2.0 API (tests/unit/feeds/gdelt.json), without a network."""
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -7,7 +7,7 @@ import pytest
 
 from app.sources.base import FetchedItem
 from app.sources.errors import SourceRejected
-from app.sources.gdelt import ACCEPT, API_URL, GdeltAdapter, request_url, seen_at
+from app.sources.gdelt import ACCEPT, API_URL, GdeltAdapter, period_url, request_url, seen_at
 from app.sources.http import HttpResponse
 
 SAMPLE = (Path(__file__).parent / "feeds" / "gdelt.json").read_bytes()
@@ -118,3 +118,24 @@ def test_an_address_with_parameters_of_its_own_keeps_them():
 @pytest.mark.parametrize("raw", ["20261023T1415Z", "20261323T141500Z", "2026-10-23T14:15:00Z", None, 20261023])
 def test_unreadable_seendate_is_unknown(raw):
     assert seen_at(raw) is None
+
+
+def test_period_request_names_start_and_end_in_utc():
+    start = datetime(2026, 8, 1, tzinfo=UTC)
+    end = datetime(2026, 8, 2, 14, 30, 5, tzinfo=timezone(timedelta(hours=2)))
+
+    asked = parameters(period_url(Source(), start, end))
+
+    assert (asked["startdatetime"], asked["enddatetime"]) == ("20260801000000", "20260802123005")
+    assert "timespan" not in asked
+    assert (asked["sort"], asked["maxrecords"], asked["mode"]) == ("DateDesc", "250", "ArtList")
+
+
+def test_period_returns_the_page_as_gdelt_sent_it():
+    http = FakeHttp()
+
+    items = GdeltAdapter().fetch_period(Source(), http, NOW - timedelta(days=30), NOW - timedelta(days=29))
+
+    # Undated ones too: whether the page was full decides whether older ones may follow.
+    assert len(items) == 3
+    assert "startdatetime=" in http.requests[0][0]

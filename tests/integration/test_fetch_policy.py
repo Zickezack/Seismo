@@ -166,3 +166,64 @@ def test_a_robots_txt_that_asks_for_a_pause_pauses_the_host(database):
         PoliteHttp(database, HttpClient("", httpx2.MockTransport(answer)), 10).get("https://bank.example/a", "*/*")
 
     assert timedelta(seconds=299) < paused_for(database) <= timedelta(seconds=300)
+
+
+def host_row(database):
+    with database.connect() as connection:
+        return connection.execute(
+            text("SELECT next_slot_at - now() AS next_slot, now() - last_request_at AS since_request FROM fetch_host")
+        ).one()
+
+
+def test_a_backfill_request_goes_while_the_host_is_free(database, web):
+    requests, http = web
+
+    PoliteHttp(database, http, 10, backfill=True).get("https://bank.example/a", "*/*")
+
+    assert requests == ["https://bank.example/robots.txt", "https://bank.example/a"]
+    row = host_row(database)
+    assert timedelta(seconds=9) < row.next_slot <= timedelta(seconds=10) and row.since_request < timedelta(seconds=1)
+
+
+def test_a_backfill_request_never_takes_a_slot_from_live_requests(database, web):
+    requests, http = web
+    PoliteHttp(database, http, 10).get("https://bank.example/a", "*/*")
+    with pytest.raises(HostBusy):
+        PoliteHttp(database, http, 10).get("https://bank.example/b", "*/*")  # live: reserves the slot in 10 s
+
+    with pytest.raises(HostBusy) as busy:
+        PoliteHttp(database, http, 10, backfill=True).get("https://bank.example/c", "*/*")
+
+    # Free after the reserved live slot, and nothing reserved for it: the next live request gets that very slot.
+    assert not busy.value.reserved
+    assert timedelta(seconds=19) < busy.value.slot - datetime.now(UTC) <= timedelta(seconds=20)
+    assert timedelta(seconds=19) < reserve(database) <= timedelta(seconds=20)
+    assert "https://bank.example/c" not in requests
+
+
+def test_a_backfill_request_keeps_the_interval_after_a_late_live_request(database, web):
+    _requests, http = web
+    with database.begin() as connection:
+        # No slot ahead, but a live job that ran late sent its request just now.
+        fetch_host_repository.save_robots(connection, "bank.example", "allow_all", None)
+        connection.execute(text("UPDATE fetch_host SET next_slot_at = now() - interval '1 minute', last_request_at = now()"))
+
+    with pytest.raises(HostBusy) as busy:
+        PoliteHttp(database, http, 10, backfill=True).get("https://bank.example/a", "*/*")
+
+    assert timedelta(seconds=9) < busy.value.slot - datetime.now(UTC) <= timedelta(seconds=10)
+
+
+def test_a_backfill_request_waits_out_a_pause_without_reserving(database, web):
+    requests, http = web
+    with database.begin() as connection:
+        fetch_host_repository.pause(connection, "bank.example", 120)
+
+    with pytest.raises(HostBusy) as busy:
+        PoliteHttp(database, http, 10, backfill=True).get("https://bank.example/a", "*/*")
+
+    assert not busy.value.reserved
+    assert timedelta(seconds=119) < busy.value.slot - datetime.now(UTC) <= timedelta(seconds=120)
+    assert requests == []
+    # A live request still gets the first slot after the pause.
+    assert timedelta(seconds=119) < reserve(database) <= timedelta(seconds=120)

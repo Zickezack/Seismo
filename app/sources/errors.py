@@ -32,8 +32,12 @@ class FetchDisallowed(SourceRejected):
 
 
 class HostBusy(Exception):
-    """The host's next request slot lies ahead; `slot` is reserved for this request (fetch_policy_service)."""
+    """The host's next request slot lies ahead; `slot` is reserved for this request (fetch_policy_service).
 
-    def __init__(self, slot: datetime) -> None:
+    A backfill request reserves nothing (`reserved` False): `slot` is only when the host is free next.
+    """
+
+    def __init__(self, slot: datetime, reserved: bool = True) -> None:
         super().__init__(f"next slot at {slot.isoformat()}")
         self.slot = slot
+        self.reserved = reserved

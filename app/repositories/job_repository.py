@@ -18,6 +18,7 @@ class ClaimedJob:
     attempts: int
     max_attempts: int
     lease_token: uuid.UUID
+    priority: int = 0
 
 
 _CLEARED_LEASE = {"lease_token": None, "lease_owner": None, "lease_expires_at": None}
@@ -28,11 +29,13 @@ _CLEARED_LEASE = {"lease_token": None, "lease_owner": None, "lease_expires_at": 
 _ACTIVE_DEDUPE_PREDICATE = Job.status.in_([literal(status.value, literal_execute=True) for status in ACTIVE_JOB_STATUSES])
 
 
-def insert_job(connection: Connection, kind: str, payload: dict, dedupe_key: str | None, max_attempts: int) -> int | None:
+def insert_job(
+    connection: Connection, kind: str, payload: dict, dedupe_key: str | None, max_attempts: int, priority: int = 0
+) -> int | None:
     """The new job's id, or None when a job with this dedupe key is already waiting or running."""
     statement = (
         insert(Job)
-        .values(kind=kind, payload=payload, dedupe_key=dedupe_key, max_attempts=max_attempts)
+        .values(kind=kind, payload=payload, dedupe_key=dedupe_key, max_attempts=max_attempts, priority=priority)
         .on_conflict_do_nothing(index_elements=[Job.dedupe_key], index_where=_ACTIVE_DEDUPE_PREDICATE)
         .returning(Job.id)
     )
@@ -60,11 +63,14 @@ def requeue_expired_leases(connection: Connection, error: str) -> int:
 
 
 def claim_next(connection: Connection, kinds: Iterable[str], owner: str, lease_seconds: float) -> ClaimedJob | None:
-    """Take the next due job of one of these kinds. SKIP LOCKED: concurrent workers never get the same job."""
+    """Take the next due job of one of these kinds, live work before backfill (priority), then the longest due.
+
+    SKIP LOCKED: concurrent workers never get the same job.
+    """
     next_due = (
         select(Job.id)
         .where(Job.status == JobStatus.QUEUED, Job.run_after <= func.now(), Job.kind.in_(list(kinds)))
-        .order_by(Job.run_after, Job.id)
+        .order_by(Job.priority, Job.run_after, Job.id)
         .limit(1)
         .with_for_update(skip_locked=True)
         .scalar_subquery()
@@ -81,7 +87,7 @@ def claim_next(connection: Connection, kinds: Iterable[str], owner: str, lease_s
             started_at=func.now(),
             updated_at=func.now(),
         )
-        .returning(Job.id, Job.kind, Job.payload, Job.attempts, Job.max_attempts, Job.lease_token)
+        .returning(Job.id, Job.kind, Job.payload, Job.attempts, Job.max_attempts, Job.lease_token, Job.priority)
     )
     row = connection.execute(statement).one_or_none()
     return ClaimedJob(**row._mapping) if row else None

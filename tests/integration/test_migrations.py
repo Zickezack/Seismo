@@ -134,3 +134,21 @@ def test_existing_sources_have_no_query(engine):
 
     with engine.connect() as connection:
         assert connection.execute(text("SELECT query FROM source")).scalar_one() is None
+
+
+def test_jobs_queued_before_backfills_existed_are_live_work(engine):
+    upgrade(engine, "e2a68a4ed2e0")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO job (kind) VALUES ('fetch_source')"))
+        connection.execute(
+            text(
+                "INSERT INTO article (source_name, source_url, item_key, url) "
+                "VALUES ('EZB', 'https://example.org', 'a', 'https://example.org/a')"
+            )
+        )
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT priority FROM job")).scalar_one() == 0
+        assert connection.execute(text("SELECT backfill_id FROM article")).scalar_one() is None

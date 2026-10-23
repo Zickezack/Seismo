@@ -18,6 +18,8 @@ class RssAdapter:
     label = "RSS"
     needs_query = False
     default_url = None
+    page_size = None
+    backfill_reach = None
 
     def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
         response = http.get(source.url, ACCEPT)
@@ -29,6 +31,11 @@ class RssAdapter:
         feed_language = language_code(feed.feed.get("language"))
         items = [_item(entry, feed_language) for entry in feed.entries]
         return [item for item in items if item is not None]
+
+    def fetch_period(self, source: SourceSettings, http: Http, start: datetime, end: datetime) -> list[FetchedItem]:
+        # A feed has no history: the items it still holds from the period. Undated ones come with the live fetch.
+        items = [item for item in self.fetch(source, http) if item.published_at and start <= item.published_at < end]
+        return sorted(items, key=lambda item: item.published_at, reverse=True)
 
 
 def _item(entry: feedparser.FeedParserDict, feed_language: str | None) -> FetchedItem | None:

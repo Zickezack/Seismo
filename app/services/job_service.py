@@ -5,7 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import Connection, Engine, Row
 
-from app.db.models import JobStatus
+from app.db.models import BACKFILL_PRIORITY, LIVE_PRIORITY, JobStatus
 from app.repositories import job_repository, llm_slot_repository
 from app.repositories.job_repository import ClaimedJob
 from app.services import platform_settings_service
@@ -38,11 +38,13 @@ FETCH_ARTICLE_JOB_KIND = "fetch_article"
 # With the doubling retry delay about 24 hours of attempts, so a full text survives a host that is down for
 # hours (userstories.md, Quellenadapter und Ingestion, story 4). A deferral to a request slot counts none.
 FETCH_ARTICLE_MAX_ATTEMPTS = 31
+BACKFILL_JOB_KIND = "backfill"
 KIND_LABELS = {
     TEST_JOB_KIND: "Testjob",
     BACKUP_JOB_KIND: "Datenbank-Backup",
     FETCH_SOURCE_JOB_KIND: "Quelle abrufen",
     FETCH_ARTICLE_JOB_KIND: "Volltext abrufen",
+    BACKFILL_JOB_KIND: "Backfill abrufen",
 }
 
 
@@ -53,6 +55,7 @@ class JobListItem:
     status: str
     attempts: int
     max_attempts: int
+    priority: int
     created_at: datetime
     updated_at: datetime
     run_after: datetime
@@ -62,7 +65,9 @@ class JobListItem:
 
     @property
     def kind_label(self) -> str:
-        return KIND_LABELS.get(self.kind, self.kind)
+        label = KIND_LABELS.get(self.kind, self.kind)
+        # A full text found by a backfill is the same kind of job, behind live work.
+        return f"{label} (Backfill)" if self.priority == BACKFILL_PRIORITY and self.kind != BACKFILL_JOB_KIND else label
 
     @property
     def status_label(self) -> str:
@@ -97,6 +102,7 @@ def enqueue(
     *,
     dedupe_key: str | None = None,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    priority: int = LIVE_PRIORITY,
 ) -> int | None:
     """Add a job, inside the transaction that makes it necessary - for a follow-up job, a job's effect.
 
@@ -106,7 +112,9 @@ def enqueue(
         raise ValueError("kind must not be empty")
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
-    return job_repository.insert_job(connection, kind, payload or {}, dedupe_key, max_attempts)
+    if priority not in (LIVE_PRIORITY, BACKFILL_PRIORITY):
+        raise ValueError("priority must be LIVE_PRIORITY or BACKFILL_PRIORITY")
+    return job_repository.insert_job(connection, kind, payload or {}, dedupe_key, max_attempts, priority)
 
 
 def enqueue_test_job(engine: Engine) -> int:

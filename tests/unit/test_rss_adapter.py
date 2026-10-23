@@ -1,5 +1,5 @@
 """RSS adapter on sample feeds (tests/unit/feeds): RSS 2.0, RSS 1.0, Atom, a web page, an empty feed."""
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -115,3 +115,14 @@ def test_registry_offers_rss():
 )
 def test_language_code(raw, code):
     assert language_code(raw) == code
+
+
+def test_period_holds_the_dated_items_of_the_feed_within_it_newest_first():
+    start, end = datetime(2026, 10, 22, tzinfo=UTC), datetime(2026, 10, 23, 8, 0, tzinfo=UTC)
+
+    items = RssAdapter().fetch_period(Source(), FakeHttp("rss2.xml"), start, end)
+
+    # The end is not part of it; an undated item belongs to no period, it comes with the live fetch.
+    assert [item.key for item in items] == ["https://bank.example/press/relative.html"]
+    later = RssAdapter().fetch_period(Source(), FakeHttp("rss2.xml"), start, end + timedelta(seconds=1))
+    assert [item.key for item in later] == ["press-2026-10-23", "https://bank.example/press/relative.html"]

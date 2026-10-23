@@ -1,7 +1,7 @@
 """The interface every source adapter implements, and the one shape all of them return."""
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 
 from app.sources.http import HttpResponse
@@ -38,9 +38,14 @@ class SourceAdapter(Protocol):
     label: str  # the source type as the UI shows it, e.g. "RSS"
     needs_query: bool  # a Quelle of this type has a Suchanfrage; the others have none
     default_url: str | None  # the URL a Quelle of this type gets when the admin leaves it empty
+    page_size: int | None  # the most items one request returns; None: one request returns all there is (a feed)
+    backfill_reach: timedelta | None  # how far back a backfill can go; None: as far as the source holds items
 
     def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
         """The source's current items. Raises SourceRejected or SourceUnavailable (app/sources/errors.py)."""
+
+    def fetch_period(self, source: SourceSettings, http: Http, start: datetime, end: datetime) -> list[FetchedItem]:
+        """For a backfill: items published from `start` to `end`, newest first, at most `page_size`. Raises as fetch."""
 
 
 def language_code(raw: str | None) -> str | None:

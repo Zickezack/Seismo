@@ -9,7 +9,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import AuthSettings, Settings
-from app.services import article_service, ingestion_service, platform_settings_service, seed_service, source_service
+from app.db.models import BackfillStatus
+from app.services import (
+    article_service,
+    backfill_service,
+    ingestion_service,
+    platform_settings_service,
+    seed_service,
+    source_service,
+)
+from app.services.backfill_service import Backfill, InvalidBackfill
 from app.services.bulk import BulkResult
 from app.services.platform_settings_service import PlatformSettings
 from app.services.seed_service import SeedResult, SeedStatus
@@ -98,7 +107,31 @@ def services(monkeypatch):
     monkeypatch.setattr(seed_service, "import_sources", import_sources)
     monkeypatch.setattr(seed_service, "sources_status", lambda _engine: calls.get("seed_status", SeedStatus(17, 0)))
     monkeypatch.setattr(platform_settings_service, "current", lambda _engine: PlatformSettings())
+
+    def start_backfill(_engine, source_id, form):
+        calls["start_backfill"] = (source_id, form)
+        if "start_backfill_error" in calls:
+            raise InvalidBackfill(calls["start_backfill_error"])
+        return backfill(9, source_id)
+
+    monkeypatch.setattr(backfill_service, "list_for_source", lambda _engine, source_id: calls.get("backfills", []))
+    monkeypatch.setattr(backfill_service, "start", start_backfill)
+    def cancel_backfills(_engine, source_id, backfill_ids):
+        calls["cancel_backfills"] = (source_id, backfill_ids)
+        return calls["cancel_backfills_result"]
+
+    monkeypatch.setattr(backfill_service, "cancel", cancel_backfills)
     return calls
+
+
+def backfill(backfill_id, source_id, **fields):
+    values = dict(
+        id=backfill_id, source_id=source_id, period_start=datetime(2026, 9, 1, tzinfo=UTC),
+        period_end=datetime(2026, 10, 1, tzinfo=UTC), cursor=datetime(2026, 9, 20, 6, 0, tzinfo=UTC),
+        status=BackfillStatus.RUNNING, articles_found=500, articles_new=480, last_error=None, created_at=NOW,
+        finished_at=None, full_texts_stored=120, full_texts_pending=360,
+    )
+    return Backfill(**values | fields)
 
 
 def text_of(html, testid):
@@ -375,3 +408,89 @@ def test_invalid_source_message_is_the_service_message(client, services, monkeyp
     response = client.post("/sources", data=FORM)
 
     assert text_of(response.text, "form-error") == "Name: „Neu“ ist bereits vergeben."
+
+
+def test_edit_page_has_settings_and_backfill_sections_with_quick_navigation(client, services):
+    html = client.get("/sources/5").text
+
+    assert [tag_of(html, f"section-nav-{name}") is not None for name in ("einstellungen", "backfill")] == [True, True]
+    assert " open" in tag_of(html, "section-einstellungen") and " open" in tag_of(html, "section-backfill")
+    assert 'action="/sources/5/backfills"' in tag_of(html, "backfill-form")
+    # GDELT reaches 3 months back; the form says so and suggests the last month.
+    assert 'min="' in tag_of(html, "period_start") and "reicht bis" in text_of(html, "period-hint")
+    assert " disabled" not in tag_of(html, "start-backfill")
+    assert tag_of(html, "backfill-list") is None
+
+
+def test_new_source_page_has_no_sections(client, services):
+    html = client.get("/sources/new").text
+
+    assert tag_of(html, "section-nav") is None and tag_of(html, "backfill-form") is None
+
+
+def test_a_feed_backfill_has_no_earliest_day_and_an_inactive_source_cannot_start_one(client, services):
+    html = client.get("/sources/1").text
+
+    assert 'min="' not in tag_of(html, "period_start")
+    assert "Ein Feed liefert nur, was er noch enthält." in text_of(html, "period-hint")
+    assert " disabled" in tag_of(html, "start-backfill")
+
+
+def test_backfills_listed_with_progress_and_only_running_ones_selectable(client, services):
+    services["backfills"] = [
+        backfill(9, 5),
+        backfill(8, 5, status=BackfillStatus.FAILED, last_error="GDELT lehnt die Suchanfrage ab: <zu kurz>",
+                 full_texts_pending=0, articles_found=0, articles_new=0, full_texts_stored=0),
+    ]
+
+    html = client.get("/sources/5").text
+
+    assert re.findall(r'data-testid="backfill-(\d+)"', html) == ["9", "8"]
+    assert text_of(html, "backfill-period-9") == "01.09.2026 bis 30.09.2026"
+    assert re.search(r'data-testid="backfill-status-9"><span class="status status-running">Läuft<', html)
+    assert re.search(r'data-testid="backfill-progress-9">zurück bis <time datetime="2026-09-20T06:00:00\+00:00"', html)
+    assert text_of(html, "backfill-progress-8") == "–"
+    assert text_of(html, "backfill-articles-9") == "480 neu von 500"
+    assert text_of(html, "backfill-full-texts-9") == "120 von 480 gespeichert, 360 ausstehend"
+    assert text_of(html, "backfill-full-texts-8") == "0 von 0 gespeichert"
+    assert text_of(html, "backfill-error-8") == "GDELT lehnt die Suchanfrage ab: &lt;zu kurz&gt;"
+    assert " disabled" not in tag_of(html, "select-backfill-9") and " disabled" in tag_of(html, "select-backfill-8")
+    assert " disabled" in tag_of(html, "cancel-backfills")
+    assert 'action="/sources/5/backfills/cancel"' in tag_of(html, "backfill-list")
+
+
+def test_start_backfill_goes_back_to_its_section_with_a_message(client, services):
+    response = client.post("/sources/5/backfills", data={"period_start": "2026-09-01", "period_end": "2026-09-30"})
+
+    assert response.headers["location"] == "/sources/5#backfill"
+    assert services["start_backfill"] == (5, {"period_start": "2026-09-01", "period_end": "2026-09-30"})
+    assert flash_after(client, response)[0] == "Backfill gestartet: 01.09.2026 bis 30.09.2026."
+
+
+def test_invalid_backfill_is_named_in_the_message(client, services):
+    services["start_backfill_error"] = "Bis: höchstens heute."
+
+    response = client.post("/sources/5/backfills", data={"period_start": "2026-09-01", "period_end": "2099-01-01"})
+
+    text, tag = flash_after(client, response)
+    assert text == "Backfill nicht gestartet: Bis: höchstens heute."
+    assert "message-error" in tag
+
+
+@pytest.mark.parametrize(
+    ("selected", "result", "message"),
+    [
+        (["9"], BulkResult(processed=1, blocked=[]), "1 Backfill abgebrochen."),
+        (["9", "7"], BulkResult(processed=2, blocked=[]), "2 Backfills abgebrochen."),
+        (["8"], BulkResult(processed=0, blocked=["Backfill #8 (Fehlgeschlagen)"]), "Nichts abgebrochen, blockiert: Backfill #8 (Fehlgeschlagen)."),
+        ([], BulkResult(processed=0, blocked=[]), "Keine Backfills ausgewählt."),
+    ],
+)
+def test_cancel_backfills(client, services, selected, result, message):
+    services["cancel_backfills_result"] = result
+
+    response = client.post("/sources/5/backfills/cancel", data={"backfill_id": selected})
+
+    assert response.headers["location"] == "/sources/5#backfill"
+    assert services["cancel_backfills"] == (5, [int(each) for each in selected])
+    assert flash_after(client, response)[0] == message

@@ -94,7 +94,7 @@ def test_every_job_kind_the_worker_runs_has_a_german_label():
     assert set(build_handlers(engine=None, backup_dir=None, limiter=None, stop_event=None)) <= set(job_service.KIND_LABELS)
 
 
-@pytest.mark.parametrize(("kind", "options"), [("", {}), ("testjob", {"max_attempts": 0})])
+@pytest.mark.parametrize(("kind", "options"), [("", {}), ("testjob", {"max_attempts": 0}), ("testjob", {"priority": 7})])
 def test_enqueue_rejects_invalid_jobs(kind, options):
     with pytest.raises(ValueError):
         job_service.enqueue(None, kind, **options)
@@ -107,7 +107,7 @@ def test_requeue_without_selection_needs_no_database():
 def test_list_item_labels_and_requeue_only_for_failed_jobs():
     now = datetime.now(UTC)
     item = JobListItem(
-        id=1, kind="unknown-kind", status=JobStatus.RUNNING, attempts=1, max_attempts=5, created_at=now,
+        id=1, kind="unknown-kind", status=JobStatus.RUNNING, attempts=1, max_attempts=5, priority=0, created_at=now,
         updated_at=now, run_after=now, lease_expires_at=now, lease_owner="worker:1", last_error=None,
     )
 
@@ -116,3 +116,6 @@ def test_list_item_labels_and_requeue_only_for_failed_jobs():
     assert not item.can_requeue
     assert JobListItem(**{**item.__dict__, "kind": "testjob", "status": JobStatus.FAILED}).can_requeue
     assert JobListItem(**{**item.__dict__, "kind": "testjob"}).kind_label == "Testjob"
+    # A backfill's full text is the same kind, marked; the backfill job itself says so by its label.
+    assert JobListItem(**{**item.__dict__, "kind": "fetch_article", "priority": 1}).kind_label == "Volltext abrufen (Backfill)"
+    assert JobListItem(**{**item.__dict__, "kind": "backfill", "priority": 1}).kind_label == "Backfill abrufen"

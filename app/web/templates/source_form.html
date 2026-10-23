@@ -24,7 +24,7 @@
 <p class="message message-error" role="alert" data-testid="form-error">{{ error }}</p>
 {% endif %}
 
-<section class="card stack">
+{% set settings %}
   {# An existing source saves in place (static/app.js); a new one goes back to the list. #}
   <form class="form-grid" method="post" action="{{ '/sources/%d' % source.id if source else '/sources' }}"{% if source %} data-inline-save{% endif %} data-testid="source-form">
     <div class="field">
@@ -82,5 +82,77 @@
   {% if source %}
   <p class="hint" data-testid="timestamps">Angelegt {{ source.created_at|local_time }} · Zuletzt geändert {{ source.updated_at|local_time }}</p>
   {% endif %}
-</section>
+{% endset %}
+
+{% if not source %}
+<section class="card stack">{{ settings }}</section>
+{% else %}
+{# Several sections: quick navigation and collapsible sections (requirements.md, "Basic UI Requirements / Styleguide", items 4 and 5). #}
+<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
+  <a href="#einstellungen" data-testid="section-nav-einstellungen">Einstellungen</a>
+  <a href="#backfill" data-testid="section-nav-backfill">Backfill</a>
+</nav>
+<details class="card section" id="einstellungen" open data-testid="section-einstellungen">
+  <summary><h2>Einstellungen</h2></summary>
+  <div class="stack">{{ settings }}</div>
+</details>
+
+<details class="card section" id="backfill" open data-testid="section-backfill">
+  <summary><h2>Backfill</h2></summary>
+  <div class="stack">
+    <p class="hint">Holt einen vergangenen Zeitraum nach, Seite für Seite und immer erst, wenn kein laufender Abruf wartet. Neue Artikel bekommen ihre Volltexte ebenso nachrangig.</p>
+    <form class="form-grid" method="post" action="/sources/{{ source.id }}/backfills" data-testid="backfill-form">
+      <div class="field">
+        <label for="period_start">Von</label>
+        <input id="period_start" name="period_start" type="date" required value="{{ backfill_start.isoformat() }}" max="{{ backfill_today.isoformat() }}"{% if backfill_earliest %} min="{{ backfill_earliest.isoformat() }}"{% endif %} aria-describedby="period-hint" data-testid="period_start">
+      </div>
+      <div class="field">
+        <label for="period_end">Bis</label>
+        <input id="period_end" name="period_end" type="date" required value="{{ backfill_today.isoformat() }}" max="{{ backfill_today.isoformat() }}" aria-describedby="period-hint" data-testid="period_end">
+      </div>
+      <p class="hint field-wide" id="period-hint" data-testid="period-hint">Ganze Tage in UTC. {% if backfill_earliest %}Diese Quelle reicht bis {{ backfill_earliest.strftime("%d.%m.%Y") }} zurück.{% else %}Ein Feed liefert nur, was er noch enthält.{% endif %}{% if not source.is_active %} Nur aktive Quellen werden abgerufen.{% endif %}</p>
+      <div class="form-actions">
+        <button class="button" type="submit" data-testid="start-backfill"{% if not source.is_active %} disabled{% endif %}>Backfill starten</button>
+      </div>
+    </form>
+    {% if backfills %}
+    <form class="stack" method="post" action="/sources/{{ source.id }}/backfills/cancel" data-bulk-form data-testid="backfill-list">
+      <div class="toolbar">
+        <div class="actions">
+          <button class="button button-secondary" type="submit" data-bulk-action data-testid="cancel-backfills" disabled>Abbrechen</button>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle laufenden Backfills auswählen" data-testid="select-all-backfills"></th>
+              <th>Zeitraum</th>
+              <th>Status</th>
+              <th>Fortschritt</th>
+              <th>Artikel</th>
+              <th>Volltexte</th>
+              <th>Gestartet</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for backfill in backfills %}
+            <tr data-testid="backfill-{{ backfill.id }}">
+              <td class="cell-select"><input type="checkbox" name="backfill_id" value="{{ backfill.id }}" data-select-row aria-label="Backfill #{{ backfill.id }} auswählen" data-testid="select-backfill-{{ backfill.id }}"{% if not backfill.is_running %} disabled title="Nur laufende Backfills lassen sich abbrechen"{% endif %}></td>
+              <td data-testid="backfill-period-{{ backfill.id }}">{{ backfill.first_day.strftime("%d.%m.%Y") }} bis {{ backfill.last_day.strftime("%d.%m.%Y") }}</td>
+              <td class="cell-wrap" data-testid="backfill-status-{{ backfill.id }}"><span class="status status-{{ backfill.status }}">{{ backfill.status_label }}</span>{% if backfill.last_error %}<span class="hint" data-testid="backfill-error-{{ backfill.id }}">{{ backfill.last_error }}</span>{% endif %}</td>
+              <td data-testid="backfill-progress-{{ backfill.id }}">{% if backfill.is_running %}zurück bis {{ backfill.cursor|local_time }}{% else %}–{% endif %}</td>
+              <td data-testid="backfill-articles-{{ backfill.id }}">{{ backfill.articles_new }} neu von {{ backfill.articles_found }}</td>
+              <td data-testid="backfill-full-texts-{{ backfill.id }}">{{ backfill.full_texts_stored }} von {{ backfill.articles_new }} gespeichert{% if backfill.full_texts_pending %}, {{ backfill.full_texts_pending }} ausstehend{% endif %}</td>
+              <td>{{ backfill.created_at|local_time }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
 {% endblock %}

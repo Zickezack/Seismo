@@ -481,6 +481,16 @@ a:focus-visible {
   color: var(--color-muted);
 }
 
+/* Status of a backfill (templates/source_form.html); "running" and "failed" as for jobs */
+.status-done {
+  color: var(--color-success-text);
+  background: var(--color-success-background);
+}
+
+.status-cancelled {
+  color: var(--color-muted);
+}
+
 .fetch-status {
   display: flex;
   flex-wrap: wrap;
