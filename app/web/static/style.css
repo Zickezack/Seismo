@@ -382,6 +382,12 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.table .cell-title {
+  min-width: 20rem;
+  max-width: 40rem;
+  white-space: normal;
+}
+
 .table .cell-url {
   min-width: 12rem;
   max-width: 20rem;

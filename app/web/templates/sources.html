@@ -6,6 +6,7 @@
 <form class="stack" method="post" action="/sources/delete" data-bulk-form data-testid="source-list">
   <div class="toolbar">
     <div class="actions">
+      <button class="button button-secondary" type="submit" formaction="/sources/fetch" data-bulk-action data-testid="fetch" disabled>Jetzt abrufen</button>
       <button class="button button-secondary" type="submit" formaction="/sources/activate" data-bulk-action data-testid="activate" disabled>Aktivieren</button>
       <button class="button button-secondary" type="submit" formaction="/sources/deactivate" data-bulk-action data-testid="deactivate" disabled>Deaktivieren</button>
       <button class="button button-danger" type="submit" formaction="/sources/delete" data-bulk-action data-confirm-delete="Quelle|Quellen" data-testid="delete" disabled>Löschen</button>
@@ -25,6 +26,8 @@
           <th>Status</th>
           <th>Abrufintervall</th>
           <th>Rohtext aufbewahren</th>
+          <th>Artikel</th>
+          <th>Letzter Abruf</th>
         </tr>
       </thead>
       <tbody>
@@ -38,6 +41,8 @@
           <td><span class="status status-{{ 'active' if source.is_active else 'inactive' }}" data-testid="status-{{ source.id }}">{{ "Aktiv" if source.is_active else "Inaktiv" }}</span></td>
           <td data-testid="interval-{{ source.id }}">alle {{ source.fetch_interval_minutes }} Min.</td>
           <td data-testid="retention-{{ source.id }}">{{ source.raw_text_retention_days }} {{ "Tag" if source.raw_text_retention_days == 1 else "Tage" }}</td>
+          <td><a href="/articles?source={{ source.id }}" data-testid="articles-{{ source.id }}">{{ article_counts.get(source.id, 0) }}</a></td>
+          <td data-testid="fetched-{{ source.id }}">{{ source.last_fetched_at|local_time }}</td>
         </tr>
         {% endfor %}
       </tbody>

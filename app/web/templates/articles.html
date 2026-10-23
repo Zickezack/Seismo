@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Artikel{% endblock %}
+{% block content %}
+<h1>Artikel</h1>
+
+<section class="card stack">
+  {# A plain GET form: the filter works without JavaScript and the URL can be bookmarked. #}
+  <form class="toolbar" method="get" action="/articles" data-testid="article-filter">
+    <div class="field">
+      <label for="source">Quelle</label>
+      <select id="source" name="source">
+        <option value="">Alle Quellen</option>
+        {% for choice in overview.sources %}
+        <option value="{{ choice.id }}"{% if overview.source_id == choice.id %} selected{% endif %}>{{ choice.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button>
+  </form>
+  <p class="hint" data-testid="article-count">
+    {% if overview.matching > overview.articles|length %}Angezeigt: die zuletzt abgerufenen {{ overview.articles|length }} von {{ overview.matching }} Artikeln.{% else %}{{ overview.matching }} Artikel.{% endif %}
+  </p>
+</section>
+
+{% if overview.articles %}
+<div class="table-container">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Veröffentlicht</th>
+        <th>Abgerufen</th>
+        <th>Titel</th>
+        <th>Quelle</th>
+        <th>Sprache</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for article in overview.articles %}
+      <tr data-testid="article-{{ article.id }}">
+        <td data-testid="published-{{ article.id }}">{{ article.published_at|local_time }}</td>
+        <td>{{ article.fetched_at|local_time }}</td>
+        <td class="cell-title"><a href="{{ article.url }}" target="_blank" rel="noopener noreferrer" data-testid="title-{{ article.id }}">{{ article.title or article.url }}</a></td>
+        <td data-testid="source-{{ article.id }}">{% if article.source_exists %}<a href="/sources/{{ article.source_id }}">{{ article.source_display_name }}</a>{% else %}{{ article.source_display_name }} (gelöscht){% endif %}</td>
+        <td>{{ article.language_label }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p data-testid="no-articles">Noch keine Artikel{% if overview.source_id %} dieser Quelle{% endif %}. Aktive Quellen ruft der Worker in ihrem Abrufintervall ab.</p>
+{% endif %}
+{% endblock %}

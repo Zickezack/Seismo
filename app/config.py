@@ -29,6 +29,8 @@ class Settings:
     worker_poll_interval_seconds: float = 5.0
     # The worker's backup volume (docker-compose.yml); outside it a backup would not survive a redeploy.
     backup_dir: Path = Path("/backups")
+    # How a source can reach the operator (e-mail or URL), sent in the User-Agent of every fetch.
+    fetch_contact: str = ""
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "Settings":
@@ -50,6 +52,7 @@ class Settings:
                 environ, "WORKER_POLL_INTERVAL_SECONDS", cls.worker_poll_interval_seconds, float
             ),
             backup_dir=Path(environ.get("BACKUP_DIR", "").strip() or cls.backup_dir),
+            fetch_contact=_single_line(environ, "FETCH_CONTACT"),
         )
 
     @property
@@ -102,6 +105,14 @@ def _require(environ, names):
     missing = [name for name in names if not environ.get(name, "").strip()]
     if missing:
         raise ConfigError(f"Missing required environment variables: {', '.join(missing)}")
+
+
+def _single_line(environ, name):
+    value = environ.get(name, "").strip()
+    # It goes into an HTTP header, where a line break would start a header of its own.
+    if any(char in value for char in "\r\n"):
+        raise ConfigError(f"{name} must be a single line")
+    return value
 
 
 def _boolean(environ, name, default):

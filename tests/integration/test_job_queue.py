@@ -219,6 +219,17 @@ def test_dedupe_key_keeps_a_job_from_waiting_twice(queue):
     assert enqueue(queue, dedupe_key="article:7") not in (None, job_id)
 
 
+def test_dedupe_works_for_many_jobs_on_one_connection(queue):
+    # From the 11th run on one connection PostgreSQL plans the prepared insert generically; with the index
+    # predicate as bound parameters ON CONFLICT then found no matching index (found with 13 due sources).
+    with queue.begin() as connection:
+        first = [job_service.enqueue(connection, KIND, dedupe_key=f"source:{n}") for n in range(20)]
+        again = [job_service.enqueue(connection, KIND, dedupe_key=f"source:{n}") for n in range(20)]
+
+    assert all(first) and len(set(first)) == 20
+    assert again == [None] * 20
+
+
 def test_only_due_jobs_of_the_worker_kinds_are_claimed(queue):
     enqueue(queue, kind="other-kind")
 

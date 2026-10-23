@@ -178,9 +178,12 @@ def test_settings_page_shows_every_setting_in_its_section(client, services):
     assert 'min="1"' in input_of(html, "llm_max_parallel_calls") and 'max="32"' in input_of(html, "llm_max_parallel_calls")
     assert 'value="7"' in input_of(html, "succeeded_jobs_retention_days")
     assert 'value="30"' in input_of(html, "failed_jobs_retention_days")
+    assert 'value="7"' in input_of(html, "article_max_age_days")
+    assert 'min="1"' in input_of(html, "article_max_age_days") and 'max="365"' in input_of(html, "article_max_age_days")
     sections = re.findall(r'data-testid="form-(\w+)"(.*?)</form>', html, re.DOTALL)
     assert [(name, re.findall(r'name="(\w+)"', form)) for name, form in sections] == [
         ("verarbeitung", ["llm_max_parallel_calls"]),
+        ("abruf", ["article_max_age_days"]),
         ("aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
         ("backups", ["backup_interval_hours", "backups_to_keep"]),
     ]
@@ -191,7 +194,7 @@ def test_settings_page_links_every_section_from_its_quick_navigation(client, ser
 
     links = re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html)
     assert links == re.findall(r'<details class="card section" id="(\w+)"', html)
-    assert links == ["verarbeitung", "aufbewahrung", "backups", "starterdaten"]
+    assert links == ["verarbeitung", "abruf", "aufbewahrung", "backups", "starterdaten"]
 
 
 def test_settings_save_in_place_answers_json(client, services):

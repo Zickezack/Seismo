@@ -70,6 +70,10 @@ services:
   worker:
     <<: *app
     command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *app-environment
+      # Sent in the User-Agent of every source fetch, so a source can reach the operator.
+      FETCH_CONTACT: ${FETCH_CONTACT:-}
     restart: unless-stopped
     volumes:
       # Backups (README.md, "Backups"): the volume db-backups, or with BACKUP_HOST_DIR an absolute path

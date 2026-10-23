@@ -9,9 +9,10 @@ from sqlalchemy import Connection, Engine, Row
 from app.repositories import source_repository
 from app.repositories.source_repository import NameTaken
 from app.services.bulk import BulkResult
+from app.sources import ADAPTER_LABELS
 
-# The adapters follow with story 2 (app/sources/), GDELT with story 5.
-ADAPTER_TYPES = {"rss": "RSS"}
+# The source types the form offers: one per adapter in app/sources/.
+ADAPTER_TYPES = ADAPTER_LABELS
 # ISO 639-1 codes. No language means several or unknown ones, never a guess (datamodel.md, rule 5).
 LANGUAGES = {
     "de": "Deutsch",
@@ -74,6 +75,7 @@ class Source(SourceValues):
     id: int
     created_at: datetime
     updated_at: datetime
+    last_fetched_at: datetime | None
 
     @property
     def adapter_label(self) -> str:

@@ -40,6 +40,9 @@ The dashboard needs an admin login; the api refuses to start without it:
 Only the `api` container gets these variables. Changing `ADMIN_PASSWORD` or `SESSION_SECRET` logs
 out every open session; a session otherwise lasts 12 hours from the login.
 
+`FETCH_CONTACT` (optional, worker only) is an e-mail address or URL sent in the User-Agent of every
+source fetch, so a source can reach the operator; some sources (e.g. the BLS) ask for it.
+
 ## Run the stack
 
 ```sh

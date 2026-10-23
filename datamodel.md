@@ -104,6 +104,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | failed_jobs_retention_days | integer | yes | 30 | Days a failed job is kept after `finished_at`, 1 to 3650. |
   | backup_interval_hours | integer | yes | 24 | Hours from the newest backup file to the next automatic backup, 1 to 720. |
   | backups_to_keep | integer | yes | 14 | Backup files kept; after each new backup the oldest beyond this number are deleted, 1 to 365. |
+  | article_max_age_days | integer | yes | 7 | Items published longer ago than this are not taken by the live fetch; they belong to the backfill. Items without a date always come. 1 to 365. |
   | updated_at | timestamptz | yes | now() | |
 
 - Relationships: none
@@ -125,11 +126,34 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | language | varchar(10) | no | | ISO 639-1 code; empty for a source in several or unknown languages (rule 5). The language of each article is stored separately. UI: Sprache. |
   | terms_note | text | no | | What the source's terms allow, with a link, at most 2000 characters. Checking them is the admin's job (`requirements.md`, "Data Sources and Data Rights"). UI: Nutzungsbedingungen. |
   | raw_text_retention_days | integer | yes | 30 | Days a raw text is kept after its processing has succeeded, 0 to 365; 0 deletes it right after (rule 8). UI: Rohtext aufbewahren. |
+  | next_fetch_at | timestamptz | no | | When the worker queues the next fetch; empty or past means due. Moves one interval ahead when a fetch is queued. |
+  | last_fetched_at | timestamptz | no | | Last successful fetch. UI: Letzter Abruf. |
   | created_at | timestamptz | yes | now() | |
   | updated_at | timestamptz | yes | now() | Last change through the form or a bulk action. |
 
-- Relationships: none yet; articles will reference their source.
-- Rules: bulk actions (Löschen, Aktivieren, Deaktivieren) are all or nothing. Seeded sources come only from the starter catalogue import (`app/seeds/sources.json`, Seed-Protokoll), active.
+- Relationships: has many Artikel (`article.source_id`).
+- Rules: bulk actions (Jetzt abrufen, Löschen, Aktivieren, Deaktivieren) are all or nothing; an inactive source blocks Jetzt abrufen. Deleting a source keeps its articles (they keep a copy of its name and URL). Seeded sources come only from the starter catalogue import (`app/seeds/sources.json`, Seed-Protokoll), active.
+- Privacy: none
+
+### Artikel (`article`)
+- Store: SQL table `article`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | source_id | bigint | no | | Foreign key to `source`, `ON DELETE SET NULL`: empty once the source is deleted. |
+  | source_name | varchar(200) | yes | | Name of the source at fetch time; shown once the source is deleted, otherwise its current name. |
+  | source_url | varchar(2000) | yes | | Feed URL of the source at fetch time. |
+  | item_key | varchar(1000) | yes | | The item's id in its source (RSS guid, Atom id), else its link; above 1000 bytes `sha256:<hex>` of it. Unique with `source_id` (`uq_article_source_id`), so a repeated fetch stores nothing twice. |
+  | url | varchar(2000) | yes | | Link of the article, `http` or `https`. |
+  | title | text | no | | As the source states it, at most 1000 characters. |
+  | published_at | timestamptz | no | | Publication time as the source states it, in UTC (RSS pubDate, Atom published, else the item's only date: RSS 1.0 dc:date, Atom updated); empty when it states none (rules 4 and 5). UI: Veröffentlicht. |
+  | fetched_at | timestamptz | yes | now() | When it was stored. UI: Abgerufen. Index `ix_article_fetched_at`. |
+  | language | varchar(10) | no | | ISO 639 code as the source states it for the item or the feed, else the language of the Quelle; empty if neither has one. |
+
+- Relationships: belongs to a Quelle while it exists.
+- Rules: metadata is kept permanently. A source adapter (`app/sources/`) returns items in one shape; only items within the maximum age (Plattform-Einstellungen) and with a web link become articles.
 - Privacy: none
 
 ### Seed-Protokoll (`seed_log`)

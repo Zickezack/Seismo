@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Beispielbank – Pressemitteilungen</title>
+    <link>https://bank.example/</link>
+    <language>de-CH</language>
+    <item>
+      <title><![CDATA[Zinsentscheid:   Leitzins   bleibt]]></title>
+      <link><![CDATA[https://bank.example/press/2026-10-23.html]]></link>
+      <guid isPermaLink="false">press-2026-10-23</guid>
+      <pubDate>Fri, 23 Oct 2026 10:00:00 +0200</pubDate>
+    </item>
+    <item>
+      <title>Relativer Link, ohne guid</title>
+      <link>/press/relative.html</link>
+      <pubDate>Thu, 22 Oct 2026 08:30:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Ohne Datum</title>
+      <link>https://bank.example/press/undated.html</link>
+    </item>
+    <item>
+      <title>Ohne Link</title>
+      <description>Nur Text</description>
+    </item>
+    <item>
+      <title>Kein Web-Link</title>
+      <link>mailto:press@bank.example</link>
+    </item>
+  </channel>
+</rss>

@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from app.services import source_service
+from app.services import article_service, ingestion_service, source_service
 from app.services.bulk import BulkResult
 from app.services.source_service import InvalidSource, Source
 from app.web.forms import form_values, wants_json
@@ -21,7 +21,8 @@ FormValues = Annotated[dict[str, str], Depends(form_values)]
 
 @router.get("")
 def source_list(request: Request) -> Response:
-    context = {"sources": source_service.list_sources(request.app.state.engine)}
+    engine = request.app.state.engine
+    context = {"sources": source_service.list_sources(engine), "article_counts": article_service.count_by_source(engine)}
     return templates.TemplateResponse(request, "sources.html", context)
 
 
@@ -58,6 +59,12 @@ def activate_sources(request: Request, source_ids: SourceIds = []) -> Response:
 def deactivate_sources(request: Request, source_ids: SourceIds = []) -> Response:
     result = source_service.set_active(request.app.state.engine, source_ids, False)
     return _after_bulk_action(request, result, "deaktiviert")
+
+
+@router.post("/fetch")
+def fetch_sources(request: Request, source_ids: SourceIds = []) -> Response:
+    result = ingestion_service.fetch_now(request.app.state.engine, source_ids)
+    return _after_bulk_action(request, result, "zum Abruf eingereiht")
 
 
 @router.get("/{source_id}")

@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 
-from sqlalchemy import Connection, Row, delete, func, select, update
+from sqlalchemy import Connection, Row, delete, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.db.models import ACTIVE_JOB_STATUSES, Job, JobStatus
@@ -21,6 +21,11 @@ class ClaimedJob:
 
 
 _CLEARED_LEASE = {"lease_token": None, "lease_owner": None, "lease_expires_at": None}
+# The predicate of the partial index uq_job_dedupe_key_active, with its values written into the SQL. As
+# bound parameters they break ON CONFLICT from the 11th insert on one connection: psycopg prepares the
+# statement after 5 runs, PostgreSQL plans it generically after 5 more, and a generic plan cannot match
+# parameters against the index predicate ("no unique or exclusion constraint matching").
+_ACTIVE_DEDUPE_PREDICATE = Job.status.in_([literal(status.value, literal_execute=True) for status in ACTIVE_JOB_STATUSES])
 
 
 def insert_job(connection: Connection, kind: str, payload: dict, dedupe_key: str | None, max_attempts: int) -> int | None:
@@ -28,7 +33,7 @@ def insert_job(connection: Connection, kind: str, payload: dict, dedupe_key: str
     statement = (
         insert(Job)
         .values(kind=kind, payload=payload, dedupe_key=dedupe_key, max_attempts=max_attempts)
-        .on_conflict_do_nothing(index_elements=[Job.dedupe_key], index_where=Job.status.in_(ACTIVE_JOB_STATUSES))
+        .on_conflict_do_nothing(index_elements=[Job.dedupe_key], index_where=_ACTIVE_DEDUPE_PREDICATE)
         .returning(Job.id)
     )
     return connection.execute(statement).scalar_one_or_none()

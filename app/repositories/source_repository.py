@@ -2,7 +2,7 @@
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 
-from sqlalchemy import Connection, Row, delete, func, insert, select, update
+from sqlalchemy import ColumnElement, Connection, Row, delete, func, insert, literal_column, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Source
@@ -10,6 +10,7 @@ from app.db.models import Source
 # ICU collation: sorts "Äpfel" next to "Apfel" and ignores case first; plain lower() would put it after "Zitrone".
 NAME_COLLATION = "de-x-icu"
 UNIQUE_NAME_INDEX = "uq_source_name"
+_ONE_MINUTE = literal_column("interval '1 minute'")
 
 
 class NameTaken(Exception):
@@ -38,8 +39,13 @@ def all_by_name(connection: Connection) -> Sequence[Row]:
 
 
 def lock_sources(connection: Connection, source_ids: list[int]) -> Sequence[Row]:
-    """Id and name of the existing ones, locked until the end of the transaction."""
-    statement = select(Source.id, Source.name).where(Source.id.in_(source_ids)).order_by(Source.id).with_for_update()
+    """Id, name and active flag of the existing ones, locked until the end of the transaction."""
+    statement = (
+        select(Source.id, Source.name, Source.is_active)
+        .where(Source.id.in_(source_ids))
+        .order_by(Source.id)
+        .with_for_update()
+    )
     return connection.execute(statement).all()
 
 
@@ -50,6 +56,35 @@ def delete_sources(connection: Connection, source_ids: list[int]) -> int:
 def set_active(connection: Connection, source_ids: list[int], active: bool) -> int:
     statement = update(Source).where(Source.id.in_(source_ids)).values(is_active=active, updated_at=func.now())
     return connection.execute(statement).rowcount
+
+
+def claim_due(connection: Connection) -> list[int]:
+    """Active sources whose next fetch is due; their next fetch moves one interval ahead.
+
+    SKIP LOCKED: two workers checking at the same moment never claim the same source.
+    """
+    due = (
+        select(Source.id)
+        .where(Source.is_active, (Source.next_fetch_at.is_(None)) | (Source.next_fetch_at <= func.now()))
+        .with_for_update(skip_locked=True)
+    )
+    return _schedule_next(connection, Source.id.in_(due.scalar_subquery()))
+
+
+def schedule_next_fetch(connection: Connection, source_ids: list[int]) -> list[int]:
+    """Move the next fetch of these sources one interval ahead, e.g. after a fetch requested by hand."""
+    return _schedule_next(connection, Source.id.in_(source_ids))
+
+
+def mark_fetched(connection: Connection, source_id: int) -> None:
+    # Leaves updated_at alone: that is the last change by the admin, not by a fetch.
+    connection.execute(update(Source).where(Source.id == source_id).values(last_fetched_at=func.now()))
+
+
+def _schedule_next(connection: Connection, condition: ColumnElement[bool]) -> list[int]:
+    next_fetch_at = func.now() + Source.fetch_interval_minutes * _ONE_MINUTE
+    statement = update(Source).where(condition).values(next_fetch_at=next_fetch_at).returning(Source.id)
+    return sorted(connection.execute(statement).scalars())
 
 
 @contextmanager

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import AuthSettings, Settings
-from app.services import platform_settings_service, seed_service, source_service
+from app.services import article_service, ingestion_service, platform_settings_service, seed_service, source_service
 from app.services.bulk import BulkResult
 from app.services.platform_settings_service import PlatformSettings
 from app.services.seed_service import SeedResult, SeedStatus
@@ -26,7 +26,7 @@ def source(source_id, name, **fields):
     values = dict(
         id=source_id, name=name, adapter_type="rss", url=f"https://example.org/{source_id}.xml", is_active=True,
         fetch_interval_minutes=60, language="en", terms_note=None, raw_text_retention_days=30, created_at=NOW,
-        updated_at=NOW,
+        updated_at=NOW, last_fetched_at=None,
     )
     return Source(**values | fields)
 
@@ -87,6 +87,8 @@ def services(monkeypatch):
     monkeypatch.setattr(source_service, "update", update)
     monkeypatch.setattr(source_service, "delete", bulk("delete"))
     monkeypatch.setattr(source_service, "set_active", bulk("set_active"))
+    monkeypatch.setattr(ingestion_service, "fetch_now", bulk("fetch_now"))
+    monkeypatch.setattr(article_service, "count_by_source", lambda _engine: {2: 12})
     monkeypatch.setattr(seed_service, "import_sources", import_sources)
     monkeypatch.setattr(seed_service, "sources_status", lambda _engine: calls.get("seed_status", SeedStatus(17, 0)))
     monkeypatch.setattr(platform_settings_service, "current", lambda _engine: PlatformSettings())
@@ -124,12 +126,16 @@ def test_list_shows_the_sources_in_the_order_the_service_returns(client, service
     assert text_of(html, "interval-2") == "alle 60 Min."
     assert text_of(html, "retention-2") == "30 Tage"
     assert text_of(html, "retention-1") == "1 Tag"
+    assert text_of(html, "articles-2") == "12"
+    assert 'href="/articles?source=2"' in tag_of(html, "articles-2")
+    assert text_of(html, "articles-1") == "0"
+    assert text_of(html, "fetched-1") == "–"
 
 
 def test_bulk_buttons_start_disabled_and_delete_asks_first(client, services):
     html = client.get("/sources").text
 
-    for action in ("activate", "deactivate", "delete"):
+    for action in ("fetch", "activate", "deactivate", "delete"):
         assert " disabled" in tag_of(html, action)
     assert 'data-confirm-delete="Quelle|Quellen"' in tag_of(html, "delete")
     # The dialog names what it deletes, from the row checkboxes - escaped like every other text.
@@ -228,6 +234,7 @@ def test_save_without_javascript_shows_the_edit_page_with_a_message(client, serv
         ("/sources/delete", "delete", (), "2 Quellen gelöscht."),
         ("/sources/activate", "set_active", (True,), "2 Quellen aktiviert."),
         ("/sources/deactivate", "set_active", (False,), "2 Quellen deaktiviert."),
+        ("/sources/fetch", "fetch_now", (), "2 Quellen zum Abruf eingereiht."),
     ],
 )
 def test_bulk_actions(client, services, path, call, flag, message):

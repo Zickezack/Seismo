@@ -19,6 +19,7 @@ class PlatformSettings:
     failed_jobs_retention_days: int = 30
     backup_interval_hours: int = 24
     backups_to_keep: int = 14
+    article_max_age_days: int = 7
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,13 @@ FORM_FIELDS = {
             "Gilt für alle Worker zusammen. Eine Senkung wirkt, sobald laufende Aufrufe beendet sind.",
             1,
             32,
+        ),
+        NumberField(
+            "article_max_age_days",
+            "Höchstalter neuer Artikel (Tage)",
+            "Ältere Einträge übernimmt der laufende Abruf nicht, sie gehören zum Backfill. Einträge ohne Datum kommen immer.",
+            1,
+            365,
         ),
         NumberField(
             "succeeded_jobs_retention_days", "Erledigte Jobs aufbewahren (Tage)", "Danach löscht der Worker sie.", 1, 3650

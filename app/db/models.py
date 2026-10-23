@@ -3,7 +3,21 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, Identity, Index, SmallInteger, String, Text, func, text, true
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+    true,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -70,6 +84,7 @@ class PlatformSettingsRecord(Base):
     failed_jobs_retention_days: Mapped[int] = mapped_column(server_default="30")
     backup_interval_hours: Mapped[int] = mapped_column(server_default="24")
     backups_to_keep: Mapped[int] = mapped_column(server_default="14")
+    article_max_age_days: Mapped[int] = mapped_column(server_default="7")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -79,6 +94,7 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(failed_jobs_retention_days >= 1, name="failed_jobs_retention_days"),
         CheckConstraint(backup_interval_hours >= 1, name="backup_interval_hours"),
         CheckConstraint(backups_to_keep >= 1, name="backups_to_keep"),
+        CheckConstraint(article_max_age_days >= 1, name="article_max_age_days"),
     )
 
 
@@ -98,6 +114,9 @@ class Source(Base):
     language: Mapped[str | None] = mapped_column(String(10))
     terms_note: Mapped[str | None] = mapped_column(Text)
     raw_text_retention_days: Mapped[int] = mapped_column(server_default="30")
+    # When the worker queues the next fetch; empty or past means due now (app/services/ingestion_service.py).
+    next_fetch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -117,3 +136,28 @@ class SeedLogEntry(Base):
     seed_source: Mapped[str] = mapped_column(String(100), primary_key=True)
     item_key: Mapped[str] = mapped_column(String(200), primary_key=True)
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Article(Base):
+    """One fetched report (UI term: Artikel). Its metadata is kept permanently (datamodel.md)."""
+
+    __tablename__ = "article"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    # Empty once the source is deleted; source_name and source_url keep what it was at fetch time.
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("source.id", ondelete="SET NULL"))
+    source_name: Mapped[str] = mapped_column(String(200))
+    source_url: Mapped[str] = mapped_column(String(2000))
+    # The item's own id within its source, else its link; repeated fetches find it again by this key.
+    item_key: Mapped[str] = mapped_column(String(1000))
+    url: Mapped[str] = mapped_column(String(2000))
+    title: Mapped[str | None] = mapped_column(Text)
+    # As the source states it, in UTC; empty when it states none (datamodel.md, rules 4 and 5).
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    language: Mapped[str | None] = mapped_column(String(10))
+
+    __table_args__ = (
+        UniqueConstraint(source_id, item_key),
+        Index("ix_article_fetched_at", fetched_at),
+    )

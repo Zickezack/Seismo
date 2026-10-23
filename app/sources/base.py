@@ -1,0 +1,39 @@
+"""The interface every source adapter implements, and the one shape all of them return."""
+import re
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Protocol
+
+from app.sources.http import HttpClient
+
+_LANGUAGE_CODE = re.compile(r"[a-z]{2,3}")
+
+
+@dataclass(frozen=True)
+class FetchedItem:
+    """One item of a source as its adapter read it; the ingestion turns it into an Artikel."""
+
+    key: str  # stable within the source: the item's own id, else its link
+    url: str
+    title: str | None
+    published_at: datetime | None  # UTC, as the source states it; None when it states none (datamodel.md, rule 5)
+    language: str | None  # ISO 639 code, as the source states it for the item or the whole source
+
+
+class SourceSettings(Protocol):
+    """What an adapter reads of a Quelle."""
+
+    url: str
+
+
+class SourceAdapter(Protocol):
+    label: str  # the source type as the UI shows it, e.g. "RSS"
+
+    def fetch(self, source: SourceSettings, http: HttpClient) -> list[FetchedItem]:
+        """The source's current items. Raises SourceRejected or SourceUnavailable (app/sources/errors.py)."""
+
+
+def language_code(raw: str | None) -> str | None:
+    """The primary language subtag of a language tag ("en-US" -> "en"), or None for anything else."""
+    code = (raw or "").strip().lower().replace("_", "-").split("-")[0]
+    return code if _LANGUAGE_CODE.fullmatch(code) else None

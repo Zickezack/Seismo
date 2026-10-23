@@ -16,6 +16,7 @@ def test_required_variables_only_gives_defaults():
     assert settings.log_level == "INFO"
     assert settings.worker_poll_interval_seconds == 5.0
     assert settings.backup_dir == Path("/backups")
+    assert settings.fetch_contact == ""
 
 
 def test_optional_variables_override_defaults():
@@ -130,3 +131,13 @@ def test_admin_password_and_session_secret_are_hidden_in_repr():
 
     assert "a" * 12 not in shown
     assert "s" * 32 not in shown
+
+
+def test_fetch_contact_is_read_and_trimmed():
+    assert Settings.from_env(REQUIRED | {"FETCH_CONTACT": " ops@example.org "}).fetch_contact == "ops@example.org"
+
+
+def test_fetch_contact_must_be_a_single_line():
+    # It goes into the User-Agent header; a line break would smuggle in a header of its own.
+    with pytest.raises(ConfigError, match="^FETCH_CONTACT must be a single line$"):
+        Settings.from_env(REQUIRED | {"FETCH_CONTACT": "ops@example.org\r\nX-Evil: 1"})

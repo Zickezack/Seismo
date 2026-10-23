@@ -19,13 +19,15 @@ dependencies = [
     "python-multipart>=0.0.32,<0.1",
     # Signs the session cookie in Starlette's SessionMiddleware.
     "itsdangerous>=2.2,<3",
+    # Reads RSS 0.9x, 1.0, 2.0 and Atom with their many date formats (app/sources/rss.py).
+    "feedparser>=6.0.14,<7",
+    # HTTP client of the source adapters (app/sources/http.py); Starlette's TestClient uses it as well.
+    "httpx2>=2.15,<3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1,<10",
-    # Starlette's TestClient prefers httpx2 and deprecates httpx.
-    "httpx2>=2.16,<3",
     # Drives the UI in a headless browser (skill verify); needs `playwright install chromium` once.
     "playwright>=1.64,<2",
 ]
