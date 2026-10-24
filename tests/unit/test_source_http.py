@@ -1,4 +1,9 @@
-"""HTTP client of the source adapters against simulated answers (httpx2.MockTransport)."""
+"""HTTP client of the source adapters against simulated answers (httpx2.MockTransport), the total timeout against a
+host on 127.0.0.1."""
+import socket
+import threading
+import time
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import httpx2
@@ -122,3 +127,86 @@ def test_unsupported_scheme_is_rejected():
     # The real transport: it refuses the scheme before connecting anywhere.
     with HttpClient("") as http, pytest.raises(SourceRejected, match="^Ungültige URL$"):
         http.get("ftp://feed.example/rss", "*/*")
+
+
+COMPLETE = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nok"
+
+
+@contextmanager
+def local_host(*answers: bytes, trickle: bool = True):
+    """A host that answers the requests on one connection in turn and then, with `trickle`, keeps sending a byte
+    every 50 ms: never silent for the per-operation timeout. For at most 10 s, so a missing total timeout fails a
+    test rather than hanging it. Yields the URL and the list of requests served."""
+    server = socket.create_server(("127.0.0.1", 0))
+    served = []
+
+    def serve():
+        connection, _address = server.accept()
+        with connection:
+            try:
+                for answer in answers:
+                    served.append(_read_request(connection))
+                    connection.sendall(answer)
+                until = time.monotonic() + 10
+                while trickle and time.monotonic() < until:
+                    connection.sendall(b"x")
+                    time.sleep(0.05)
+            except OSError:
+                pass  # the client shut the connection down
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.getsockname()[1]}/page", served
+    finally:
+        thread.join(15)
+        server.close()
+
+
+def _read_request(connection: socket.socket) -> bytes:
+    request = b""
+    while b"\r\n\r\n" not in request:
+        if not (data := connection.recv(4096)):
+            raise OSError("closed")
+        request += data
+    return request
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        b"HTTP/1.1 200 OK\r\nX-Slow: ",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n",
+        # Without a length the shut-down connection would end the answer as if it were complete.
+        b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n",
+    ],
+    ids=["headers", "body", "body without length"],
+)
+def test_answer_trickling_in_is_cut_off_after_the_total_timeout(monkeypatch, head):
+    monkeypatch.setattr(source_http, "TOTAL_TIMEOUT_SECONDS", 0.5)
+    started = time.monotonic()
+
+    with local_host(head) as (url, _served), HttpClient("") as http:
+        with pytest.raises(SourceUnavailable, match="^Keine vollständige Antwort innerhalb von 0.5 s$"):
+            http.get(url, "*/*")
+
+    assert time.monotonic() - started < 5
+
+
+def test_total_timeout_also_cuts_off_a_reused_connection(monkeypatch):
+    monkeypatch.setattr(source_http, "TOTAL_TIMEOUT_SECONDS", 0.5)
+
+    with local_host(COMPLETE, b"HTTP/1.1 200 OK\r\nX-Slow: ") as (url, served), HttpClient("") as http:
+        assert http.get(url, "*/*").content == b"ok"
+        with pytest.raises(SourceUnavailable, match="^Keine vollständige Antwort"):
+            http.get(url, "*/*")
+
+    # Both on the one connection the host accepts: the second request opened none of its own.
+    assert len(served) == 2
+
+
+def test_answer_within_the_total_timeout_is_kept():
+    with local_host(COMPLETE, trickle=False) as (url, _served), HttpClient("") as http:
+        response = http.get(url, "text/plain")
+
+    assert (response.status, response.content, response.content_type) == (200, b"ok", "text/plain")
