@@ -137,18 +137,23 @@ def read_page(content: bytes, content_type: str | None, url: str) -> Page:
         # A page without a main text is no article page (an app shell, an error page): what it says of itself may
         # concern another one - the EC press corner's shell names its home page, which would make different articles
         # duplicates, and a bot check's title ("Just a moment...") would replace GDELT's.
-        return Page(text, *page_metadata(content, url)) if text else Page(text)
+        return Page(text, *page_metadata(content, url, charset)) if text else Page(text)
     if media_type == "application/pdf":
         reader = PdfReader(io.BytesIO(content))
         return Page(clean_text("\n".join(page.extract_text() or "" for page in reader.pages)))
     return Page(clean_text(content.decode(charset or "utf-8", errors="replace")))
 
 
-def page_metadata(content: bytes, url: str) -> tuple[str | None, str | None, datetime | None]:
+def page_metadata(
+    content: bytes, url: str, charset: str | None = None
+) -> tuple[str | None, str | None, datetime | None]:
     """A web page's own canonical link (in canonical form), its title (og:title, else <title>) and its publication
-    time (meta tags, then JSON-LD datePublished, then <time itemprop>): each None when the page does not state it."""
+    time (meta tags, then JSON-LD datePublished, then <time itemprop>): each None when the page does not state it.
+
+    Read in the header's charset, else the page's own, else UTF-8: lxml alone takes a page whose charset is only in
+    the header, or in an HTML5 <meta charset>, for Latin-1 ("FÄ±rÄ±ndan" for "Fırından")."""
     try:
-        tree = lxml.html.fromstring(content)
+        tree = lxml.html.fromstring(content, parser=_html_parser(charset or _declared_charset(content)))
     except (ParserError, ValueError):
         return None, None, None
     links = (link for link in tree.iter("link") if "canonical" in (link.get("rel") or "").lower().split())
@@ -205,6 +210,20 @@ def _identifier() -> LanguageIdentifier:
     identifier = LanguageIdentifier.from_modelpath(MODEL_DIR / MODEL_FILE, norm_probs=True)
     identifier.set_languages(sorted(set(GDELT_LANGUAGES.values()) & set(identifier.labels)))
     return identifier
+
+
+def _declared_charset(content: bytes) -> str | None:
+    """The charset a page declares in its head: <meta charset> or the http-equiv Content-Type."""
+    match = re.search(rb"<meta[^>]+charset=[\"']?([\w.:-]+)", content[:4096], re.IGNORECASE)
+    return match.group(1).decode("ascii") if match else None
+
+
+def _html_parser(charset: str | None) -> lxml.html.HTMLParser:
+    try:
+        return lxml.html.HTMLParser(encoding=charset or "utf-8")
+    except LookupError:
+        # A charset Python does not know: UTF-8, the web's own default.
+        return lxml.html.HTMLParser(encoding="utf-8")
 
 
 def _media_type(content_type: str | None) -> tuple[str, str | None]:

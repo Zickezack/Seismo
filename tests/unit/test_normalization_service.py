@@ -102,6 +102,24 @@ def test_time_from_json_ld_when_no_meta_tag_states_it():
     assert page_metadata(page(head), "https://bank.example/a")[2] == datetime(2026, 10, 22, 8, tzinfo=UTC)
 
 
+@pytest.mark.parametrize(
+    ("head", "encoding", "header_charset"),
+    [
+        ('<meta charset="utf-8">', "utf-8", None),
+        ('<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-9">', "iso-8859-9", None),
+        ("", "utf-8", "UTF-8"),
+        ("", "windows-1251", "windows-1251"),
+        ("", "utf-8", None),
+        ('<meta charset="no-such-charset">', "utf-8", None),
+    ],
+)
+def test_the_title_is_read_in_the_page_s_charset(head, encoding, header_charset):
+    title = "Fırından çıkan ürün" if encoding != "windows-1251" else "Украина вернула"
+    content = f"<html><head>{head}<title>{title}</title></head><body><p>Text</p></body></html>".encode(encoding)
+
+    assert page_metadata(content, "https://news.example/a", header_charset)[1] == title
+
+
 def test_a_page_without_metadata():
     assert page_metadata(b"<p>nur Text</p>", "https://bank.example/a") == (None, None, None)
     assert page_metadata(b"", "https://bank.example/a") == (None, None, None)
