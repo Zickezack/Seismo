@@ -202,7 +202,7 @@ def test_bulk_buttons_start_disabled_and_delete_asks_first(client, services):
 
     for action in ("fetch", "activate", "deactivate", "delete"):
         assert " disabled" in tag_of(html, action)
-    assert 'data-confirm-delete="Quelle|Quellen"' in tag_of(html, "delete")
+    assert 'data-confirm="Quelle|Quellen"' in tag_of(html, "delete")
     # The dialog names what it deletes, from the row checkboxes - escaped like every other text.
     assert 'data-name="Apfel &lt;Feed&gt;"' in tag_of(html, "select-2")
     assert tag_of(html, "confirm-dialog") is not None

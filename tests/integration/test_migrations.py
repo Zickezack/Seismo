@@ -268,3 +268,37 @@ def test_normalized_articles_are_normalized_again_to_recognise_their_duplicates(
 
     with engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM article WHERE duplicate_of_id IS NULL")).scalar_one() == 3
+
+
+def test_articles_get_signatures_and_links_by_being_normalized_again(engine):
+    upgrade(engine, "83294e0053ee")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO article (source_name, source_url, item_key, url, normalization_status, normalized_at) VALUES "
+                "('Q', 'https://q.example/rss', 'done', 'https://q.example/a', 'done', now()), "
+                "('Q', 'https://q.example/rss', 'failed', 'https://q.example/b', 'failed', now())"
+            )
+        )
+
+    upgrade(engine)
+
+    query = "SELECT item_key, normalization_status, text_signature, text_bands FROM article"
+    with engine.connect() as connection:
+        rows = {row[0]: row[1:] for row in connection.execute(text(query))}
+        links = connection.execute(text("SELECT count(*) FROM article_link")).scalar_one()
+    assert rows == {"done": ("pending", None, None), "failed": ("failed", None, None)}
+    assert links == 0
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO article_link (article_id, other_id, similarity) "
+                "SELECT min(id), max(id), 0.8 FROM article"
+            )
+        )
+    downgrade(engine, "83294e0053ee")
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM article")).scalar_one() == 2

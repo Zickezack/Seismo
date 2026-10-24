@@ -463,6 +463,17 @@ a:focus-visible {
   color: var(--color-muted);
 }
 
+/* Facts about one item as label and value, e.g. an article's metadata (templates/article.html): the values wrap,
+   so the table fits a narrow screen without scrolling. */
+.table-details th {
+  width: 1%;
+}
+
+.table-details td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .table .cell-wrap {
   min-width: 8rem;
   max-width: 14rem;

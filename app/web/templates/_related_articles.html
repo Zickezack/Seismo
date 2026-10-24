@@ -1,0 +1,28 @@
+{#- The articles of the article page (article.html): one checkbox per row for its bulk action. A row's checkbox
+    sends the row's article, unless value_of_row names another one (a duplicate's own id beside its original). -#}
+<div class="table-container">
+  <table class="table">
+    <thead>
+      <tr>
+        <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle auswählen" data-testid="select-all"></th>
+        <th>Titel</th>
+        <th>Quelle</th>
+        <th>Veröffentlicht</th>
+        {% if show_reason %}<th>Erkannt an</th>{% endif %}
+        {% if show_similarity %}<th>Ähnlichkeit</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr data-testid="related-{{ row.id }}">
+        <td class="cell-select"><input type="checkbox" name="article_id" value="{{ value_of_row or row.id }}" data-select-row data-name="{{ name_of_row or row.title or row.url }}" aria-label="{{ row.title or row.url }} auswählen" data-testid="select-{{ row.id }}"></td>
+        <td class="cell-title"><a href="/articles/{{ row.id }}" data-testid="related-title-{{ row.id }}">{{ row.title or row.url }}</a>{% if show_similarity and row.id == detail.first_published_id %}<span class="hint" data-testid="first-{{ row.id }}">zuerst veröffentlicht</span>{% endif %}</td>
+        <td class="cell-wrap">{{ row.source_display_name }}</td>
+        <td>{{ row.published_at|local_time }}</td>
+        {% if show_reason %}<td>{{ row.duplicate_label }}</td>{% endif %}
+        {% if show_similarity %}<td data-testid="similarity-{{ row.id }}">{{ row.similarity_label }}</td>{% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

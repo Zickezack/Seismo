@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import Connection, Row
 
 from app.db.models import DuplicateReason, FullTextStatus
-from app.repositories import article_repository
+from app.repositories import article_link_repository, article_repository
 
 # A shorter text says too little to make two articles one: a heading, a cookie notice, a bot check.
 MIN_TEXT_FOR_HASH = 200
@@ -77,10 +77,20 @@ def check(connection: Connection, article_id: int) -> None:
         _join(connection, article, other_host[0], DuplicateReason.TEXT)
 
 
+def separate(connection: Connection, article_id: int, original_id: int) -> None:
+    """The admin's word: the duplicate is no copy of its original. It becomes an original of its own, normalized again
+    - its full text fetched first when it was skipped as the original's page - and the two are never paired again."""
+    lock(connection)
+    article_link_repository.separate(connection, article_id, original_id)
+    article_repository.unmark_duplicate(connection, article_id)
+
+
 def _join(connection: Connection, article: Row, original: Row, reason: DuplicateReason) -> int:
     """The article joins the original's group, or leads it when it comes first. Returns the group's original."""
     first, then = sorted((article, original), key=_order)
     article_repository.mark_duplicate(connection, then.id, first.id, reason)
+    # A duplicate's links are its original's (similarity_service).
+    article_link_repository.move(connection, then.id, first.id)
     if reason == DuplicateReason.URL:
         # Only while it waits: a full text stored before stays.
         article_repository.finish_full_text(connection, then.id, FullTextStatus.SKIPPED, None)

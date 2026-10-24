@@ -22,6 +22,7 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Quelle | `source` | A news source with its adapter type (RSS, GDELT, ...), fetch rules, terms-of-use note, raw-text retention period and Abrufstatus (last success, last error, failures in a row). | none |
 | Artikel | `article` | One fetched report. Its metadata (source, URL, publication time, fetch time, language) is kept permanently. | none |
 | Rohtext | `raw_text` | An article's full text in the temporary raw-data layer. | none |
+| Verknüpfung | `article_link` | Two articles with similar texts - a near-duplicate, a syndicated or lightly edited copy - or a pair the admin separated. UI: Ähnliche Artikel. | none |
 | Extraktion | `extraction` | One LLM run on an article, with model version, schema version, extraction time and validation result. | none |
 | Ereigniskandidat | `event_candidate` | An event as extracted from a single article, before it is assigned to an event. | none |
 | Ereignis | `event` | The durable main object with a stable ID, collecting all reports about one real-world event. | none |
@@ -174,9 +175,11 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | content_hash | varchar(64) | no | | SHA-256 of the cleaned text, from 200 characters on; else empty. Kept with the metadata, so a copy is recognised after its original's raw text is deleted. Index `ix_article_content_hash`. |
   | duplicate_of_id | bigint | no | | The original this article duplicates (`duplicate_service`), foreign key to `article`, `ON DELETE SET NULL`; empty for an original. Never a duplicate itself. UI: "Duplikat (gleiche URL) von" / "Duplikat (gleicher Text) von" and the original's source, linked to it; filter "Duplikate ausblenden". |
   | duplicate_reason | varchar(10) | no | | How it was recognised: `url` (the same `canonical_url`) or `text` (the same `content_hash` on another host); check constraint. Kept when its group gets an original published earlier. |
+  | text_signature | integer[] | no | | MinHash of the cleaned text (`similarity_service`): 128 values over its word 5-grams - character 5-grams for a script without spaces between words - from 200 characters on; else empty. Kept with the metadata, so a text is compared after its raw text is deleted. |
+  | text_bands | bigint[] | no | | The signature's 32 bands of 4 values, hashed: an article sharing one is a candidate for a similar text. GIN index `ix_article_text_bands` (`&&`). |
 
-- Relationships: belongs to a Quelle while it exists; has at most one Rohtext; may be the duplicate of one original Artikel, which has any number of them.
-- Rules: metadata is kept permanently. A source adapter (`app/sources/`) returns items in one shape; only items within the maximum age (Plattform-Einstellungen) and with a web link become articles. Once its full text is settled, the worker normalizes an article (job "Artikel normalisieren", `normalization_service`): canonical URL, the page's title where the source states none or only GDELT's tokenized one, the page's publication time where the feed states none or only GDELT's seendate, detected language, cleaned text. A page without a main text (an app shell, an error page) gives none of its metadata: it may concern another page - the EC press corner's shell names its home page as canonical. Identical articles (story 2, `duplicate_service`) are kept - every source that found one stays traceable - and point to their original: the same `canonical_url`, checked at ingestion (a duplicate by its link gets no full text) and after normalization (the page's own canonical link), or the same `content_hash` on another host - the same text on one host under another canonical URL is a page that is no report (an error page, a consent wall), never a duplicate. The original is the article published first (the admin's decision of 2026-10-24), on equal times the one stored first; an unknown time never comes before a known one (rule 5). An article found later but published earlier becomes the original, and the group follows it; the order is settled when an article joins, a time that changes afterwards does not reorder it. Later steps work on originals only.
+- Relationships: belongs to a Quelle while it exists; has at most one Rohtext; may be the duplicate of one original Artikel, which has any number of them; an original has any number of Verknüpfungen.
+- Rules: metadata is kept permanently. A source adapter (`app/sources/`) returns items in one shape; only items within the maximum age (Plattform-Einstellungen) and with a web link become articles. Once its full text is settled, the worker normalizes an article (job "Artikel normalisieren", `normalization_service`): canonical URL, the page's title where the source states none or only GDELT's tokenized one, the page's publication time where the feed states none or only GDELT's seendate, detected language, cleaned text. A page without a main text (an app shell, an error page) gives none of its metadata: it may concern another page - the EC press corner's shell names its home page as canonical. Identical articles (story 2, `duplicate_service`) are kept - every source that found one stays traceable - and point to their original: the same `canonical_url`, checked at ingestion (a duplicate by its link gets no full text) and after normalization (the page's own canonical link), or the same `content_hash` on another host - the same text on one host under another canonical URL is a page that is no report (an error page, a consent wall), never a duplicate. The original is the article published first (the admin's decision of 2026-10-24), on equal times the one stored first; an unknown time never comes before a known one (rule 5). An article found later but published earlier becomes the original, and the group follows it; the order is settled when an article joins, a time that changes afterwards does not reorder it. Later steps work on originals only. Similar originals (story 3) are linked in pairs, never merged: see Verknüpfung.
 - Privacy: none
 
 ### Rohtext (`raw_text`)
@@ -194,6 +197,22 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
 - Relationships: belongs to one Artikel.
 - Rules: the temporary raw-data layer: deleted after its source's retention period once processing has succeeded (rule 8, epic Verdichtung und Daten-Lifecycle); nothing deletes it yet. The normalisation turns it into plain text.
+- Privacy: none
+
+### Verknüpfung (`article_link`)
+- Store: SQL table `article_link`, one row per pair
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | article_id | bigint | yes | | The pair's lower article id; primary key with `other_id`; foreign key to `article`, `ON DELETE CASCADE`. Check constraint `article_id < other_id`. |
+  | other_id | bigint | yes | | The pair's higher article id; foreign key to `article`, `ON DELETE CASCADE`. Index `ix_article_link_other_id`. |
+  | similarity | double precision | no | | The estimated share of word 5-grams the two texts have in common (Jaccard, from their signatures); empty for a pair separated without a link ("Kein Duplikat"). UI: Ähnlichkeit, in percent. |
+  | created_at | timestamptz | yes | now() | |
+  | separated_at | timestamptz | no | | Set by the admin ("Verknüpfung aufheben", "Kein Duplikat"): the two are unrelated, never linked again, and neither becomes the other's duplicate. |
+
+- Relationships: pairs two Artikel.
+- Rules: made at normalization (`similarity_service`), between originals only - a duplicate's links are its original's: two texts from 60 % estimated similarity (the admin's decision of 2026-10-24), published (else fetched) within 7 days of each other, never two identical texts on one host (an error page, see Artikel). Every link is a measured pair: A linked to B and B to C does not link A and C. When an original becomes a duplicate, its pairs go to the new original, a separation winning over a link. The article page (UI: Artikel, `/articles/<id>`) lists an original's similar articles first published first, marks the first, and separates selected ones; it also separates a duplicate from its original ("Kein Duplikat": the duplicate becomes an original of its own, normalized again, its full text fetched when it was skipped). Kept with the articles; pruning belongs to the epic Verdichtung und Daten-Lifecycle.
 - Privacy: none
 
 ### Backfill (`backfill`)

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Artikel{% endblock %}
+{% block content %}
+{% set article = detail.article %}
+<h1 data-testid="article-title">{{ article.title or article.url }}</h1>
+
+<section class="card stack">
+  <div class="table-container">
+    <table class="table table-details" data-testid="article-meta">
+      <tbody>
+        <tr><th scope="row">Quelle</th><td data-testid="meta-source">{% if article.source_exists %}<a href="/sources/{{ article.source_id }}">{{ article.source_display_name }}</a>{% else %}{{ article.source_display_name }} (gelöscht){% endif %}</td></tr>
+        <tr><th scope="row">Link</th><td><a href="{{ article.url }}" target="_blank" rel="noopener noreferrer" data-testid="meta-url">{{ article.url }}</a></td></tr>
+        <tr><th scope="row">Kanonische URL</th><td data-testid="meta-canonical">{{ article.canonical_url or "–" }}</td></tr>
+        <tr><th scope="row">Veröffentlicht</th><td data-testid="meta-published">{{ article.published_at|local_time }}{% if article.published_note %} <span class="hint">{{ article.published_note }}</span>{% endif %}</td></tr>
+        <tr><th scope="row">Abgerufen</th><td>{{ article.fetched_at|local_time }}</td></tr>
+        <tr><th scope="row">Sprache</th><td>{{ article.language_label }}</td></tr>
+        <tr><th scope="row">Volltext</th><td data-testid="meta-full-text"><span class="status status-{{ article.full_text_status }}">{{ article.full_text_label }}</span>{% if article.full_text_size %} {{ article.full_text_size }}{% endif %}{% if article.text_note %} <span class="hint">{{ article.text_note }}</span>{% endif %}{% if article.full_text_error %} <span class="hint">{{ article.full_text_error }}</span>{% endif %}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if detail.original %}
+<section class="stack" data-testid="original-section">
+  <h2>Duplikat</h2>
+  <p class="hint">{{ article.duplicate_note }}. Ähnliche Artikel stehen beim Original.</p>
+  <form class="stack" method="post" action="/articles/{{ article.id }}/not-duplicate" data-bulk-form data-testid="original-list">
+    <div class="toolbar">
+      <button class="button button-secondary" type="submit" data-bulk-action data-confirm="Duplikat|Duplikate" data-confirm-verb="trennen" data-testid="not-duplicate" disabled>Kein Duplikat</button>
+    </div>
+    {% with rows = [detail.original], value_of_row = article.id, name_of_row = article.title or article.url, show_reason = false, show_similarity = false %}{% include "_related_articles.html" %}{% endwith %}
+  </form>
+</section>
+{% endif %}
+
+{% if detail.duplicates %}
+<section class="stack" data-testid="duplicates-section">
+  <h2>Duplikate ({{ detail.duplicates|length }})</h2>
+  <form class="stack" method="post" action="/articles/{{ article.id }}/not-duplicate" data-bulk-form data-testid="duplicate-list">
+    <div class="toolbar">
+      <button class="button button-secondary" type="submit" data-bulk-action data-confirm="Duplikat|Duplikate" data-confirm-verb="trennen" data-testid="not-duplicate" disabled>Kein Duplikat</button>
+    </div>
+    {% with rows = detail.duplicates, value_of_row = none, name_of_row = none, show_reason = true, show_similarity = false %}{% include "_related_articles.html" %}{% endwith %}
+  </form>
+</section>
+{% endif %}
+
+{% if not detail.original %}
+<section class="stack" id="similar" data-testid="similar-section">
+  <h2>Ähnliche Artikel ({{ detail.similar|length }})</h2>
+  {% if detail.similar %}
+  <p class="hint" data-testid="first-published">{% if detail.first_published_id == article.id %}Dieser Artikel wurde zuerst veröffentlicht.{% else %}Zuerst veröffentlicht: der markierte Artikel.{% endif %} Die Ähnlichkeit ist der geschätzte Anteil gemeinsamer Fünf-Wort-Folgen.</p>
+  <form class="stack" method="post" action="/articles/{{ article.id }}/separate" data-bulk-form data-testid="similar-list">
+    <div class="toolbar">
+      <button class="button button-secondary" type="submit" data-bulk-action data-confirm="Verknüpfung|Verknüpfungen" data-confirm-verb="aufheben" data-testid="separate" disabled>Verknüpfung aufheben</button>
+    </div>
+    {% with rows = detail.similar, value_of_row = none, name_of_row = none, show_reason = false, show_similarity = true %}{% include "_related_articles.html" %}{% endwith %}
+  </form>
+  {% else %}
+  <p data-testid="no-similar">Keine ähnlichen Artikel.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

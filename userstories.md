@@ -36,10 +36,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 10. As an analyst, I want the ReliefWeb API as a source type, so humanitarian and conflict reports come in through the route ReliefWeb offers for automated access, since its robots.txt excludes the RSS feeds.
 11. As an analyst, I want the EIA Open Data API as a source of energy data releases (e.g. the weekly petroleum and natural gas storage reports), with its API key from the environment, since EIA's robots.txt excludes its RSS feeds.
 
-### Epic: Normalisierung, Deduplizierung und Clustering
-3. As an analyst, I want near-duplicate and syndicated articles linked to each other without blindly merging different events, and wrong links correctable, so the same report from several outlets is recognised and every article stays traceable to its source.
-   - Note (2026-10-24): a copy taken over later and slightly changed could be linked to the first published article (the original of story 2) as a variation.
-
 ### Epic: Strukturierte Ereignisextraktion
 1. As an analyst, I want a versioned event schema and an LLM extraction via Ollama - for articles that pass a configurable relevance pre-filter - that turns an article into event candidates with event type, actors, location, time, status and impacts, each statement labelled as fact, claim, forecast or interpretation and backed by a text quote, so events are structured and evidence-based.
 2. As an analyst, I want the LLM output validated against the JSON schema, invalid output retried and logged, missing details marked as unknown instead of invented, separate confidence values for extraction, source quality and inference, and the model version, schema version and extraction time stored, so every extracted statement is traceable.
@@ -112,6 +108,7 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ### Epic: Normalisierung, Deduplizierung und Clustering
 1. As an analyst, I want article HTML cleaned to plain text and the metadata normalised (canonical URL, title, UTC timestamps, detected language), so all later steps work on consistent data.
 2. As an analyst, I want identical articles recognised by canonical URL and content hash, so repeated fetches never create duplicate articles.
+3. As an analyst, I want near-duplicate and syndicated articles linked to each other without blindly merging different events, and wrong links correctable, so the same report from several outlets is recognised and every article stays traceable to its source.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.

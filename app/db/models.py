@@ -7,9 +7,11 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Identity,
     Index,
+    Integer,
     LargeBinary,
     SmallInteger,
     String,
@@ -19,7 +21,7 @@ from sqlalchemy import (
     text,
     true,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -270,6 +272,10 @@ class Article(Base):
     # The original it duplicates, the article published first (duplicate_service); empty for an original.
     duplicate_of_id: Mapped[int | None] = mapped_column(ForeignKey("article.id", ondelete="SET NULL"), index=True)
     duplicate_reason: Mapped[str | None] = mapped_column(String(10))
+    # MinHash of the cleaned text from 200 characters on (similarity_service): kept with the metadata.
+    text_signature: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
+    # Its bands: an article sharing one is a candidate for a similar text.
+    text_bands: Mapped[list[int] | None] = mapped_column(ARRAY(BigInteger))
 
     __table_args__ = (
         UniqueConstraint(source_id, item_key),
@@ -280,6 +286,8 @@ class Article(Base):
         CheckConstraint(duplicate_reason.in_([s.value for s in DuplicateReason]), name="duplicate_reason"),
         # Equality only: a B-tree's key size limit would refuse the longest links.
         Index("ix_article_canonical_url", canonical_url, postgresql_using="hash"),
+        # The candidates for a similar text: articles whose bands overlap (`&&`).
+        Index("ix_article_text_bands", text_bands, postgresql_using="gin"),
         # The worker's sweep for articles to normalize (normalization_service.enqueue_due).
         Index(
             "ix_article_normalization_pending",
@@ -287,6 +295,25 @@ class Article(Base):
             postgresql_where=normalization_status == NormalizationStatus.PENDING.value,
         ),
     )
+
+
+class ArticleLink(Base):
+    """Two articles with similar texts (UI: Ähnliche Artikel), or a pair the admin separated (datamodel.md)."""
+
+    __tablename__ = "article_link"
+
+    # The lower id first: a pair has one row.
+    article_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("article.id", ondelete="CASCADE"), primary_key=True)
+    other_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("article.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    # The estimated share of common word 5-grams; empty for a pair separated without a link ("Kein Duplikat").
+    similarity: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Set by the admin: the two are unrelated, never linked again and never one a duplicate of the other.
+    separated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (CheckConstraint(article_id < other_id, name="ordered_pair"),)
 
 
 class RawText(Base):

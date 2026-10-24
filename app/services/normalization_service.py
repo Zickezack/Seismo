@@ -25,7 +25,7 @@ from sqlalchemy import Connection, Engine
 
 from app.db.models import BACKFILL_PRIORITY, LIVE_PRIORITY, NormalizationStatus, PublishedAtSource
 from app.repositories import normalization_repository
-from app.services import duplicate_service, job_service
+from app.services import duplicate_service, job_service, similarity_service
 from app.services.ingestion_service import MAX_PUBLICATION_AHEAD
 from app.services.urls import clean_url
 from app.sources import ADAPTERS
@@ -99,6 +99,7 @@ def normalize(engine: Engine, article_id: int) -> Callable[[Connection], None] |
         "normalization_error": None,
         "detected_language": detect_language(page.text) if page else None,
         "content_hash": duplicate_service.content_hash(page.text) if page else None,
+        **similarity_service.fingerprint(page.text if page else None),
     }
     # The page's own title fills a gap and replaces one its source states worse (GDELT's come tokenized).
     adapter = ADAPTERS.get(article.adapter_type or "")
@@ -120,11 +121,13 @@ def normalize(engine: Engine, article_id: int) -> Callable[[Connection], None] |
 
 
 def _finish(connection: Connection, article_id: int, values: dict, plain_text: str | None) -> bool:
-    """Write the result once, then look for the article's duplicates: its canonical URL and text are known now."""
+    """Write the result once, then look for the article's duplicates and similar articles: its canonical URL and text
+    are known now."""
     duplicate_service.lock(connection)
     if not normalization_repository.finish(connection, article_id, values, plain_text):
         return False
     duplicate_service.check(connection, article_id)
+    similarity_service.link(connection, article_id)
     return True
 
 

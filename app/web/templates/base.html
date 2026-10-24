@@ -29,7 +29,7 @@
     {% block content %}{% endblock %}
   </main>
   {% if admin %}
-  {# The one delete confirmation of every list (static/app.js, data-confirm-delete). #}
+  {# The one confirmation of every list, of a delete or another action that cannot be undone (static/app.js, data-confirm). #}
   <dialog class="dialog" aria-labelledby="confirm-title" data-confirm-dialog data-testid="confirm-dialog">
     <form class="stack" method="dialog">
       <h2 id="confirm-title" data-confirm-title data-testid="confirm-title"></h2>
