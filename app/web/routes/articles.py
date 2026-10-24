@@ -27,8 +27,13 @@ def article_page(request: Request, article_id: int) -> Response:
     if detail is None:
         flash(request, NOT_FOUND, "error")
         return RedirectResponse("/articles", status_code=303)
-    extraction = extraction_service.latest_for_article(request.app.state.engine, article_id)
-    return templates.TemplateResponse(request, "article.html", {"detail": detail, "extraction": extraction})
+    engine = request.app.state.engine
+    context = {
+        "detail": detail,
+        "extraction": extraction_service.latest_for_article(engine, article_id),
+        "runs": extraction_service.unusable_runs_for_article(engine, article_id),
+    }
+    return templates.TemplateResponse(request, "article.html", context)
 
 
 @router.post("/{article_id}/separate")

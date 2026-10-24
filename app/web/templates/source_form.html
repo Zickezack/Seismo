@@ -81,6 +81,16 @@
       <label class="checkbox-label"><input id="extract_events" name="extract_events" type="checkbox"{% if values.extract_events %} checked{% endif %} aria-describedby="extract_events-hint" data-testid="extract_events"> Ereignisse extrahieren</label>
       <p class="hint" id="extract_events-hint">Ihre Artikel gehen an das LLM, soweit sie den Vorfilter der Plattform-Einstellungen bestehen.</p>
     </div>
+    <div class="field">
+      <label for="quality">Quellenqualität</label>
+      <select id="quality" name="quality" aria-describedby="quality-hint" data-testid="quality">
+        <option value=""{% if not values.quality %} selected{% endif %}>Unbekannt</option>
+        {% for code, label in qualities.items() %}
+        <option value="{{ code }}"{% if values.quality == code %} selected{% endif %}>{{ label|capitalize }}</option>
+        {% endfor %}
+      </select>
+      <p class="hint" id="quality-hint">Für Belege aus ihren Artikeln, sofern keine Domain der Plattform-Einstellungen passt.</p>
+    </div>
     {{ number_field("fetch_interval_minutes", "Abrufintervall (Minuten)", fetch_interval, "Zeit zwischen zwei Abrufen der Quelle.") }}
     {{ number_field("min_request_interval_seconds", "Mindestabstand (Sekunden)", min_request_interval, "Zwischen zwei Anfragen an denselben Host, für Feed und Volltexte dieser Quelle. Leer: Plattform-Wert (%d s); ein kleinerer Wert wirkt nicht." % platform_min_interval, required=False) }}
     {{ number_field("raw_text_retention_days", "Rohtext aufbewahren (Tage)", retention, "Ab der erfolgreichen Verarbeitung; 0 löscht den Volltext gleich danach. Metadaten und Belege bleiben.") }}

@@ -34,7 +34,7 @@ def test_every_setting_has_a_form_field_and_every_default_fits_its_range():
 
     assert set(FORM_FIELDS) == set(defaults.__dict__)
     for name, field in FORM_FIELDS.items():
-        if field.kind in ("domains", "text"):
+        if field.kind in ("domains", "text", "quality"):
             # Valid, and already as the form stores it.
             assert field.parse(getattr(defaults, name)) == getattr(defaults, name)
         else:
@@ -48,6 +48,15 @@ def test_language_list_is_stored_sorted_once_each_and_refuses_what_is_no_code():
     for raw in ("", "deutsch", "e1"):
         with pytest.raises(InvalidSetting, match="^Sprachen: bitte Sprachcodes wie de, en, fr angeben"):
             field.parse(raw)
+
+
+def test_quality_list_takes_a_domain_and_a_level_per_line_and_names_what_it_refuses():
+    field = FORM_FIELDS["source_quality_domains"]
+
+    assert field.parse(" Reuters.com high\n\nnews.cision.com NIEDRIG\nreuters.com mittel") == "news.cision.com niedrig\nreuters.com mittel"
+    with pytest.raises(InvalidSetting, match=r"^Quellenqualität nach Domain: je Zeile eine Domain und hoch, mittel oder niedrig, nicht: reuters\.com, https://x\.example sehr hoch\.$"):
+        field.parse("reuters.com\nhttps://x.example sehr hoch")
+    assert PlatformSettings(source_quality_domains="dw.com mittel\nsnb.ch hoch").source_quality_levels == {"dw.com": "medium", "snb.ch": "high"}
 
 
 def test_domain_list_is_stored_sorted_once_each_and_names_what_is_no_domain():

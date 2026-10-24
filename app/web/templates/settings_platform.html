@@ -28,11 +28,16 @@
 </div>
 {% endmacro %}
 
+{% macro llm_status() %}
+<p class="hint field-wide" data-testid="llm-status">{% if llm %}Ollama {{ llm.base_url }}, Modell {{ llm.model }}, Kontext {{ llm.num_ctx }} Tokens: {% if llm.served %}<span class="status status-active">verfügbar</span>{% else %}<span class="status status-failed">nicht verfügbar</span> - nicht erreichbar oder das Modell nicht geladen (ollama pull){% endif %}{% else %}Kein Ollama konfiguriert (OLLAMA_BASE_URL): der Worker extrahiert nichts.{% endif %} Festgelegt in der Umgebung des Servers, nicht hier.</p>
+{% endmacro %}
+
 {% macro section(id, title, names) %}
 <details class="card section" id="{{ id }}" open data-testid="section-{{ id }}">
   <summary><h2>{{ title }}</h2></summary>
   <form class="form-grid" method="post" action="/settings/platform" data-inline-save data-testid="form-{{ id }}">
-    {% for name in names %}{% if fields[name].kind == "domains" %}{{ domain_field(fields[name]) }}{% elif fields[name].kind == "text" %}{{ text_field(fields[name]) }}{% else %}{{ number_field(fields[name]) }}{% endif %}{% endfor %}
+    {% if id == "extraktion" %}{{ llm_status() }}{% endif %}
+    {% for name in names %}{% if fields[name].kind in ("domains", "quality") %}{{ domain_field(fields[name]) }}{% elif fields[name].kind == "text" %}{{ text_field(fields[name]) }}{% else %}{{ number_field(fields[name]) }}{% endif %}{% endfor %}
     <div class="form-actions">
       <button class="button" type="submit" data-testid="save-{{ id }}">Speichern</button>
       <span class="save-status" data-save-status role="status" data-testid="status-{{ id }}"></span>
@@ -44,7 +49,7 @@
 {% set sections = [
   ("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls"]),
   ("abruf", "Abruf", ["article_max_age_days", "domain_min_interval_seconds", "tdm_blocked_domains"]),
-  ("extraktion", "Ereignisextraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour"]),
+  ("extraktion", "Ereignisextraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour", "source_quality_domains"]),
   ("aufbewahrung", "Aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
   ("backups", "Backups", ["backup_interval_hours", "backups_to_keep"]),
 ] %}

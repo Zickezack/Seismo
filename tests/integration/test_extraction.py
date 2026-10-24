@@ -109,27 +109,39 @@ def test_the_budget_takes_the_newest_first_and_counts_the_hour(database):
 
 
 class Ollama:
-    """Answers every chat with `content`, or with `status`; records what it was asked."""
+    """Answers the chats in turn with `contents` - the last one again once they run out - or with `status`; a
+    `(content, done_reason)` pair answers with that reason. Records what it was asked."""
 
-    def __init__(self, content=None, status=200, done_reason="stop"):
-        self.content, self.status, self.done_reason, self.requests = content, status, done_reason, []
+    def __init__(self, *contents, status=200):
+        self.contents, self.status, self.requests = list(contents), status, []
 
     def __call__(self, request):
         self.requests.append(json.loads(request.content))
         if self.status != 200:
             return httpx2.Response(self.status, json={"error": "model 'qwen3.5:9b' not found"})
-        body = {"model": "qwen3.5:9b", "message": {"role": "assistant", "content": self.content}, "done_reason": self.done_reason}
+        content = self.contents.pop(0) if len(self.contents) > 1 else self.contents[0]
+        content, done_reason = content if isinstance(content, tuple) else (content, "stop")
+        body = {"model": "qwen3.5:9b", "message": {"role": "assistant", "content": content}, "done_reason": done_reason}
         return httpx2.Response(200, json=body | {"prompt_eval_count": 900, "eval_count": 300})
 
 
 def answer(*quotes):
-    statements = [{"kind": kind, "text": f"Statement {number}.", "quote": quote} for number, (kind, quote) in enumerate(quotes)]
+    statements = [{"kind": kind, "text": f"Statement {number}.", "quote": quote, "confidence": "high"}
+                  for number, (kind, quote) in enumerate(quotes)]
     return json.dumps({"events": [{
-        "event_type": "monetary_policy", "status": "update", "title": "ECB keeps rates unchanged",
-        "summary": "The ECB left its key rates unchanged.", "location": {"country": None, "place": "euro area"},
-        "time_note": "on Thursday", "actors": [{"name": "ECB", "role": "central bank"}],
-        "impacts": [], "statements": statements,
+        "event_type": "monetary_policy", "status": "update", "confidence": "medium", "title": "ECB keeps rates unchanged",
+        "summary": "The ECB left its key rates unchanged.",
+        "location": {"country": None, "place": "euro area", "quote": "Inflation im Euroraum"},
+        "time_note": "on Thursday", "time_quote": "am Donnerstag unverändert",
+        "actors": [{"name": "ECB", "role": "central bank", "quote": "Die Europäische Zentralbank"},
+                   {"name": "IMF", "role": "observer", "quote": "Der Internationale Währungsfonds"}],
+        "impacts": [{"target": "German bonds", "target_kind": "market", "direction": "positive", "horizon": "days",
+                     "description": "Yields eased.", "quote": "die Renditen deutscher Staatsanleihen gaben leicht nach"}],
+        "statements": statements,
     }]})
+
+
+INVALID = '{"events": [{"event_type": "flood"}]}'
 
 
 def extract_all(database, ollama):
@@ -150,6 +162,7 @@ def queued(database):
 
 
 def test_an_extraction_stores_its_candidates_with_the_quotes_found_in_the_text(database, queued):
+    platform_settings_service.save(database, {"source_quality_domains": "bank.example mittel"})
     ollama = Ollama(answer(
         ("fact", RATE_DECISION),
         ("claim", "kündigte an, die Daten der kommenden Monate genau zu verfolgen"),
@@ -162,14 +175,22 @@ def test_an_extraction_stores_its_candidates_with_the_quotes_found_in_the_text(d
         extraction = connection.execute(select(Extraction.__table__)).one()
         candidate = connection.execute(select(EventCandidate.__table__)).one()
         statements = connection.execute(
-            select(Statement.kind, Evidence.quote, Evidence.article_id).join(Evidence).order_by(Statement.position)
+            select(Statement.kind, Statement.extraction_confidence, Evidence.quote, Evidence.source_quality, Evidence.article_id)
+            .join(Evidence)
+            .order_by(Statement.position)
         ).all()
-    assert (extraction.article_id, extraction.model, extraction.schema_version) == (queued, "qwen3.5:9b", "1")
+    assert (extraction.article_id, extraction.model, extraction.schema_version) == (queued, "qwen3.5:9b", "2")
+    assert (extraction.validation_result, extraction.repaired, extraction.validation_errors) == ("valid", False, None)
     assert (extraction.truncated, extraction.statements_dropped, extraction.input_chars > 500) == (False, 1, True)
-    assert (candidate.event_type, candidate.status, candidate.place, candidate.time_note) == ("monetary_policy", "update", "euro area", "on Thursday")
-    assert candidate.actors == [{"name": "ECB", "role": "central bank"}]
+    assert (candidate.event_type, candidate.status, candidate.inference_confidence) == ("monetary_policy", "update", "medium")
+    assert (candidate.place, candidate.location_quote) == ("euro area", "Inflation im Euroraum")
+    assert (candidate.time_note, candidate.time_quote) == ("on Thursday", "am Donnerstag unverändert")
+    # The IMF is not in the text: left out, not invented.
+    assert candidate.actors == [{"name": "ECB", "role": "central bank", "quote": "Die Europäische Zentralbank"}]
+    assert candidate.impacts[0]["quote"] == "die Renditen deutscher Staatsanleihen gaben leicht nach"
     assert [tuple(row) for row in statements] == [
-        ("fact", RATE_DECISION, queued), ("claim", "kündigte an, die Daten der kommenden Monate genau zu verfolgen", queued)
+        ("fact", "high", RATE_DECISION, "medium", queued),
+        ("claim", "high", "kündigte an, die Daten der kommenden Monate genau zu verfolgen", "medium", queued),
     ]
     [request] = ollama.requests
     assert RATE_DECISION in request["messages"][1]["content"] and request["messages"][1]["content"].startswith("Source: EZB")
@@ -190,14 +211,40 @@ def test_an_article_that_became_a_duplicate_meanwhile_is_not_extracted(database,
     assert ollama.requests == [] and [job.status for job in jobs(database, KIND)] == [JobStatus.SUCCEEDED]
 
 
+def runs(database):
+    with database.connect() as connection:
+        return connection.execute(
+            select(Extraction.validation_result, Extraction.repaired, Extraction.validation_errors, Extraction.raw_answer)
+            .order_by(Extraction.id)
+        ).all()
+
+
+@pytest.mark.parametrize("first", [INVALID, ('{"events": [', "length")], ids=["outside the schema", "cut"])
+def test_an_unusable_answer_is_stored_and_asked_again_valid_then_with_every_level_one_lower(database, queued, first):
+    ollama = Ollama(first, answer(("fact", RATE_DECISION)))
+
+    extract_all(database, ollama)
+
+    (result, repaired, errors, raw), valid = runs(database)
+    assert (result, repaired, valid.validation_result, valid.repaired, valid.raw_answer) == (
+        "invalid" if first == INVALID else "incomplete", False, "valid", True, None
+    )
+    assert raw == (first if first == INVALID else first[0]) and errors
+    follow_up = ollama.requests[1]["messages"][1]["content"]
+    assert "A previous answer was not usable" in follow_up and first[0] not in follow_up.split("A previous answer")[1]
+    with database.connect() as connection:
+        assert connection.execute(select(Statement.extraction_confidence)).scalar_one() == "medium"
+    assert [job.status for job in jobs(database, KIND)] == [JobStatus.SUCCEEDED]
+
+
 @pytest.mark.parametrize(
     ("ollama", "status", "error"),
     [
         (Ollama(status=400), JobStatus.FAILED, "PermanentJobError: Ollama: HTTP 400"),
         (Ollama(status=404), JobStatus.QUEUED, "LlmUnavailable: Ollama: HTTP 404: model 'qwen3.5:9b' not found"),
         (Ollama(status=503), JobStatus.QUEUED, "LlmUnavailable: Ollama: HTTP 503"),
-        (Ollama('{"events": [{"event_type": "flood"}]}'), JobStatus.QUEUED, "ValidationError"),
-        (Ollama('{"events": [', done_reason="length"), JobStatus.QUEUED, "IncompleteAnswer: Antwort nach 300 Tokens abgeschnitten"),
+        (Ollama(INVALID), JobStatus.QUEUED, "InvalidAnswer: Antwort auch auf Nachfrage ausserhalb des Schemas: events.0.event_type"),
+        (Ollama(('{"events": [', "length")), JobStatus.QUEUED, "InvalidAnswer: Antwort auch auf Nachfrage abgeschnitten: cut off after 300 tokens"),
     ],
     ids=["refused", "model not pulled", "server failing", "outside the schema", "cut answer"],
 )
@@ -206,5 +253,14 @@ def test_a_refused_request_fails_at_once_anything_else_is_retried(database, queu
 
     [job] = jobs(database, KIND)
     assert job.status == status and job.last_error.startswith(error)
-    with database.connect() as connection:
-        assert connection.execute(select(Extraction.id)).all() == []
+    assert extraction_service.latest_for_article(database, queued) is None
+
+
+def test_two_unusable_answers_are_both_stored_and_the_job_retried_later(database, queued):
+    extract_all(database, Ollama(INVALID))
+
+    assert [(result, repaired) for result, repaired, _errors, _raw in runs(database)] == [("invalid", False), ("invalid", True)]
+    [job] = jobs(database, KIND)
+    assert (job.status, job.attempts) == (JobStatus.QUEUED, 1)
+    # Its job is there: the sweep does not queue the article a second time.
+    assert extraction_service.enqueue_due(database) == []

@@ -4,14 +4,18 @@ Ollama constrains the answer to, and the check of the answer.
 Versioned: a change of the fields, their meaning or the prompt (app/services/extraction_service.py) is a new
 SCHEMA_VERSION, stored with every extraction (datamodel.md, rule 2). Every text the model writes is English; a quote
 is verbatim from the article. What the article does not state stays empty - never a guess (rule 5).
+
+Version 2 (story 2): place, time, actors and impacts carry a quote like every statement; a statement rates how faithful
+it is to its quote (extraction), an event how sure its type, status and impacts are derived (inference).
 """
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.db.models import EventStatus, EventType, StatementKind
+from app.db.models import ConfidenceLevel, EventStatus, EventType, StatementKind
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
+QUOTE_MAX = 500
 MAX_EVENTS = 5
 MAX_STATEMENTS = 5
 
@@ -47,6 +51,7 @@ class _Strict(BaseModel):
 class Actor(_Strict):
     name: str = Field(min_length=1, max_length=200)
     role: str = Field(max_length=200)
+    quote: str = Field(min_length=1, max_length=QUOTE_MAX)
 
 
 class Impact(_Strict):
@@ -55,17 +60,22 @@ class Impact(_Strict):
     direction: Direction
     horizon: Horizon
     description: str = Field(max_length=500)
+    quote: str = Field(min_length=1, max_length=QUOTE_MAX)
 
 
+# Required, though null: the answer names every detail, unknown as null, instead of leaving out a key - and with it
+# the quote that backs it (a model left an optional quote out).
 class Location(_Strict):
-    country: str | None = Field(default=None, pattern="^[A-Z]{2}$")
-    place: str | None = Field(default=None, max_length=200)
+    country: str | None = Field(pattern="^[A-Z]{2}$")
+    place: str | None = Field(max_length=200)
+    quote: str | None = Field(max_length=QUOTE_MAX)
 
 
 class ExtractedStatement(_Strict):
     kind: StatementKind
     text: str = Field(min_length=1, max_length=500)
-    quote: str = Field(min_length=1, max_length=500)
+    quote: str = Field(min_length=1, max_length=QUOTE_MAX)
+    confidence: ConfidenceLevel
 
 
 class ExtractedEvent(_Strict):
@@ -73,8 +83,10 @@ class ExtractedEvent(_Strict):
     status: EventStatus
     title: str = Field(min_length=1, max_length=200)
     summary: str = Field(min_length=1, max_length=1000)
+    confidence: ConfidenceLevel
     location: Location
-    time_note: str | None = Field(default=None, max_length=200)
+    time_note: str | None = Field(max_length=200)
+    time_quote: str | None = Field(max_length=QUOTE_MAX)
     actors: list[Actor] = Field(max_length=10)
     impacts: list[Impact] = Field(max_length=10)
     statements: list[ExtractedStatement] = Field(min_length=1, max_length=MAX_STATEMENTS)
@@ -104,3 +116,14 @@ def json_schema() -> dict:
 def parse(answer: str) -> ExtractionAnswer:
     """The model's answer, checked against the schema; raises pydantic.ValidationError."""
     return ExtractionAnswer.model_validate_json(answer)
+
+
+def error_summary(error: ValidationError, limit: int = 10) -> str:
+    """What is wrong with an answer, one line per error: where and what, never the value - it may quote the article
+    (datamodel.md, rule 13)."""
+    lines = [
+        f"{'.'.join(str(part) for part in detail['loc']) or 'answer'}: {detail['msg']}"
+        for detail in error.errors(include_input=False, include_url=False)
+    ]
+    more = len(lines) - limit
+    return "\n".join(lines[:limit] + ([f"and {more} more"] if more > 0 else []))

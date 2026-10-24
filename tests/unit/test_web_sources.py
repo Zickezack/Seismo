@@ -34,7 +34,7 @@ JSON = {"Accept": "application/json"}
 
 def source(source_id, name, **fields):
     values = dict(
-        id=source_id, name=name, adapter_type="rss", url=f"https://example.org/{source_id}.xml", query=None, is_active=True, extract_events=True,
+        id=source_id, name=name, adapter_type="rss", url=f"https://example.org/{source_id}.xml", query=None, is_active=True, extract_events=True, quality=None,
         fetch_interval_minutes=60, language="en", region="europe", terms_note=None, raw_text_retention_days=30,
         min_request_interval_seconds=None, created_at=NOW, updated_at=NOW, last_fetched_at=None, last_error=None,
         last_error_at=None, consecutive_failures=0,
@@ -226,6 +226,7 @@ def test_new_source_form_starts_with_the_defaults(client, services):
     assert "data-inline-save" not in tag_of(html, "source-form")
     assert " checked" in tag_of(html, "is_active")
     assert " checked" in tag_of(html, "extract_events")
+    assert '<option value="" selected>Unbekannt</option>' in html and '<option value="high">Hoch</option>' in html
     assert 'value="60"' in re.search(r'<input id="fetch_interval_minutes"[^>]*>', html, re.DOTALL).group(0)
     assert 'value="30"' in re.search(r'<input id="raw_text_retention_days"[^>]*>', html, re.DOTALL).group(0)
 

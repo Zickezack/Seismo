@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from app.services import platform_settings_service, seed_service, source_service
+from app.services import extraction_service, platform_settings_service, seed_service, source_service
 from app.services.platform_settings_service import InvalidSetting
 from app.web.forms import form_values, wants_json
 from app.web.templating import flash, name_list, templates
@@ -22,6 +22,7 @@ def platform_settings(request: Request) -> Response:
         "fields": platform_settings_service.FORM_FIELDS,
         "sources_seed": seed_service.sources_status(engine),
         "sources_without_region": len(source_service.list_sources(engine, region=source_service.NO_REGION)),
+        "llm": extraction_service.llm_status(*request.app.state.llm),
     }
     return templates.TemplateResponse(request, "settings_platform.html", context)
 

@@ -321,3 +321,33 @@ def test_existing_sources_extract_events_and_the_settings_row_gets_the_extractio
 
     downgrade(engine, "c609763963d4")
     upgrade(engine)
+
+
+def test_extractions_stored_so_far_were_valid_and_an_invalid_run_goes_on_downgrade(engine):
+    upgrade(engine, "0129b1c02d83")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO article (source_name, source_url, item_key, url) VALUES ('Q', 'https://q.example/rss', 'a', 'https://q.example/a')"))
+        connection.execute(
+            text(
+                "INSERT INTO extraction (article_id, model, schema_version, duration_ms, input_chars, truncated) "
+                "SELECT id, 'qwen3.5:9b', '1', 1000, 500, false FROM article"
+            )
+        )
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        row = connection.execute(text("SELECT validation_result, repaired, validation_errors FROM extraction")).one()
+    assert tuple(row) == ("valid", False, None)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO extraction (article_id, model, schema_version, duration_ms, input_chars, truncated, validation_result) "
+                "SELECT id, 'qwen3.5:9b', '2', 1000, 500, false, 'invalid' FROM article"
+            )
+        )
+    downgrade(engine, "0129b1c02d83")
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT schema_version FROM extraction")).scalars().all() == ["1"]
+    upgrade(engine)

@@ -56,6 +56,10 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       # Only to warn on the source list when it is missing; the worker sends it.
       FETCH_CONTACT: ${FETCH_CONTACT:-}
+      # Only shown in the Plattform-Einstellungen; the worker extracts with them.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-}
     restart: unless-stopped
     ports:
       - "${API_PORT:-8000}:8000"

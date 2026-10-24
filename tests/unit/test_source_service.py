@@ -32,6 +32,7 @@ def test_valid_form_is_trimmed():
         raw_text_retention_days=30,
         min_request_interval_seconds=None,
         region="europe",
+        quality=None,
     )
 
 

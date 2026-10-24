@@ -168,6 +168,7 @@ def _form_page(
         "adapter_types": source_service.ADAPTER_TYPES,
         "languages": source_service.LANGUAGES,
         "regions": source_service.REGIONS,
+        "qualities": source_service.QUALITIES,
         "no_language_label": source_service.NO_LANGUAGE_LABEL,
         "fetch_interval": source_service.FETCH_INTERVAL_MINUTES,
         "retention": source_service.RAW_TEXT_RETENTION_DAYS,

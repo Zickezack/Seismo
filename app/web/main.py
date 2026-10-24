@@ -32,6 +32,8 @@ def create_app(settings: Settings, auth_settings: AuthSettings) -> FastAPI:
     app.state.auth = auth_settings
     # Only shown: whether the worker can name its operator in the User-Agent (routes/sources.py).
     app.state.fetch_contact = settings.fetch_contact
+    # Only shown: which LLM server the worker extracts with, and whether it serves the model (routes/settings.py).
+    app.state.llm = (settings.ollama_base_url, settings.ollama_model, settings.ollama_num_ctx)
     app.middleware("http")(log_requests)
     app.add_middleware(
         SessionMiddleware,

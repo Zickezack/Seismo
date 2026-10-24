@@ -40,6 +40,8 @@ REGIONS = {
     "oceania": "Ozeanien",
     "worldwide": "Weltweit",
 }
+# The quality of a source's articles where no domain of the list in the Plattform-Einstellungen matches; empty: unknown.
+QUALITIES = {"high": "hoch", "medium": "mittel", "low": "niedrig"}
 NO_REGION = "none"  # the list's filter value for sources from before regions existed
 NO_REGION_LABEL = "Ohne Region"
 SORT_ORDERS = {"name": "Name", "region": "Region"}
@@ -66,6 +68,7 @@ NEW_SOURCE_FORM = {
     "region": "",
     "is_active": True,
     "extract_events": True,
+    "quality": "",
     "fetch_interval_minutes": DEFAULT_FETCH_INTERVAL_MINUTES,
     "language": "",
     "terms_note": "",
@@ -98,6 +101,7 @@ class SourceValues:
     raw_text_retention_days: int
     min_request_interval_seconds: int | None
     region: str | None  # always set by the form; None only for sources from before regions existed
+    quality: str | None  # QUALITIES; None: unknown
 
 
 @dataclass(frozen=True)
@@ -161,6 +165,7 @@ def parse(form: Mapping[str, str]) -> SourceValues:
         ),
         language=checked(_choice, form.get("language", ""), "Sprache", LANGUAGES, True),
         region=checked(_choice, form.get("region", ""), "Region", REGIONS),
+        quality=checked(_choice, form.get("quality", ""), "Quellenqualität", QUALITIES, True),
         terms_note=checked(_terms_note, form.get("terms_note", "")),
         raw_text_retention_days=checked(
             _whole_number, form.get("raw_text_retention_days", ""), "Rohtext aufbewahren (Tage)", RAW_TEXT_RETENTION_DAYS

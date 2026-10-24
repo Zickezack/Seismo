@@ -207,6 +207,7 @@ def page(monkeypatch):
     calls = {}
     monkeypatch.setattr(article_service, "detail", lambda _engine, article_id: calls.get("detail"))
     monkeypatch.setattr(extraction_service, "latest_for_article", lambda _engine, article_id: calls.get("extraction"))
+    monkeypatch.setattr(extraction_service, "unusable_runs_for_article", lambda _engine, article_id: calls.get("runs", []))
     return calls
 
 
@@ -293,10 +294,12 @@ def test_the_article_page_shows_the_event_candidates_with_their_statements_and_q
     page["detail"] = detail(article(4))
     candidate = extraction_service.CandidateView(
         id=9, event_type="monetary_policy", status="update", title="ECB keeps rates unchanged", summary="The ECB held rates.",
-        country="DE", place="Frankfurt", time_note="on Thursday",
-        actors=[{"name": "ECB", "role": "central bank"}],
-        impacts=[{"target": "Euro", "target_kind": "market", "direction": "unclear", "horizon": "days", "description": ""}],
-        statements=[extraction_service.StatementView("fact", "The ECB held rates.", "Die EZB hat die Leitzinsen unverändert gelassen.")],
+        country="DE", place="Frankfurt", time_note="on Thursday", location_quote="in Frankfurt", time_quote="am Donnerstag",
+        actors=[{"name": "ECB", "role": "central bank", "quote": "Die EZB"}],
+        impacts=[{"target": "Euro", "target_kind": "market", "direction": "unclear", "horizon": "days", "description": "",
+                  "quote": "Der Euro notierte kaum verändert"}],
+        statements=[extraction_service.StatementView("fact", "The ECB held rates.", "Die EZB hat die Leitzinsen unverändert gelassen.", "high", "medium")],
+        inference_confidence="medium",
     )
     page["extraction"] = extraction_service.ExtractionView(
         model="qwen3.5:9b", schema_version="1", extracted_at=NOW, duration_ms=41_200, input_chars=612, truncated=True,
@@ -308,12 +311,14 @@ def test_the_article_page_shows_the_event_candidates_with_their_statements_and_q
     meta = text_of(html, "extraction-meta")
     assert meta.startswith("Extrahiert") and "mit qwen3.5:9b, Schema 1, in 41.2&nbsp;s aus 612 Zeichen (Text gekürzt). 1 Aussage ohne auffindbares Zitat verworfen." in html
     assert text_of(html, "candidate-title-9") == "ECB keeps rates unchanged"
-    assert text_of(html, "candidate-facts-9") == "Geldpolitik · Fortsetzung · Frankfurt, DE · on Thursday"
+    facts = re.search(r'data-testid="candidate-facts-9">(.*?)</p>', html).group(1)
+    assert facts == ('Geldpolitik · Fortsetzung · <span title="in Frankfurt">Frankfurt, DE</span> · '
+                     '<span title="am Donnerstag">on Thursday</span> · Schlussfolgerung mittel')
     actors = re.search(r'data-testid="candidate-actors-9">(.*?)</p>', html).group(1)
-    assert actors == "<strong>Akteure:</strong> ECB (central bank)"
-    assert "<li>Euro (Markt): unklar, Tage</li>" in html
+    assert actors == '<strong>Akteure:</strong> <span title="Die EZB">ECB (central bank)</span>'
+    assert '<li title="Der Euro notierte kaum verändert">Euro (Markt): unklar, Tage</li>' in html
     statements = re.search(r'data-testid="candidate-statements-9">(.*?)</ul>', html, re.DOTALL).group(1)
-    assert '<span class="status status-fact">Tatsache</span> The ECB held rates.' in statements
+    assert '<span class="status status-fact">Tatsache</span> The ECB held rates. <span class="hint">Extraktion hoch · Quelle mittel</span>' in statements
     assert '<blockquote class="quote">Die EZB hat die Leitzinsen unverändert gelassen.</blockquote>' in statements
 
 
@@ -326,3 +331,27 @@ def test_an_article_not_extracted_yet_says_so_and_one_without_events_too(client,
         statements_dropped=0, candidates=[],
     )
     assert text_of(client.get("/articles/4").text, "no-candidates") == "Das Modell fand kein Ereignis mit Beleg im Text."
+
+
+def test_a_detail_the_article_does_not_state_shows_as_unknown_and_unusable_runs_their_errors(client, page):
+    page["detail"] = detail(article(4))
+    candidate = extraction_service.CandidateView(
+        id=9, event_type="other", status="unknown", title="Something", summary="Something happened.", country=None,
+        place=None, time_note=None, actors=[], impacts=[],
+        statements=[extraction_service.StatementView("claim", "Someone said so.", "Jemand sagte das.", "low", None)],
+    )
+    page["extraction"] = extraction_service.ExtractionView(
+        model="qwen3.5:9b", schema_version="2", extracted_at=NOW, duration_ms=9000, input_chars=600, truncated=False,
+        statements_dropped=0, candidates=[candidate], repaired=True,
+    )
+    page["runs"] = [extraction_service.RunView(NOW, "qwen3.5:9b", "invalid", "events.0.event_type: Input should be ...", False)]
+
+    html = client.get("/articles/4").text
+
+    facts = re.search(r'data-testid="candidate-facts-9">(.*?)</p>', html).group(1)
+    assert facts == "Sonstiges · Status unbekannt · <span>Ort unbekannt</span> · <span>Zeit unbekannt</span> · Schlussfolgerung unbekannt"
+    assert "Extraktion niedrig · Quelle unbekannt" in html
+    assert "(gültig erst auf Nachfrage)" in re.search(r'data-testid="extraction-meta">(.*?)</p>', html, re.DOTALL).group(1)
+    runs = re.search(r'data-testid="unusable-runs">(.*?)</details>', html, re.DOTALL).group(1)
+    assert "1 unbrauchbare Antwort des Modells" in runs and "Ausserhalb des Schemas" in runs
+    assert '<pre class="run-errors">events.0.event_type: Input should be ...</pre>' in runs

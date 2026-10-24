@@ -115,6 +115,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | extraction_min_text_chars | integer | yes | 500 | Shorter cleaned texts are not extracted; check constraint >= 0. UI: Mindestlänge des Texts (Zeichen). |
   | extraction_max_age_days | integer | yes | 3 | Older articles (publication, else fetch time) are not extracted; check constraint >= 1. UI: Höchstalter (Tage). |
   | extractions_per_hour | integer | yes | 30 | At most this many extraction jobs are queued per hour, newest articles first; 0 holds the extraction; check constraint >= 0. UI: Extraktionen pro Stunde (höchstens). |
+  | source_quality_domains | text | no | the catalogue's suggestions | "domain level" per line, level hoch, mittel or niedrig, sorted by domain; a domain covers its subdomains, the most specific one wins. NULL: the suggestions the code starts with (`platform_settings_service.STARTER_SOURCE_QUALITY`: official bodies hoch, established media mittel, press release portals niedrig - the admin's decision of 2026-10-24). UI: Ereignisextraktion - Quellenqualität nach Domain. |
   | updated_at | timestamptz | yes | now() | |
 
 - Relationships: none
@@ -134,6 +135,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | query | text | no | | The search of an adapter that needs one, in its syntax, at most 1000 characters; required for `gdelt`, empty for `rss`. UI: Suchanfrage. |
   | is_active | boolean | yes | true | Only active sources are fetched. UI: Aktiv / Inaktiv. |
   | extract_events | boolean | yes | true | Its articles pass the event extraction's pre-filter. UI: Ereignisse extrahieren. |
+  | quality | varchar(10) | no | | `high`, `medium`, `low`; check constraint. The quality of its articles' quotes where no domain of the list in the Plattform-Einstellungen matches; empty: unknown. UI: Quellenqualität - Hoch, Mittel, Niedrig, Unbekannt. |
   | fetch_interval_minutes | integer | yes | 60 | Time between two fetches, 5 to 1440. UI: Abrufintervall. |
   | language | varchar(10) | no | | ISO 639-1 code; empty for a source in several or unknown languages (rule 5). The language of each article is stored separately. UI: Sprache. |
   | region | varchar(20) | no | | What the source reports on: `africa`, `asia`, `europe`, `middle_east`, `north_america`, `south_america`, `oceania`, `worldwide` (UI: Afrika, Asien, Europa, Naher Osten, Nordamerika, Südamerika, Ozeanien, Weltweit; the list sorts in this order). Checked in the service, not by a constraint. Required by the form; empty only for sources from before regions existed (UI: Ohne Region). UI: Region. |
@@ -235,9 +237,13 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | input_chars | integer | yes | | Characters of the cleaned text the model saw. |
   | truncated | boolean | yes | | The text was cut to fit the model's context (`OLLAMA_NUM_CTX`). UI: Text gekürzt. |
   | statements_dropped | integer | yes | 0 | Statements whose quote is not in that text: not stored, nor an event left without one. |
+  | validation_result | varchar(20) | yes | `valid` | `valid`, `invalid` (outside the schema), `incomplete` (cut before its end); check constraint. Every model run is stored, an unusable one at once in its own transaction. UI: Ausserhalb des Schemas, Abgeschnitten. |
+  | validation_errors | text | no | | Of an unusable run: what was wrong, one line per error - where and what, never the value (`event_schema.error_summary`). Shown to the admin; logged is only their number. |
+  | raw_answer | text | no | | Of an unusable run: the model's answer, at most 20000 characters, for diagnosis. May quote the article: shown to the admin, never logged. |
+  | repaired | boolean | yes | false | The answer to the follow-up question, asked with the errors of the first answer (not the answer itself, which would not fit the context). A valid one lowers every statement's extraction level by one. UI: gültig erst auf Nachfrage. |
 
 - Relationships: belongs to one Artikel; has any number of Ereigniskandidaten.
-- Rules: made by the job "Ereignisse extrahieren" (`extraction_service`) for an article that passes the pre-filter: an original (never a duplicate, never a later copy of a linked article) of a source that extracts, in a listed language, with enough text, not too old - at most a number per hour, newest first (Plattform-Einstellungen). One per article; an article whose extraction job failed comes back only when the admin requeues the job. Every text the model writes is English, every quote verbatim. Kept with the metadata.
+- Rules: made by the job "Ereignisse extrahieren" (`extraction_service`) for an article that passes the pre-filter: an original (never a duplicate, never a later copy of a linked article) of a source that extracts, in a listed language, with enough text, not too old - at most a number per hour, newest first (Plattform-Einstellungen). One valid run per article; a run with an unusable answer is stored as well, and the job asks the model once more right away, told what was wrong; a second unusable answer leaves the job to its retry. An article whose extraction job failed comes back only when the admin requeues the job. Every text the model writes is English, every quote verbatim. Kept with the metadata.
 - Privacy: none
 
 ### Ereigniskandidat (`event_candidate`)
@@ -256,9 +262,12 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | summary | text | yes | | English, at most 1000 characters. |
   | country | varchar(2) | no | | ISO 3166-1 alpha-2, where the article states it (rule 5). |
   | place | text | no | | As the article names it. |
+  | location_quote | text | no | | The passage that names place and country (schema 2); without one found, both are empty - unknown, never guessed. |
   | time_note | text | no | | When the event happens, as the article states it, in a few English words, e.g. "on Friday morning", "effective Nov. 7". No date of the model's own: tried in development, it filled in the publication day for 24 of 27 candidates (rule 5); a date is derived later, in code, with the epic Ereignisidentität und zeitliche Entwicklung. |
-  | actors | jsonb | yes | `[]` | `[{name, role}]`: who acts or is directly concerned. Entities come with their epic. |
-  | impacts | jsonb | yes | `[]` | `[{target, target_kind, direction, horizon, description}]`: only effects the article itself names; `target_kind` company, sector, commodity, country, market, other; `direction` positive, negative, mixed, unclear; `horizon` days, weeks, months, years, unknown. Not a Wirkungsannahme of the platform. |
+  | time_quote | text | no | | The passage that states the time (schema 2); without one found, `time_note` is empty. |
+  | inference_confidence | varchar(10) | no | | `high`, `medium`, `low`: how sure type, status and impacts follow from the article, as the model rates it (rule 7); check constraint; empty before schema 2. UI: Schlussfolgerung hoch, mittel, niedrig, unbekannt. |
+  | actors | jsonb | yes | `[]` | `[{name, role, quote}]`: who acts or is directly concerned; an actor without a quote found in the text is left out (schema 2). Entities come with their epic. |
+  | impacts | jsonb | yes | `[]` | `[{target, target_kind, direction, horizon, description, quote}]`: only effects the article itself names, an impact without a quote found left out (schema 2); `target_kind` company, sector, commodity, country, market, other; `direction` positive, negative, mixed, unclear; `horizon` days, weeks, months, years, unknown. Not a Wirkungsannahme of the platform. |
 
 - Relationships: belongs to one Extraktion and its Artikel; has one or more Aussagen.
 - Rules: stored only with at least one Aussage that has a Beleg. Assigned to an Ereignis with the epic Ereignisidentität und zeitliche Entwicklung.
@@ -275,6 +284,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | position | smallint | yes | | |
   | kind | varchar(20) | yes | | `fact`, `claim`, `source_forecast`, `interpretation` (rule 6); check constraint. UI: Tatsache, Behauptung, Quellenprognose, Interpretation. |
   | text | text | yes | | English, one sentence. |
+  | extraction_confidence | varchar(10) | no | | `high`, `medium`, `low`: how faithfully the statement renders its quote, as the model rates it, one lower for a cut text or a repaired answer (rule 7); check constraint; empty before schema 2. UI: Extraktion hoch, mittel, niedrig, unbekannt. |
 
 - Relationships: belongs to one Ereigniskandidat; has one Beleg (from the article it was extracted from).
 - Privacy: none
@@ -289,6 +299,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | statement_id | bigint | yes | | Foreign key to `statement`, `ON DELETE CASCADE`. Index. |
   | article_id | bigint | yes | | The article the quote is from; foreign key to `article`, `ON DELETE CASCADE`. Index. |
   | quote | text | yes | | The passage as it stands in the article's cleaned text - found there despite spaces, typographic quotes and dashes the model wrote differently, at least 10 characters. |
+  | source_quality | varchar(10) | no | | `high`, `medium`, `low`: the quality of the source the quote is from, as it stood at extraction - the most specific domain of the list in the Plattform-Einstellungen, else the article's Quelle; empty: unknown (rule 7); check constraint. UI: Quelle hoch, mittel, niedrig, unbekannt. |
 
 - Relationships: belongs to one Aussage and one Artikel.
 - Rules: a permissible evidence quote, kept after the raw text is deleted (rule 8).

@@ -37,12 +37,19 @@ _random = random.Random(20261024)
 _PERMUTATIONS = [(_random.randrange(1, _PRIME), _random.randrange(0, _PRIME)) for _ in range(SIGNATURE_SIZE)]
 
 
+def unspaced(text: str) -> bool:
+    """Whether most of the text's letters are of a script without spaces between words: one of them says about as
+    much as a word."""
+    characters = "".join(_WORD.findall(text))
+    return len(_UNSPACED.findall(characters)) * 2 > len(characters)
+
+
 def shingles(text: str) -> set[str]:
     """The text's word 5-grams in lower case, without punctuation; character 5-grams when most of its letters are of
     a script without spaces between words."""
     words = _WORD.findall(text.lower())
     characters = "".join(words)
-    if len(_UNSPACED.findall(characters)) * 2 > len(characters):
+    if unspaced(characters):
         return {characters[i : i + SHINGLE_LENGTH] for i in range(len(characters) - SHINGLE_LENGTH + 1)}
     return {" ".join(words[i : i + SHINGLE_LENGTH]) for i in range(len(words) - SHINGLE_LENGTH + 1)}
 

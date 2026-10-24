@@ -12,7 +12,7 @@ NOW = datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
 CUTOFF = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 SOURCE = Source(
     id=7, name="EZB – Pressemitteilungen", adapter_type="rss", url="https://www.ecb.europa.eu/rss/press.html",
-    query=None, is_active=True, extract_events=True, fetch_interval_minutes=60, language="en", region="europe", terms_note=None, raw_text_retention_days=30,
+    query=None, is_active=True, extract_events=True, fetch_interval_minutes=60, language="en", region="europe", quality=None, terms_note=None, raw_text_retention_days=30,
     min_request_interval_seconds=None, created_at=NOW, updated_at=NOW, last_fetched_at=None, last_error=None,
     last_error_at=None, consecutive_failures=0,
 )

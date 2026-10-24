@@ -9,6 +9,27 @@ from app.repositories import platform_settings_repository
 from app.services import tdm_policy
 
 
+# A quality per domain, for the catalogue's publishers (admin's decision of 2026-10-24): official bodies high,
+# established media medium, press release portals - a company's own word - low. Everything else stays unknown.
+STARTER_SOURCE_QUALITY = {
+    "hoch": (
+        "admin.ch", "bankofcanada.ca", "bankofengland.co.uk", "bis.org", "bls.gov", "bundesbank.de", "destatis.de",
+        "ec.europa.eu", "ecb.europa.eu", "federalreserve.gov", "noaa.gov", "sec.gov", "snb.ch", "usgs.gov", "who.int",
+        "wto.org",
+    ),
+    "mittel": (
+        "abc.net.au", "africanews.com", "allafrica.com", "bleepingcomputer.com", "dw.com", "ebc.com.br", "gcaptain.com",
+        "meduza.io", "mercopress.com", "middleeasteye.net", "splash247.com", "thehindu.com", "ukrinform.net",
+    ),
+    "niedrig": ("cision.com", "presseportal.de"),
+}
+QUALITY_WORDS = {"hoch": "high", "mittel": "medium", "niedrig": "low"}
+
+
+def _quality_lines(by_word: Mapping[str, tuple[str, ...]]) -> str:
+    return "\n".join(sorted(f"{domain} {word}" for word, domains in by_word.items() for domain in domains))
+
+
 class InvalidSetting(ValueError):
     """Invalid values from the settings form. The message is shown to the admin as is."""
 
@@ -30,6 +51,8 @@ class PlatformSettings:
     extraction_min_text_chars: int = 500
     extraction_max_age_days: int = 3
     extractions_per_hour: int = 30
+    # "domain level" per line, level hoch, mittel or niedrig; a domain covers its subdomains (extraction_service).
+    source_quality_domains: str = _quality_lines(STARTER_SOURCE_QUALITY)
 
     @property
     def blocked_domains(self) -> list[str]:
@@ -38,6 +61,12 @@ class PlatformSettings:
     @property
     def extraction_language_codes(self) -> list[str]:
         return self.extraction_languages.split(",")
+
+    @property
+    def source_quality_levels(self) -> dict[str, str]:
+        """Domain to level (high, medium, low)."""
+        pairs = (line.split() for line in self.source_quality_domains.splitlines() if line.strip())
+        return {domain: QUALITY_WORDS[word] for domain, word in pairs}
 
 
 @dataclass(frozen=True)
@@ -98,6 +127,37 @@ class LanguageListField:
         return ",".join(codes)
 
 
+@dataclass(frozen=True)
+class QualityListField:
+    """Domains with a quality, "domain level" per line; stored sorted by domain, each once, the level as a word."""
+
+    name: str
+    label: str
+    hint: str
+    kind = "quality"
+
+    def parse(self, raw: str) -> str:
+        levels, invalid = {}, []
+        for line in raw.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            word = parts[-1].lower() if len(parts) == 2 else ""
+            word = {english: german for german, english in QUALITY_WORDS.items()}.get(word, word)
+            try:
+                [domain] = tdm_policy.parse_domains(parts[0]) if word in QUALITY_WORDS else []
+            except ValueError:
+                domain = None
+            if domain is None:
+                invalid.append(line.strip())
+            else:
+                levels[domain] = word
+        if invalid:
+            shown = ", ".join(invalid[:5]) + (" …" if len(invalid) > 5 else "")
+            raise InvalidSetting(f"{self.label}: je Zeile eine Domain und hoch, mittel oder niedrig, nicht: {shown}.")
+        return "\n".join(f"{domain} {word}" for domain, word in sorted(levels.items()))
+
+
 FORM_FIELDS = {
     field.name: field
     for field in (
@@ -146,6 +206,12 @@ FORM_FIELDS = {
             "Ab der Veröffentlichung, sonst ab dem Abruf. Ältere Artikel extrahiert der Worker nicht mehr.",
             1,
             30,
+        ),
+        QualityListField(
+            "source_quality_domains",
+            "Quellenqualität nach Domain",
+            "Je Zeile eine Domain und hoch, mittel oder niedrig; gilt auch für ihre Subdomains, die genaueste zuerst. "
+            "Sonst gilt die Qualität der Quelle des Artikels, sonst bleibt sie unbekannt.",
         ),
         NumberField(
             "extractions_per_hour",

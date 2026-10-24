@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
     text,
     true,
@@ -109,6 +110,22 @@ class StatementKind(StrEnum):
     INTERPRETATION = "interpretation"
 
 
+class ConfidenceLevel(StrEnum):
+    """How sure: of an extraction, an inference, or a source's quality (datamodel.md, rule 7 - never combined)."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class ValidationResult(StrEnum):
+    """What the check of a model's answer found (event schema, app/llm/event_schema.py)."""
+
+    VALID = "valid"
+    INVALID = "invalid"  # outside the schema
+    INCOMPLETE = "incomplete"  # cut before its end
+
+
 class BackfillStatus(StrEnum):
     RUNNING = "running"
     DONE = "done"
@@ -191,6 +208,8 @@ class PlatformSettingsRecord(Base):
     domain_min_interval_seconds: Mapped[int] = mapped_column(server_default="10")
     # Domains whose terms forbid text and data mining, one per line; NULL: the list the code starts with.
     tdm_blocked_domains: Mapped[str | None] = mapped_column(Text)
+    # A quality per domain, "domain level" per line (extraction_service); NULL: the suggestions the code starts with.
+    source_quality_domains: Mapped[str | None] = mapped_column(Text)
     # The event extraction's pre-filter and budget (extraction_service).
     extraction_languages: Mapped[str] = mapped_column(String(200), server_default="de,en,es,fr,it,nl,pt")
     extraction_min_text_chars: Mapped[int] = mapped_column(server_default="500")
@@ -235,6 +254,8 @@ class Source(Base):
     # What it reports on: a continent, the Middle East or worldwide; checked in the service like the type.
     # None until set: sources from before regions existed.
     region: Mapped[str | None] = mapped_column(String(20))
+    # Its articles' source quality where no domain of the list matches (extraction_service); None: unknown.
+    quality: Mapped[str | None] = mapped_column(String(10))
     terms_note: Mapped[str | None] = mapped_column(Text)
     raw_text_retention_days: Mapped[int] = mapped_column(server_default="30")
     # Raises the platform's minimum interval for every request made for this source; None: the platform's.
@@ -253,6 +274,7 @@ class Source(Base):
         CheckConstraint(fetch_interval_minutes >= 1, name="fetch_interval_minutes"),
         CheckConstraint(raw_text_retention_days >= 0, name="raw_text_retention_days"),
         CheckConstraint(min_request_interval_seconds >= 1, name="min_request_interval_seconds"),
+        CheckConstraint(quality.in_([s.value for s in ConfidenceLevel]), name="quality"),
         # Names are unique regardless of case: "EZB" and "ezb" would be the same source to the admin.
         Index("uq_source_name", func.lower(name), unique=True),
     )
@@ -390,6 +412,17 @@ class Extraction(Base):
     truncated: Mapped[bool]
     # Statements whose quote is not in the text: not stored.
     statements_dropped: Mapped[int] = mapped_column(server_default="0")
+    validation_result: Mapped[str] = mapped_column(String(20), server_default=ValidationResult.VALID.value)
+    # Of an answer outside the schema or cut: what was wrong (field and kind of error, never its value) and the
+    # answer itself, for diagnosis. Shown to the admin, never logged (datamodel.md, rule 13).
+    validation_errors: Mapped[str | None] = mapped_column(Text)
+    raw_answer: Mapped[str | None] = mapped_column(Text)
+    # Valid only after the model was asked again with the errors of its first answer.
+    repaired: Mapped[bool] = mapped_column(server_default=false())
+
+    __table_args__ = (
+        CheckConstraint(validation_result.in_([s.value for s in ValidationResult]), name="validation_result"),
+    )
 
 
 class EventCandidate(Base):
@@ -408,14 +441,20 @@ class EventCandidate(Base):
     # Empty where the article does not state it (datamodel.md, rule 5).
     country: Mapped[str | None] = mapped_column(String(2))  # ISO 3166-1 alpha-2
     place: Mapped[str | None] = mapped_column(Text)
+    # The passage that states place and country; without one found, both are unknown (schema 2).
+    location_quote: Mapped[str | None] = mapped_column(Text)
     # The time as the article states it, e.g. "on Friday morning": a model's own date proved a guess.
     time_note: Mapped[str | None] = mapped_column(Text)
+    time_quote: Mapped[str | None] = mapped_column(Text)
+    # How sure type, status and impacts are derived, as the model rates it; None before schema 2.
+    inference_confidence: Mapped[str | None] = mapped_column(String(10))
     actors: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     impacts: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
 
     __table_args__ = (
         CheckConstraint(event_type.in_([s.value for s in EventType]), name="event_type"),
         CheckConstraint(status.in_([s.value for s in EventStatus]), name="status"),
+        CheckConstraint(inference_confidence.in_([s.value for s in ConfidenceLevel]), name="inference_confidence"),
     )
 
 
@@ -429,8 +468,14 @@ class Statement(Base):
     position: Mapped[int] = mapped_column(SmallInteger)
     kind: Mapped[str] = mapped_column(String(20))
     text: Mapped[str] = mapped_column(Text)
+    # How faithfully the statement renders its quote, as the model rates it, lowered for a cut text or a repaired
+    # answer; None before schema 2.
+    extraction_confidence: Mapped[str | None] = mapped_column(String(10))
 
-    __table_args__ = (CheckConstraint(kind.in_([s.value for s in StatementKind]), name="kind"),)
+    __table_args__ = (
+        CheckConstraint(kind.in_([s.value for s in StatementKind]), name="kind"),
+        CheckConstraint(extraction_confidence.in_([s.value for s in ConfidenceLevel]), name="extraction_confidence"),
+    )
 
 
 class Evidence(Base):
@@ -442,6 +487,10 @@ class Evidence(Base):
     statement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("statement.id", ondelete="CASCADE"), index=True)
     article_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("article.id", ondelete="CASCADE"), index=True)
     quote: Mapped[str] = mapped_column(Text)  # verbatim from the article's cleaned text
+    # The quality of the source the quote is from, as it stood at extraction; None: unknown.
+    source_quality: Mapped[str | None] = mapped_column(String(10))
+
+    __table_args__ = (CheckConstraint(source_quality.in_([s.value for s in ConfidenceLevel]), name="source_quality"),)
 
 
 class RawText(Base):

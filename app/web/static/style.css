@@ -498,6 +498,14 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* The errors of an unusable model answer (templates/article.html), as the check wrote them. */
+.run-errors {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .plain-list {
   margin: 0.25rem 0 0;
   padding-left: 1.25rem;

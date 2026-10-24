@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.config import AuthSettings, Settings
 from app.db.models import JobStatus
-from app.services import job_service, platform_settings_service, seed_service, source_service
+from app.services import extraction_service, job_service, platform_settings_service, seed_service, source_service
 from app.services.job_service import BulkResult, JobListItem, JobOverview
 from app.services.platform_settings_service import PlatformSettings
 from app.services.seed_service import SeedStatus
@@ -191,7 +191,7 @@ def test_settings_page_shows_every_setting_in_its_section(client, services):
     assert [(name, re.findall(r'name="(\w+)"', form)) for name, form in sections] == [
         ("verarbeitung", ["llm_max_parallel_calls"]),
         ("abruf", ["article_max_age_days", "domain_min_interval_seconds", "tdm_blocked_domains"]),
-        ("extraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour"]),
+        ("extraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour", "source_quality_domains"]),
         ("aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
         ("backups", ["backup_interval_hours", "backups_to_keep"]),
     ]
@@ -245,3 +245,22 @@ def test_navigation_marks_the_current_page(client, services):
 def test_login_page_has_no_navigation(services):
     with TestClient(create_app(SETTINGS, AUTH)) as anonymous:
         assert tag_of(anonymous.get("/login").text, "nav-jobs") is None
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (None, "Kein Ollama konfiguriert (OLLAMA_BASE_URL): der Worker extrahiert nichts."),
+        (extraction_service.LlmStatus("http://ollama:11434", "qwen3.5:9b", 8192, True), "Ollama http://ollama:11434, Modell qwen3.5:9b, Kontext 8192 Tokens: verfügbar"),
+        (extraction_service.LlmStatus("http://ollama:11434", "qwen3.5:9b", 8192, False), "Ollama http://ollama:11434, Modell qwen3.5:9b, Kontext 8192 Tokens: nicht verfügbar - nicht erreichbar oder das Modell nicht geladen (ollama pull)"),
+    ],
+    ids=["none configured", "served", "not served"],
+)
+def test_the_extraction_section_says_which_ollama_and_whether_it_serves_the_model(client, services, monkeypatch, status, expected):
+    monkeypatch.setattr(extraction_service, "llm_status", lambda *_llm: status)
+
+    html = client.get("/settings/platform").text
+
+    line = re.sub(r"<[^>]+>", "", re.search(r'data-testid="llm-status">(.*?)</p>', html).group(1))
+    assert line.startswith(expected) and line.endswith("Festgelegt in der Umgebung des Servers, nicht hier.")
+    assert 'data-testid="source_quality_domains"' in html and "ecb.europa.eu hoch" in html

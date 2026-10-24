@@ -47,21 +47,21 @@ class OllamaClient:
     def __exit__(self, *_exc_info: object) -> None:
         self._client.close()
 
-    def serves_model(self) -> bool:
+    def serves_model(self, timeout: float = CONNECT_TIMEOUT_SECONDS) -> bool:
         """Whether the server answers and has the model pulled: a model still being pulled is not there yet."""
         try:
-            response = self._client.get("/api/tags", timeout=CONNECT_TIMEOUT_SECONDS)
+            response = self._client.get("/api/tags", timeout=timeout)
             names = {model["name"] for model in response.json().get("models", [])} if response.status_code == 200 else set()
         except (httpx2.HTTPError, ValueError):
             return False
         # A model named without a tag is the one tagged "latest".
         return self.model in names or f"{self.model}:latest" in names
 
-    def chat_json(self, system: str, user: str, schema: dict) -> LlmAnswer:
-        """The model's answer to one system and one user message, constrained to `schema`."""
+    def chat_json(self, messages: list[dict], schema: dict) -> LlmAnswer:
+        """The model's answer to the messages (system, user, and an exchange before), constrained to `schema`."""
         request = {
             "model": self.model,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "messages": messages,
             "format": schema,
             "stream": False,
             # A thinking model writes its reasoning first: hundreds of tokens this answer does not need.

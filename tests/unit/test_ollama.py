@@ -7,6 +7,9 @@ import pytest
 from app.llm.ollama import LlmRejected, LlmUnavailable, OllamaClient
 
 
+MESSAGES = [{"role": "system", "content": "system text"}, {"role": "user", "content": "user text"}]
+
+
 def client(handler):
     return OllamaClient("http://ollama:11434", "qwen3.5:9b", 8192, transport=httpx2.MockTransport(handler))
 
@@ -20,7 +23,7 @@ def test_one_chat_constrained_to_the_schema_without_thinking():
                                           "done_reason": "stop", "prompt_eval_count": 812, "eval_count": 9})
 
     with client(handler) as llm:
-        answer = llm.chat_json("system text", "user text", {"type": "object"})
+        answer = llm.chat_json(MESSAGES, {"type": "object"})
 
     assert (answer.content, answer.model, answer.prompt_tokens, answer.answer_tokens, answer.complete) == ('{"events": []}', "qwen3.5:9b", 812, 9, True)
     body = seen["body"]
@@ -34,19 +37,19 @@ def test_an_answer_cut_at_its_length_is_incomplete():
     answer = {"model": "m", "message": {"content": '{"events": ['}, "done_reason": "length"}
 
     with client(lambda _request: httpx2.Response(200, json=answer)) as llm:
-        assert llm.chat_json("s", "u", {}).complete is False
+        assert llm.chat_json(MESSAGES, {}).complete is False
 
 
 def test_a_missing_model_or_a_failing_server_is_unavailable_another_refusal_is_final():
     # Not pulled yet: a state of the server, which a later attempt may find changed.
     with client(lambda _request: httpx2.Response(404, json={"error": "model 'qwen3.5:9b' not found"})) as llm:
         with pytest.raises(LlmUnavailable, match=r"^Ollama: HTTP 404: model 'qwen3.5:9b' not found$"):
-            llm.chat_json("s", "u", {})
+            llm.chat_json(MESSAGES, {})
     with client(lambda _request: httpx2.Response(503)) as llm, pytest.raises(LlmUnavailable, match="^Ollama: HTTP 503$"):
-        llm.chat_json("s", "u", {})
+        llm.chat_json(MESSAGES, {})
     with client(lambda _request: httpx2.Response(400, json={"error": "invalid format"})) as llm:
         with pytest.raises(LlmRejected, match=r"^Ollama: HTTP 400: invalid format$"):
-            llm.chat_json("s", "u", {})
+            llm.chat_json(MESSAGES, {})
 
 
 @pytest.mark.parametrize(
@@ -84,6 +87,6 @@ def test_an_unreachable_or_silent_server_is_unavailable():
         raise httpx2.ReadTimeout("slow", request=request)
 
     with client(refused) as llm, pytest.raises(LlmUnavailable, match="^Ollama nicht erreichbar: ConnectError$"):
-        llm.chat_json("s", "u", {})
+        llm.chat_json(MESSAGES, {})
     with client(silent) as llm, pytest.raises(LlmUnavailable, match="^Keine Antwort innerhalb von 600 s$"):
-        llm.chat_json("s", "u", {})
+        llm.chat_json(MESSAGES, {})
