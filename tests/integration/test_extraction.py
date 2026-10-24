@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.db.models import Article, EventCandidate, Evidence, Extraction, Job, JobStatus, Statement
 from app.jobs.handlers import build_handlers
@@ -144,13 +144,15 @@ def answer(*quotes):
 INVALID = '{"events": [{"event_type": "flood"}]}'
 
 
-def extract_all(database, ollama):
+def extract_all(database, ollama, stop=None, jobs_to_run=None):
+    """Run the due extraction jobs, or as many as `jobs_to_run`: a stopping worker claims no next one."""
     llm = partial(OllamaClient, "http://ollama:11434", "qwen3.5:9b", 8192, transport=httpx2.MockTransport(ollama))
-    stop = threading.Event()
+    stop = stop or threading.Event()
     handlers = build_handlers(database, Path("/nonexistent"), LlmCallLimiter(database, stop), stop, "ops@example.org", llm)
     handlers = {KIND: handlers[KIND]}
-    while run_next_job(database, handlers, "test", 10, on_renewed=lambda: None):
-        pass
+    run = 0
+    while (jobs_to_run is None or run < jobs_to_run) and run_next_job(database, handlers, "test", 10, on_renewed=lambda: None):
+        run += 1
 
 
 @pytest.fixture
@@ -241,12 +243,10 @@ def test_an_unusable_answer_is_stored_and_asked_again_valid_then_with_every_leve
     ("ollama", "status", "error"),
     [
         (Ollama(status=400), JobStatus.FAILED, "PermanentJobError: Ollama: HTTP 400"),
-        (Ollama(status=404), JobStatus.QUEUED, "LlmUnavailable: Ollama: HTTP 404: model 'qwen3.5:9b' not found"),
-        (Ollama(status=503), JobStatus.QUEUED, "LlmUnavailable: Ollama: HTTP 503"),
         (Ollama(INVALID), JobStatus.QUEUED, "InvalidAnswer: Antwort auch auf Nachfrage ausserhalb des Schemas: events.0.event_type"),
         (Ollama(('{"events": [', "length")), JobStatus.QUEUED, "InvalidAnswer: Antwort auch auf Nachfrage abgeschnitten: cut off after 300 tokens"),
     ],
-    ids=["refused", "model not pulled", "server failing", "outside the schema", "cut answer"],
+    ids=["refused", "outside the schema", "cut answer"],
 )
 def test_a_refused_request_fails_at_once_anything_else_is_retried(database, queued, ollama, status, error):
     extract_all(database, ollama)
@@ -264,3 +264,32 @@ def test_two_unusable_answers_are_both_stored_and_the_job_retried_later(database
     assert (job.status, job.attempts) == (JobStatus.QUEUED, 1)
     # Its job is there: the sweep does not queue the article a second time.
     assert extraction_service.enqueue_due(database) == []
+
+
+def test_a_stopping_worker_asks_no_follow_up_question_and_puts_the_job_back(database, queued):
+    ollama = Ollama(INVALID, answer(("fact", RATE_DECISION)))
+    stopping = threading.Event()
+    stopping.set()
+
+    extract_all(database, ollama, stopping, jobs_to_run=1)
+
+    assert len(ollama.requests) == 1
+    assert [(result, repaired) for result, repaired, _errors, _raw in runs(database)] == [("invalid", False)]
+    [job] = jobs(database, KIND)
+    # Back into the queue, the attempt not counted (app/jobs/errors.py, JobInterrupted).
+    assert (job.status, job.attempts) == (JobStatus.QUEUED, 0)
+
+
+def refused(request):
+    raise httpx2.ConnectError("refused", request=request)
+
+
+@pytest.mark.parametrize("away", [refused, Ollama(status=503), Ollama(status=404)], ids=["no connection", "server failing", "model not pulled"])
+def test_a_job_that_finds_ollama_away_waits_without_using_an_attempt(database, queued, away):
+    extract_all(database, away, jobs_to_run=1)
+
+    [job] = jobs(database, KIND)
+    assert (job.status, job.attempts, job.last_error) == (JobStatus.QUEUED, 0, None)
+    with database.connect() as connection:
+        delay = connection.execute(select(Job.run_after - func.now()).where(Job.id == job.id)).scalar_one()
+    assert timedelta(seconds=50) < delay <= timedelta(seconds=60)

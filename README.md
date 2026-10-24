@@ -80,6 +80,8 @@ docker compose ps
 - Logs are JSON lines on stdout: `docker compose logs -f api worker`.
 - Stop: `docker compose down`. The data stays in the `db-data` volume, the backups in `db-backups`;
   `docker compose down -v` deletes both.
+- A stopping `worker` finishes its current job first. While an event extraction runs, a stop or a redeploy
+  waits for it - at most 6 minutes (`stop_grace_period`, longer than the 5 minutes an LLM call may take).
 
 ## Backups
 

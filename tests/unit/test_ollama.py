@@ -4,7 +4,7 @@ import json
 import httpx2
 import pytest
 
-from app.llm.ollama import LlmRejected, LlmUnavailable, OllamaClient
+from app.llm.ollama import ANSWER_TIMEOUT_SECONDS, LlmRejected, LlmUnavailable, LlmUnreachable, OllamaClient
 
 
 MESSAGES = [{"role": "system", "content": "system text"}, {"role": "user", "content": "user text"}]
@@ -88,5 +88,21 @@ def test_an_unreachable_or_silent_server_is_unavailable():
 
     with client(refused) as llm, pytest.raises(LlmUnavailable, match="^Ollama nicht erreichbar: ConnectError$"):
         llm.chat_json(MESSAGES, {})
-    with client(silent) as llm, pytest.raises(LlmUnavailable, match="^Keine Antwort innerhalb von 600 s$"):
+    with client(silent) as llm, pytest.raises(LlmUnavailable, match=f"^Keine Antwort innerhalb von {ANSWER_TIMEOUT_SECONDS} s$"):
         llm.chat_json(MESSAGES, {})
+
+
+def test_a_server_away_is_unreachable_a_silent_one_only_unavailable():
+    # Waited for without an attempt (story 4); a timeout may be the article's and still counts.
+    def refused(request):
+        raise httpx2.ConnectError("refused", request=request)
+
+    def silent(request):
+        raise httpx2.ReadTimeout("slow", request=request)
+
+    for away in (refused, lambda _request: httpx2.Response(502), lambda _request: httpx2.Response(404, json={"error": "x"})):
+        with client(away) as llm, pytest.raises(LlmUnreachable):
+            llm.chat_json(MESSAGES, {})
+    with client(silent) as llm, pytest.raises(LlmUnavailable) as error:
+        llm.chat_json(MESSAGES, {})
+    assert not isinstance(error.value, LlmUnreachable)

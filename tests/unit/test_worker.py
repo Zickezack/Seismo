@@ -1,12 +1,16 @@
 import logging
+import re
 import threading
+from pathlib import Path
 
 import pytest
 from sqlalchemy.exc import OperationalError
 
 from app.config import Settings
 from app.db.models import JobStatus
+from app.llm.ollama import ANSWER_TIMEOUT_SECONDS
 from app.services.health_service import HealthReport
+from app.sources import http
 from app.worker import main as worker
 
 READY = HealthReport(database_reachable=True, schema_current=True)
@@ -318,3 +322,22 @@ def test_extractions_are_queued_only_while_ollama_serves_the_model_and_a_change_
     assert [record.getMessage() for record in caplog.records] == [
         "LLM model not available: Ollama unreachable or the model not pulled", "LLM model available", "Extraction jobs queued",
     ]
+
+
+def test_the_worker_s_stop_grace_period_outlasts_its_longest_job():
+    # Docker kills the worker after stop_grace_period; it must outlast one LLM call and one fetch, with their effect.
+    compose = (Path(__file__).parents[2] / "docker-compose.yml").read_text()
+    # The worker's own lines: indented below "  worker:", up to the next service.
+    worker = re.search(r"^  worker:\n((?:(?:    .*)?\n)*)", compose, re.MULTILINE).group(1)
+    minutes = int(re.search(r"^    stop_grace_period: (\d+)m$", worker, re.MULTILINE).group(1))
+
+    assert minutes * 60 >= ANSWER_TIMEOUT_SECONDS + 30
+    assert minutes * 60 >= http.TOTAL_TIMEOUT_SECONDS + http.TIMEOUT_SECONDS + 30
+
+
+def test_llm_jobs_are_not_claimed_while_ollama_does_not_serve_the_model():
+    handlers = {"fetch_source": "fetch", "extract_events": "extract"}
+
+    assert worker._claimable(handlers, None) == handlers
+    assert worker._claimable(handlers, True) == handlers
+    assert worker._claimable(handlers, False) == {"fetch_source": "fetch"}

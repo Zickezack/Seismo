@@ -41,6 +41,8 @@ FETCH_ARTICLE_MAX_ATTEMPTS = 31
 BACKFILL_JOB_KIND = "backfill"
 NORMALIZE_JOB_KIND = "normalize_article"
 EXTRACT_EVENTS_JOB_KIND = "extract_events"
+# The kinds that need Ollama: the worker claims them only while it serves the model (app/worker/main.py).
+LLM_JOB_KINDS = frozenset({EXTRACT_EVENTS_JOB_KIND})
 KIND_LABELS = {
     TEST_JOB_KIND: "Testjob",
     BACKUP_JOB_KIND: "Datenbank-Backup",

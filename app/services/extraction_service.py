@@ -9,6 +9,7 @@ completes it. A statement whose quote is not in the text the model saw is not st
 neither: no evidence, no statement (datamodel.md, rule 2).
 """
 import logging
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from pydantic import ValidationError
 from sqlalchemy import Connection, Engine
 
 from app.db.models import ConfidenceLevel, EventStatus, EventType, StatementKind, ValidationResult
+from app.jobs.errors import JobInterrupted
 from app.llm import event_schema
 from app.llm.event_schema import Direction, Horizon, TargetKind
 from app.llm.limiter import LlmCallLimiter
@@ -173,14 +175,15 @@ def enqueue_due(engine: Engine) -> list[int]:
 
 
 def extract(
-    engine: Engine, article_id: int, client: OllamaClient, limiter: LlmCallLimiter
+    engine: Engine, article_id: int, client: OllamaClient, limiter: LlmCallLimiter, stop_event: threading.Event | None = None
 ) -> Callable[[Connection], None] | None:
     """First phase of an extraction job: ask the model. Returns the effect that stores the candidates, or None when
     the article has an extraction already, became a duplicate or lost its text meanwhile.
 
     An answer outside the schema or cut is stored as a run of its own at once, and the model asked again in the same
     slot, told what was wrong; a second such answer raises InvalidAnswer. LlmError (app/llm/ollama.py) when the
-    model brought no answer. Both are retried with the job."""
+    model brought no answer. Both are retried with the job. A worker that is stopping asks no follow-up question - it
+    would outlast its stop_grace_period (docker-compose.yml): JobInterrupted puts the job back into the queue."""
     with engine.connect() as connection:
         article = extraction_repository.get_for_extraction(connection, article_id)
     if article is None or article.extracted or article.duplicate_of_id is not None or not article.plain_text:
@@ -193,6 +196,8 @@ def extract(
         repaired = failure is not None
         if failure:
             _record(engine, run, answer, failure, started, repaired=False)
+            if stop_event is not None and stop_event.is_set():
+                raise JobInterrupted("Worker stoppt: keine Nachfrage beim Modell")
             answer, parsed, failure = _ask(client, messages(article, text, failure))
             if failure:
                 _record(engine, run, answer, failure, started, repaired=True)

@@ -33,7 +33,7 @@ from app.llm.ollama import OllamaClient
 from app.services import backup_service, extraction_service, ingestion_service, normalization_service
 from app.services.health_service import HealthReport, check_readiness
 from app.db.models import JobStatus
-from app.services.job_service import LEASE_SECONDS, purge_finished_jobs
+from app.services.job_service import LEASE_SECONDS, LLM_JOB_KINDS, purge_finished_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -104,13 +104,22 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
                 next_extract_check = time.monotonic() + EXTRACT_CHECK_INTERVAL_SECONDS
                 llm_served = _enqueue_due_extractions(engine, llm, llm_served)
             # After a job, take the next one at once; wait only while the queue is empty.
-            if report.ready and _run_next_job(engine, handlers, owner, renew_interval, heartbeat_file):
+            claimable = _claimable(handlers, llm_served)
+            if report.ready and _run_next_job(engine, claimable, owner, renew_interval, heartbeat_file):
                 continue
             stop_event.wait(settings.worker_poll_interval_seconds)
     finally:
         engine.dispose()
         heartbeat_file.unlink(missing_ok=True)
         logger.info("Worker stopped")
+
+
+def _claimable(handlers: Mapping[str, Handler], llm_served: bool | None) -> Mapping[str, Handler]:
+    """Every kind but the LLM jobs while Ollama does not serve the model: they wait in the queue, without an attempt
+    (userstories.md, Strukturierte Ereignisextraktion, story 4). Unknown yet (None): all of them."""
+    if llm_served is not False:
+        return handlers
+    return {kind: handler for kind, handler in handlers.items() if kind not in LLM_JOB_KINDS}
 
 
 def _run_next_job(

@@ -4,8 +4,10 @@ from dataclasses import dataclass
 
 import httpx2
 
-# Answering takes the GPU a while: the whole answer comes at once, nothing is sent before.
-ANSWER_TIMEOUT_SECONDS = 600
+# Answering takes the GPU a while: the whole answer comes at once, nothing is sent before. About 2.5 times the longest
+# answer expected on the GTX 1080 of stage 1; a slower one points to a problem (a model not in the GPU's memory). The
+# worker's stop_grace_period (docker-compose.yml) outlasts it, so a deploy lets a running call finish.
+ANSWER_TIMEOUT_SECONDS = 300
 CONNECT_TIMEOUT_SECONDS = 10
 # The longest answer; a model that runs on is cut here and its JSON is incomplete.
 MAX_ANSWER_TOKENS = 3000
@@ -17,6 +19,11 @@ class LlmError(Exception):
 
 class LlmUnavailable(LlmError):
     """The server could not be reached or failed (timeout, connection, HTTP 5xx): a later attempt may succeed."""
+
+
+class LlmUnreachable(LlmUnavailable):
+    """No connection, HTTP 5xx or the model not pulled: the server is away, not the article's fault. An LLM job waits for
+    it without counting the attempt; a timeout is no such sign - it may be the article's."""
 
 
 class LlmRejected(LlmError):
@@ -73,12 +80,12 @@ class OllamaClient:
         except httpx2.TimeoutException:
             raise LlmUnavailable(f"Keine Antwort innerhalb von {ANSWER_TIMEOUT_SECONDS} s") from None
         except httpx2.TransportError as error:
-            raise LlmUnavailable(f"Ollama nicht erreichbar: {type(error).__name__}") from None
+            raise LlmUnreachable(f"Ollama nicht erreichbar: {type(error).__name__}") from None
         if response.status_code >= 500:
-            raise LlmUnavailable(f"Ollama: HTTP {response.status_code}")
+            raise LlmUnreachable(f"Ollama: HTTP {response.status_code}")
         if response.status_code == 404:
             # The model is not pulled (yet): a setting of the server, not a fault of the article.
-            raise LlmUnavailable(f"Ollama: HTTP 404: {_error_of(response)}")
+            raise LlmUnreachable(f"Ollama: HTTP 404: {_error_of(response)}")
         if response.status_code >= 400:
             raise LlmRejected(f"Ollama: HTTP {response.status_code}: {_error_of(response)}")
         body = response.json()

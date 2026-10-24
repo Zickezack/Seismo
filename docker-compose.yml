@@ -76,6 +76,10 @@ services:
   worker:
     <<: *app
     command: ["python", "-m", "app.worker"]
+    # On a stop the worker finishes its current job (app/worker/main.py); Docker's default of 10 s would kill an
+    # LLM call and repeat it after the lease. Longer than one call (app/llm/ollama.py, ANSWER_TIMEOUT_SECONDS 300 s)
+    # with its effect; a stopping worker asks the model no follow-up question. Only a running job makes it wait.
+    stop_grace_period: 6m
     environment:
       <<: *app-environment
       # Sent in the User-Agent of every source fetch, so a source can reach the operator.
