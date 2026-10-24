@@ -21,12 +21,14 @@ def article(article_id, **fields):
         fetched_at=NOW, language="de", source_id=2, source_display_name="EZB", source_exists=True,
         full_text_status="stored", full_text_error=None, full_text_bytes=48_000, detected_language=None,
         published_at_source="feed", normalization_status="pending", normalization_error=None, text_chars=None,
+        duplicate_of_id=None, duplicate_reason=None, original_url=None, original_source_name=None,
     )
     return ArticleListItem(**values | fields)
 
 
 OVERVIEW = ArticleOverview(
     source_id=None,
+    hide_duplicates=False,
     sources=[SourceChoice(2, "EZB"), SourceChoice(3, "Fed")],
     articles=[
         article(11),
@@ -51,8 +53,8 @@ def client():
 def overview(monkeypatch):
     calls = {"overview": OVERVIEW}
 
-    def fake(_engine, source):
-        calls["source"] = source
+    def fake(_engine, source, hide_duplicates):
+        calls["source"], calls["hide_duplicates"] = source, hide_duplicates
         return calls["overview"]
 
     monkeypatch.setattr(article_service, "overview", fake)
@@ -91,7 +93,7 @@ def test_deleted_source_and_missing_values(client, overview):
 
 
 def test_filter_is_passed_on_and_selected(client, overview):
-    overview["overview"] = ArticleOverview(source_id=3, sources=OVERVIEW.sources, articles=[], matching=0)
+    overview["overview"] = ArticleOverview(source_id=3, hide_duplicates=False, sources=OVERVIEW.sources, articles=[], matching=0)
 
     html = client.get("/articles?source=3").text
 
@@ -101,7 +103,7 @@ def test_filter_is_passed_on_and_selected(client, overview):
 
 
 def test_more_articles_than_shown(client, overview):
-    overview["overview"] = ArticleOverview(source_id=None, sources=[], articles=[article(1)], matching=250)
+    overview["overview"] = ArticleOverview(source_id=None, hide_duplicates=False, sources=[], articles=[article(1)], matching=250)
 
     assert text_of(client.get("/articles").text, "article-count") == "Angezeigt: die zuletzt abgerufenen 1 von 250 Artikeln."
 
@@ -122,6 +124,7 @@ def test_full_text_status_size_and_reason(client, overview):
 def test_list_shows_the_detected_language_where_the_time_came_from_and_the_text_length(client, monkeypatch):
     overview = ArticleOverview(
         source_id=None,
+        hide_duplicates=False,
         sources=[],
         articles=[
             article(1, language="en", detected_language="de", published_at_source="page", normalization_status="done", text_chars=4512),
@@ -131,7 +134,7 @@ def test_list_shows_the_detected_language_where_the_time_came_from_and_the_text_
         ],
         matching=4,
     )
-    monkeypatch.setattr(article_service, "overview", lambda _engine, _source: overview)
+    monkeypatch.setattr(article_service, "overview", lambda _engine, _source, _hide: overview)
 
     html = client.get("/articles").text
 
@@ -144,3 +147,36 @@ def test_list_shows_the_detected_language_where_the_time_came_from_and_the_text_
     assert text_of(html, "text-note-3") == "Text nicht lesbar"
     assert 'title="PdfReadError: EOF marker not found"' in tag_of(html, "text-note-3")
     assert tag_of(html, "text-note-4") is None
+
+
+def test_a_duplicate_names_why_and_links_its_original_s_source(client, overview):
+    overview["overview"] = ArticleOverview(
+        source_id=None,
+        hide_duplicates=False,
+        sources=[],
+        articles=[
+            article(5, duplicate_of_id=4, duplicate_reason="url", original_url="https://agency.example/4", original_source_name="Agentur"),
+            article(6, duplicate_of_id=4, duplicate_reason="text", original_url="https://agency.example/4", original_source_name="Agentur"),
+            article(4),
+        ],
+        matching=3,
+    )
+
+    html = client.get("/articles").text
+
+    assert text_of(html, "duplicate-5") == "Duplikat (gleiche URL) von"
+    hint = re.search(r'data-testid="duplicate-5">(.*?)</span>', html).group(1)
+    assert '<a href="https://agency.example/4" target="_blank" rel="noopener noreferrer">Agentur</a>' in hint
+    assert text_of(html, "duplicate-6") == "Duplikat (gleicher Text) von"
+    assert tag_of(html, "duplicate-4") is None
+
+
+def test_duplicates_can_be_hidden_and_the_count_says_so(client, overview):
+    overview["overview"] = ArticleOverview(source_id=None, hide_duplicates=True, sources=[], articles=[article(1)], matching=1)
+
+    html = client.get("/articles?source=&hide_duplicates=1").text
+
+    assert overview["hide_duplicates"] is True
+    assert "checked" in tag_of(html, "hide-duplicates")
+    assert text_of(html, "article-count") == "1 Artikel ohne Duplikate."
+    assert client.get("/articles") and overview["hide_duplicates"] is False

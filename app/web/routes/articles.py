@@ -9,6 +9,7 @@ router = APIRouter(prefix="/articles", tags=["articles"])
 
 
 @router.get("")
-def article_list(request: Request, source: str | None = None) -> Response:
-    context = {"overview": article_service.overview(request.app.state.engine, source)}
+def article_list(request: Request, source: str | None = None, hide_duplicates: str | None = None) -> Response:
+    # A checkbox: the browser sends it only when it is ticked.
+    context = {"overview": article_service.overview(request.app.state.engine, source, bool(hide_duplicates))}
     return templates.TemplateResponse(request, "articles.html", context)

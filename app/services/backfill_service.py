@@ -15,7 +15,7 @@ from sqlalchemy import Connection, Engine, Row
 
 from app.db.models import BACKFILL_PRIORITY, BackfillStatus
 from app.repositories import article_repository, backfill_repository, source_repository
-from app.services import ingestion_service, job_service, platform_settings_service, source_service
+from app.services import duplicate_service, ingestion_service, job_service, platform_settings_service, source_service
 from app.services.bulk import BulkResult
 from app.services.fetch_policy_service import PoliteHttp
 from app.sources import ADAPTERS
@@ -192,7 +192,8 @@ def fetch_page(
         ):
             return
         article_ids = article_repository.insert_new(connection, rows)
-        ingestion_service.enqueue_full_texts(connection, article_ids, BACKFILL_PRIORITY)
+        originals = duplicate_service.mark_new(connection, article_ids)
+        ingestion_service.enqueue_full_texts(connection, originals, BACKFILL_PRIORITY)
         backfill_repository.record_page(connection, backfill_id, len(rows), len(article_ids), cursor)
         if cursor is not None:
             _enqueue_page(connection, backfill_id)

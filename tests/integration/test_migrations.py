@@ -234,3 +234,37 @@ def test_articles_stored_so_far_wait_for_normalization_and_know_where_their_time
         statuses = set(connection.execute(text("SELECT normalization_status FROM article")).scalars())
     assert rows == {"a": "feed", "b": "gdelt", "c": "feed", "d": None}
     assert statuses == {"pending"}
+
+
+def test_normalized_articles_are_normalized_again_to_recognise_their_duplicates(engine):
+    upgrade(engine, "eba26a55a0f5")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO article (source_name, source_url, item_key, url, canonical_url, normalization_status, normalized_at) VALUES "
+                "('Q', 'https://q.example/rss', 'done', 'https://q.example/a', 'https://q.example/a', 'done', now()), "
+                "('Q', 'https://q.example/rss', 'failed', 'https://q.example/b', 'https://q.example/b', 'failed', now()), "
+                "('Q', 'https://q.example/rss', 'waiting', 'https://q.example/c', NULL, 'pending', NULL)"
+            )
+        )
+
+    upgrade(engine)
+
+    query = "SELECT item_key, normalization_status, normalized_at IS NULL, content_hash, duplicate_of_id, duplicate_reason FROM article"
+    with engine.connect() as connection:
+        rows = {row[0]: row[1:] for row in connection.execute(text(query))}
+    assert rows == {
+        "done": ("pending", True, None, None, None),
+        "failed": ("failed", False, None, None, None),
+        "waiting": ("pending", True, None, None, None),
+    }
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE article SET duplicate_of_id = (SELECT id FROM article WHERE item_key = 'done'), duplicate_reason = 'url' WHERE item_key = 'waiting'")
+        )
+    downgrade(engine, "eba26a55a0f5")
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM article WHERE duplicate_of_id IS NULL")).scalar_one() == 3

@@ -20,7 +20,7 @@ from sqlalchemy import Connection, Engine
 
 from app.db.models import BACKFILL_PRIORITY, LIVE_PRIORITY, FullTextStatus
 from app.repositories import article_repository, raw_text_repository, source_repository
-from app.services import job_service, platform_settings_service, source_service, tdm_policy
+from app.services import duplicate_service, job_service, platform_settings_service, source_service, tdm_policy
 from app.services.urls import clean_url
 from app.services.fetch_policy_service import PoliteHttp
 from app.services.bulk import BulkResult
@@ -131,10 +131,12 @@ def fetch_source(
         if not source_repository.lock_sources(connection, [source_id]):
             return
         article_ids = article_repository.insert_new(connection, rows)
-        enqueue_full_texts(connection, article_ids, LIVE_PRIORITY)
+        originals = duplicate_service.mark_new(connection, article_ids)
+        enqueue_full_texts(connection, originals, LIVE_PRIORITY)
         source_repository.mark_fetched(connection, source_id)
         # IDs and counts only, never titles (datamodel.md, rule 13).
-        logger.info("Source fetched", extra={"source_id": source_id, "items": len(items), "new_articles": len(article_ids)})
+        fields = {"source_id": source_id, "items": len(items), "new_articles": len(article_ids)}
+        logger.info("Source fetched", extra=fields | {"duplicates": len(article_ids) - len(originals)})
 
     return store
 

@@ -40,6 +40,10 @@ class ArticleListItem:
     normalization_status: str
     normalization_error: str | None
     text_chars: int | None  # length of the cleaned text while the raw text is kept
+    duplicate_of_id: int | None
+    duplicate_reason: str | None
+    original_url: str | None
+    original_source_name: str | None  # the original's source: its current name, or the copy kept after deletion
 
     @property
     def full_text_label(self) -> str:
@@ -70,6 +74,13 @@ class ArticleListItem:
             return ""
         return f"Text {self.text_chars}\u00a0Zeichen" if self.text_chars else "kein Text erkannt"
 
+    @property
+    def duplicate_note(self) -> str:
+        """Why it is a duplicate; the original's source follows it."""
+        if self.duplicate_of_id is None:
+            return ""
+        return {"url": "Duplikat (gleiche URL) von", "text": "Duplikat (gleicher Text) von"}.get(self.duplicate_reason, "Duplikat von")
+
 
 @dataclass(frozen=True)
 class SourceChoice:
@@ -80,20 +91,22 @@ class SourceChoice:
 @dataclass(frozen=True)
 class ArticleOverview:
     source_id: int | None  # the active filter
+    hide_duplicates: bool  # the other one
     sources: list[SourceChoice]  # what the filter offers
     articles: list[ArticleListItem]  # the newest LIST_LIMIT matching the filter
     matching: int
 
 
-def overview(engine: Engine, source: str | None) -> ArticleOverview:
+def overview(engine: Engine, source: str | None, hide_duplicates: bool = False) -> ArticleOverview:
     with engine.connect() as connection:
         sources = [SourceChoice(row.id, row.name) for row in source_repository.all_by_name(connection)]
         # Anything but the id of an existing source means no filter.
         source_id = next((choice.id for choice in sources if str(choice.id) == (source or "").strip()), None)
-        rows = article_repository.latest(connection, source_id, LIST_LIMIT)
-        matching = article_repository.count(connection, source_id)
+        rows = article_repository.latest(connection, source_id, LIST_LIMIT, hide_duplicates)
+        matching = article_repository.count(connection, source_id, hide_duplicates)
     return ArticleOverview(
         source_id=source_id,
+        hide_duplicates=hide_duplicates,
         sources=sources,
         articles=[ArticleListItem(**{field.name: row._mapping[field.name] for field in fields(ArticleListItem)}) for row in rows],
         matching=matching,

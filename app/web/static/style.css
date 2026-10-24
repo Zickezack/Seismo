@@ -470,6 +470,7 @@ a:focus-visible {
 }
 
 .table .cell-wrap .hint,
+.table .cell-title .hint,
 .table .cell-url .hint {
   display: block;
   margin-top: 0.25rem;

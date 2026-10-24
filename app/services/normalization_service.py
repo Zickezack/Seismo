@@ -25,7 +25,7 @@ from sqlalchemy import Connection, Engine
 
 from app.db.models import BACKFILL_PRIORITY, LIVE_PRIORITY, NormalizationStatus, PublishedAtSource
 from app.repositories import normalization_repository
-from app.services import job_service
+from app.services import duplicate_service, job_service
 from app.services.ingestion_service import MAX_PUBLICATION_AHEAD
 from app.services.urls import clean_url
 from app.sources import ADAPTERS
@@ -92,12 +92,13 @@ def normalize(engine: Engine, article_id: int) -> Callable[[Connection], None] |
             "normalization_status": NormalizationStatus.FAILED,
             "normalization_error": job_service.describe_error(error),
         }
-        return lambda connection: normalization_repository.finish(connection, article_id, failed, None)
+        return lambda connection: _finish(connection, article_id, failed, None)
     values = {
         "canonical_url": (page and page.canonical_url) or link,
         "normalization_status": NormalizationStatus.DONE,
         "normalization_error": None,
         "detected_language": detect_language(page.text) if page else None,
+        "content_hash": duplicate_service.content_hash(page.text) if page else None,
     }
     # The page's own title fills a gap and replaces one its source states worse (GDELT's come tokenized).
     adapter = ADAPTERS.get(article.adapter_type or "")
@@ -109,13 +110,22 @@ def normalize(engine: Engine, article_id: int) -> Callable[[Connection], None] |
         values |= {"published_at": page.published_at, "published_at_source": PublishedAtSource.PAGE}
 
     def store(connection: Connection) -> None:
-        if normalization_repository.finish(connection, article_id, values, page.text if page else None):
+        if _finish(connection, article_id, values, page.text if page else None):
             # IDs and counts only (datamodel.md, rule 13).
             text_chars = len(page.text) if page else None
             fields = {"article_id": article_id, "text_chars": text_chars, "language": values["detected_language"]}
             logger.info("Article normalized", extra=fields)
 
     return store
+
+
+def _finish(connection: Connection, article_id: int, values: dict, plain_text: str | None) -> bool:
+    """Write the result once, then look for the article's duplicates: its canonical URL and text are known now."""
+    duplicate_service.lock(connection)
+    if not normalization_repository.finish(connection, article_id, values, plain_text):
+        return False
+    duplicate_service.check(connection, article_id)
+    return True
 
 
 def read_page(content: bytes, content_type: str | None, url: str) -> Page:

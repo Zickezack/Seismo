@@ -55,6 +55,11 @@ class PublishedAtSource(StrEnum):
     PAGE = "page"  # the page's own full timestamp (article:published_time, JSON-LD datePublished)
 
 
+class DuplicateReason(StrEnum):
+    URL = "url"  # the same canonical URL
+    TEXT = "text"  # the same cleaned text, on another host
+
+
 class BackfillStatus(StrEnum):
     RUNNING = "running"
     DONE = "done"
@@ -260,6 +265,11 @@ class Article(Base):
     # Shown to the admin, never logged (datamodel.md, rule 13).
     normalization_error: Mapped[str | None] = mapped_column(Text)
     normalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # SHA-256 of the cleaned text from 200 characters on: kept with the metadata, after the raw text is gone.
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    # The original it duplicates, the article published first (duplicate_service); empty for an original.
+    duplicate_of_id: Mapped[int | None] = mapped_column(ForeignKey("article.id", ondelete="SET NULL"), index=True)
+    duplicate_reason: Mapped[str | None] = mapped_column(String(10))
 
     __table_args__ = (
         UniqueConstraint(source_id, item_key),
@@ -267,6 +277,9 @@ class Article(Base):
         CheckConstraint(full_text_status.in_([s.value for s in FullTextStatus]), name="full_text_status"),
         CheckConstraint(normalization_status.in_([s.value for s in NormalizationStatus]), name="normalization_status"),
         CheckConstraint(published_at_source.in_([s.value for s in PublishedAtSource]), name="published_at_source"),
+        CheckConstraint(duplicate_reason.in_([s.value for s in DuplicateReason]), name="duplicate_reason"),
+        # Equality only: a B-tree's key size limit would refuse the longest links.
+        Index("ix_article_canonical_url", canonical_url, postgresql_using="hash"),
         # The worker's sweep for articles to normalize (normalization_service.enqueue_due).
         Index(
             "ix_article_normalization_pending",
