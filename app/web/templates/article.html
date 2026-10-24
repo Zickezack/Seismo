@@ -20,6 +20,36 @@
   </div>
 </section>
 
+<section class="stack" id="events" data-testid="events-section">
+  <h2>Ereigniskandidaten{% if extraction %} ({{ extraction.candidates|length }}){% endif %}</h2>
+  {% if not extraction %}
+  <p data-testid="no-extraction">Noch nicht extrahiert.</p>
+  {% else %}
+  <p class="hint" data-testid="extraction-meta">Extrahiert {{ extraction.extracted_at|local_time }} mit {{ extraction.model }}, Schema {{ extraction.schema_version }}, in {{ (extraction.duration_ms / 1000)|round(1) }}&nbsp;s aus {{ extraction.input_chars }} Zeichen{% if extraction.truncated %} (Text gekürzt){% endif %}.{% if extraction.statements_dropped %} {{ extraction.statements_dropped }} {{ "Aussage" if extraction.statements_dropped == 1 else "Aussagen" }} ohne auffindbares Zitat verworfen.{% endif %} Texte des Modells auf Englisch, Zitate wörtlich.</p>
+  {% for candidate in extraction.candidates %}
+  <article class="card stack" data-testid="candidate-{{ candidate.id }}">
+    <h3 data-testid="candidate-title-{{ candidate.id }}">{{ candidate.title }}</h3>
+    <p class="hint" data-testid="candidate-facts-{{ candidate.id }}">{{ candidate.type_label }} · {{ candidate.status_label }}{% if candidate.where %} · {{ candidate.where }}{% endif %}{% if candidate.time_note %} · {{ candidate.time_note }}{% endif %}</p>
+    <p>{{ candidate.summary }}</p>
+    {% if candidate.actors %}<p data-testid="candidate-actors-{{ candidate.id }}"><strong>Akteure:</strong> {% for actor in candidate.actors %}{{ actor.name }}{% if actor.role %} ({{ actor.role }}){% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+    {% if candidate.impact_lines %}
+    <div><strong>Wirkungen laut Artikel:</strong>
+      <ul class="plain-list" data-testid="candidate-impacts-{{ candidate.id }}">{% for line in candidate.impact_lines %}<li>{{ line }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    <ul class="statements" data-testid="candidate-statements-{{ candidate.id }}">
+      {% for statement in candidate.statements %}
+      <li><span class="status status-{{ statement.kind }}">{{ statement.kind_label }}</span> {{ statement.text }}
+        <blockquote class="quote">{{ statement.quote }}</blockquote></li>
+      {% endfor %}
+    </ul>
+  </article>
+  {% else %}
+  <p data-testid="no-candidates">Das Modell fand kein Ereignis mit Beleg im Text.</p>
+  {% endfor %}
+  {% endif %}
+</section>
+
 {% if detail.original %}
 <section class="stack" data-testid="original-section">
   <h2>Duplikat</h2>

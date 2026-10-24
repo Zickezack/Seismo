@@ -302,3 +302,22 @@ def test_articles_get_signatures_and_links_by_being_normalized_again(engine):
 
     with engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM article")).scalar_one() == 2
+
+
+def test_existing_sources_extract_events_and_the_settings_row_gets_the_extraction_defaults(engine):
+    upgrade(engine, "c609763963d4")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO source (name, adapter_type, url) VALUES ('EZB', 'rss', 'https://ecb.example/rss')"))
+        connection.execute(text("INSERT INTO platform_settings (id) VALUES (1) ON CONFLICT DO NOTHING"))
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT extract_events FROM source")).scalar_one() is True
+        settings = connection.execute(
+            text("SELECT extraction_languages, extraction_min_text_chars, extraction_max_age_days, extractions_per_hour FROM platform_settings")
+        ).one()
+    assert tuple(settings) == ("de,en,es,fr,it,nl,pt", 500, 3, 30)
+
+    downgrade(engine, "c609763963d4")
+    upgrade(engine)

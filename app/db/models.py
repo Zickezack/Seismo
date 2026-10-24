@@ -62,6 +62,53 @@ class DuplicateReason(StrEnum):
     TEXT = "text"  # the same cleaned text, on another host
 
 
+class EventType(StrEnum):
+    """What an event candidate is about (event schema, app/llm/event_schema.py); labels in extraction_service."""
+
+    ARMED_CONFLICT = "armed_conflict"
+    TERRORISM = "terrorism"
+    CIVIL_UNREST = "civil_unrest"
+    NATURAL_DISASTER = "natural_disaster"
+    ACCIDENT = "accident"
+    CYBER_INCIDENT = "cyber_incident"
+    INFRASTRUCTURE_OUTAGE = "infrastructure_outage"
+    SUPPLY_CHAIN_DISRUPTION = "supply_chain_disruption"
+    ENERGY_SUPPLY = "energy_supply"
+    COMMODITY_MARKET = "commodity_market"
+    MONETARY_POLICY = "monetary_policy"
+    FISCAL_POLICY = "fiscal_policy"
+    TRADE_POLICY = "trade_policy"  # tariffs, sanctions, export controls
+    REGULATION = "regulation"
+    ELECTION_POLITICS = "election_politics"
+    DIPLOMACY = "diplomacy"
+    CORPORATE = "corporate"
+    LABOR = "labor"
+    HEALTH = "health"
+    LEGAL = "legal"
+    ECONOMIC_DATA = "economic_data"
+    OTHER = "other"
+
+
+class EventStatus(StrEnum):
+    """The state an article reports, as the states of an event (Ereigniszustand, datamodel.md)."""
+
+    START = "start"
+    UPDATE = "update"
+    ESCALATION = "escalation"
+    CLOSURE = "closure"
+    RESUMPTION = "resumption"
+    UNKNOWN = "unknown"
+
+
+class StatementKind(StrEnum):
+    """Model-wide rule 6 (datamodel.md): Tatsache, Behauptung, Quellenprognose, Interpretation."""
+
+    FACT = "fact"
+    CLAIM = "claim"
+    SOURCE_FORECAST = "source_forecast"  # a forecast made in the source, never one of the platform
+    INTERPRETATION = "interpretation"
+
+
 class BackfillStatus(StrEnum):
     RUNNING = "running"
     DONE = "done"
@@ -144,6 +191,11 @@ class PlatformSettingsRecord(Base):
     domain_min_interval_seconds: Mapped[int] = mapped_column(server_default="10")
     # Domains whose terms forbid text and data mining, one per line; NULL: the list the code starts with.
     tdm_blocked_domains: Mapped[str | None] = mapped_column(Text)
+    # The event extraction's pre-filter and budget (extraction_service).
+    extraction_languages: Mapped[str] = mapped_column(String(200), server_default="de,en,es,fr,it,nl,pt")
+    extraction_min_text_chars: Mapped[int] = mapped_column(server_default="500")
+    extraction_max_age_days: Mapped[int] = mapped_column(server_default="3")
+    extractions_per_hour: Mapped[int] = mapped_column(server_default="30")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -155,6 +207,10 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(backups_to_keep >= 1, name="backups_to_keep"),
         CheckConstraint(article_max_age_days >= 1, name="article_max_age_days"),
         CheckConstraint(domain_min_interval_seconds >= 1, name="domain_min_interval_seconds"),
+        CheckConstraint(extraction_min_text_chars >= 0, name="extraction_min_text_chars"),
+        CheckConstraint(extraction_max_age_days >= 1, name="extraction_max_age_days"),
+        # 0 holds the extraction.
+        CheckConstraint(extractions_per_hour >= 0, name="extractions_per_hour"),
     )
 
 
@@ -171,6 +227,8 @@ class Source(Base):
     # The search of an adapter that needs one (GDELT), in that adapter's syntax; None for the others.
     query: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(server_default=true())
+    # Its articles pass the event extraction's pre-filter (extraction_service).
+    extract_events: Mapped[bool] = mapped_column(server_default=true())
     fetch_interval_minutes: Mapped[int] = mapped_column(server_default="60")
     # ISO 639-1 code; None for a source in several or unknown languages (datamodel.md, rule 5).
     language: Mapped[str | None] = mapped_column(String(10))
@@ -314,6 +372,76 @@ class ArticleLink(Base):
     separated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (CheckConstraint(article_id < other_id, name="ordered_pair"),)
+
+
+class Extraction(Base):
+    """One LLM run on an article (UI term: Extraktion): with what it ran, on how much of the text (datamodel.md)."""
+
+    __tablename__ = "extraction"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    article_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("article.id", ondelete="CASCADE"), index=True)
+    model: Mapped[str] = mapped_column(String(200))  # as Ollama names it
+    schema_version: Mapped[str] = mapped_column(String(20))
+    extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    duration_ms: Mapped[int]
+    input_chars: Mapped[int]  # of the text the model saw
+    # The text was cut to fit the model's context.
+    truncated: Mapped[bool]
+    # Statements whose quote is not in the text: not stored.
+    statements_dropped: Mapped[int] = mapped_column(server_default="0")
+
+
+class EventCandidate(Base):
+    """An event as one article reports it (UI term: Ereigniskandidat), before it is assigned to an event."""
+
+    __tablename__ = "event_candidate"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    extraction_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("extraction.id", ondelete="CASCADE"), index=True)
+    article_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("article.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(SmallInteger)  # in the model's answer
+    event_type: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20))
+    title: Mapped[str] = mapped_column(Text)  # in English, like every text the model writes
+    summary: Mapped[str] = mapped_column(Text)
+    # Empty where the article does not state it (datamodel.md, rule 5).
+    country: Mapped[str | None] = mapped_column(String(2))  # ISO 3166-1 alpha-2
+    place: Mapped[str | None] = mapped_column(Text)
+    # The time as the article states it, e.g. "on Friday morning": a model's own date proved a guess.
+    time_note: Mapped[str | None] = mapped_column(Text)
+    actors: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    impacts: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+
+    __table_args__ = (
+        CheckConstraint(event_type.in_([s.value for s in EventType]), name="event_type"),
+        CheckConstraint(status.in_([s.value for s in EventStatus]), name="status"),
+    )
+
+
+class Statement(Base):
+    """One statement of an event candidate (UI term: Aussage), with its kind (datamodel.md, rule 6)."""
+
+    __tablename__ = "statement"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event_candidate.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(SmallInteger)
+    kind: Mapped[str] = mapped_column(String(20))
+    text: Mapped[str] = mapped_column(Text)
+
+    __table_args__ = (CheckConstraint(kind.in_([s.value for s in StatementKind]), name="kind"),)
+
+
+class Evidence(Base):
+    """The quote that backs a statement (UI term: Beleg): kept with the metadata after the raw text is gone (rule 8)."""
+
+    __tablename__ = "evidence"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    statement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("statement.id", ondelete="CASCADE"), index=True)
+    article_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("article.id", ondelete="CASCADE"), index=True)
+    quote: Mapped[str] = mapped_column(Text)  # verbatim from the article's cleaned text
 
 
 class RawText(Base):

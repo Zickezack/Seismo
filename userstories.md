@@ -37,10 +37,10 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 11. As an analyst, I want the EIA Open Data API as a source of energy data releases (e.g. the weekly petroleum and natural gas storage reports), with its API key from the environment, since EIA's robots.txt excludes its RSS feeds.
 
 ### Epic: Strukturierte Ereignisextraktion
-1. As an analyst, I want a versioned event schema and an LLM extraction via Ollama - for articles that pass a configurable relevance pre-filter - that turns an article into event candidates with event type, actors, location, time, status and impacts, each statement labelled as fact, claim, forecast or interpretation and backed by a text quote, so events are structured and evidence-based.
 2. As an analyst, I want the LLM output validated against the JSON schema, invalid output retried and logged, missing details marked as unknown instead of invented, separate confidence values for extraction, source quality and inference, and the model version, schema version and extraction time stored, so every extracted statement is traceable.
 3. As an admin, I want the worker's stop grace period (`stop_grace_period` in `docker-compose.yml`) to be longer than the longest LLM call, so a deploy or restart lets a running extraction finish instead of killing it and repeating the call once its lease has expired.
 4. As an admin, I want LLM jobs to wait while Ollama is unreachable instead of using up their attempts, so a switched-off or restarting LLM machine delays the extraction but never makes jobs fail.
+   - Note (2026-10-24): story 1 already queues no extraction while Ollama does not serve the model, and a missing model is retried instead of failing the job; jobs queued before Ollama goes away still use up their attempts.
 
 ### Epic: Ereignisidentität und zeitliche Entwicklung
 1. As an analyst, I want each event candidate assigned to an existing event (Ereignis) or turned into a new event with a stable event ID, so several reports about the same event form one consistent event record.
@@ -109,6 +109,9 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 1. As an analyst, I want article HTML cleaned to plain text and the metadata normalised (canonical URL, title, UTC timestamps, detected language), so all later steps work on consistent data.
 2. As an analyst, I want identical articles recognised by canonical URL and content hash, so repeated fetches never create duplicate articles.
 3. As an analyst, I want near-duplicate and syndicated articles linked to each other without blindly merging different events, and wrong links correctable, so the same report from several outlets is recognised and every article stays traceable to its source.
+
+### Epic: Strukturierte Ereignisextraktion
+1. As an analyst, I want a versioned event schema and an LLM extraction via Ollama - for articles that pass a configurable relevance pre-filter - that turns an article into event candidates with event type, actors, location, time, status and impacts, each statement labelled as fact, claim, forecast or interpretation and backed by a text quote, so events are structured and evidence-based.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.

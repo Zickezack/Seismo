@@ -45,4 +45,5 @@ def test_unset_fields_get_the_defaults_of_a_new_source():
         "name": "N",
         "url": "https://example.org/feed",
         "is_active": "on",
+        "extract_events": "on",
     }

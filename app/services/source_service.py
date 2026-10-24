@@ -65,6 +65,7 @@ NEW_SOURCE_FORM = {
     "query": "",
     "region": "",
     "is_active": True,
+    "extract_events": True,
     "fetch_interval_minutes": DEFAULT_FETCH_INTERVAL_MINUTES,
     "language": "",
     "terms_note": "",
@@ -90,6 +91,7 @@ class SourceValues:
     url: str
     query: str | None
     is_active: bool
+    extract_events: bool  # its articles pass the event extraction's pre-filter (extraction_service)
     fetch_interval_minutes: int
     language: str | None
     terms_note: str | None
@@ -153,6 +155,7 @@ def parse(form: Mapping[str, str]) -> SourceValues:
         query=checked(_query, form.get("query", ""), adapter),
         # A checkbox: the browser sends it only when it is ticked.
         is_active=bool(form.get("is_active")),
+        extract_events=bool(form.get("extract_events")),
         fetch_interval_minutes=checked(
             _whole_number, form.get("fetch_interval_minutes", ""), "Abrufintervall (Minuten)", FETCH_INTERVAL_MINUTES
         ),

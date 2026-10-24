@@ -128,7 +128,11 @@ def test_run_logs_only_changes_in_readiness_and_cleans_up(readiness, queue, no_d
         worker.run(SETTINGS, stop_event, heartbeat)
 
     messages = [record.getMessage() for record in caplog.records]
-    assert messages == ["Worker started", "Worker not ready", "Worker ready", "Worker stopped"]
+    # SETTINGS name no Ollama: said once, at the start.
+    assert messages == [
+        "Worker started", "No Ollama configured (OLLAMA_BASE_URL): no event extraction is queued", "Worker not ready",
+        "Worker ready", "Worker stopped",
+    ]
     assert not heartbeat.exists()
     assert no_database.disposed
 
@@ -280,3 +284,37 @@ def test_failed_fetch_check_is_logged_and_the_worker_keeps_running(
 
     assert "Fetch check failed: connection lost" in caplog.text
     assert len(renewal_callbacks) == 2
+
+
+class FakeLlm:
+    model = "qwen3.5:9b"
+
+    def __init__(self, served):
+        self.served = served
+
+    def __call__(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc_info):
+        pass
+
+    def serves_model(self):
+        return self.served
+
+
+def test_extractions_are_queued_only_while_ollama_serves_the_model_and_a_change_is_logged(monkeypatch, caplog):
+    queued = []
+    monkeypatch.setattr(worker.extraction_service, "enqueue_due", lambda engine: queued.append(engine) or [7])
+
+    with caplog.at_level(logging.INFO, logger=worker.__name__):
+        missing = worker._enqueue_due_extractions("engine", FakeLlm(served=False), None)
+        still_missing = worker._enqueue_due_extractions("engine", FakeLlm(served=False), missing)
+        served = worker._enqueue_due_extractions("engine", FakeLlm(served=True), still_missing)
+
+    assert (missing, still_missing, served, queued) == (False, False, True, ["engine"])
+    assert [record.getMessage() for record in caplog.records] == [
+        "LLM model not available: Ollama unreachable or the model not pulled", "LLM model available", "Extraction jobs queued",
+    ]

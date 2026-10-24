@@ -111,6 +111,10 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | article_max_age_days | integer | yes | 7 | Items published longer ago than this are not taken by the live fetch; they belong to the backfill. Items without a date always come. 1 to 365. |
   | domain_min_interval_seconds | integer | yes | 10 | Minimum time between two requests to the same host, feeds and full texts alike; a longer Crawl-delay in the host's robots.txt wins. 1 to 600. |
   | tdm_blocked_domains | text | no | the starter list | Domains whose terms forbid text and data mining, one per line, sorted, at most 500; each covers its subdomains. A full text from them is not fetched (Vorbehalten). Empty: none. Starter list (NULL): the publishers found in October 2026 (`tdm_policy.STARTER_BLOCKED_DOMAINS`). UI: Domains ohne Volltext. |
+  | extraction_languages | varchar(200) | yes | `de,en,es,fr,it,nl,pt` | Languages the event extraction takes (ISO 639-1 codes, comma-separated, sorted): the language recognised in the text, else the one stated. UI: Ereignisextraktion - Sprachen. |
+  | extraction_min_text_chars | integer | yes | 500 | Shorter cleaned texts are not extracted; check constraint >= 0. UI: Mindestlänge des Texts (Zeichen). |
+  | extraction_max_age_days | integer | yes | 3 | Older articles (publication, else fetch time) are not extracted; check constraint >= 1. UI: Höchstalter (Tage). |
+  | extractions_per_hour | integer | yes | 30 | At most this many extraction jobs are queued per hour, newest articles first; 0 holds the extraction; check constraint >= 0. UI: Extraktionen pro Stunde (höchstens). |
   | updated_at | timestamptz | yes | now() | |
 
 - Relationships: none
@@ -129,6 +133,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | url | varchar(2000) | yes | | Feed or API address, `http` or `https` with a host. Left empty for `gdelt`, the API address is filled in. Not unique: one endpoint can serve several sources, e.g. every GDELT query. |
   | query | text | no | | The search of an adapter that needs one, in its syntax, at most 1000 characters; required for `gdelt`, empty for `rss`. UI: Suchanfrage. |
   | is_active | boolean | yes | true | Only active sources are fetched. UI: Aktiv / Inaktiv. |
+  | extract_events | boolean | yes | true | Its articles pass the event extraction's pre-filter. UI: Ereignisse extrahieren. |
   | fetch_interval_minutes | integer | yes | 60 | Time between two fetches, 5 to 1440. UI: Abrufintervall. |
   | language | varchar(10) | no | | ISO 639-1 code; empty for a source in several or unknown languages (rule 5). The language of each article is stored separately. UI: Sprache. |
   | region | varchar(20) | no | | What the source reports on: `africa`, `asia`, `europe`, `middle_east`, `north_america`, `south_america`, `oceania`, `worldwide` (UI: Afrika, Asien, Europa, Naher Osten, Nordamerika, Südamerika, Ozeanien, Weltweit; the list sorts in this order). Checked in the service, not by a constraint. Required by the form; empty only for sources from before regions existed (UI: Ohne Region). UI: Region. |
@@ -213,6 +218,80 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
 - Relationships: pairs two Artikel.
 - Rules: made at normalization (`similarity_service`), between originals only - a duplicate's links are its original's: two texts from 60 % estimated similarity (the admin's decision of 2026-10-24), published (else fetched) within 7 days of each other, never two identical texts on one host (an error page, see Artikel). Every link is a measured pair: A linked to B and B to C does not link A and C. When an original becomes a duplicate, its pairs go to the new original, a separation winning over a link. The article page (UI: Artikel, `/articles/<id>`) lists an original's similar articles first published first, marks the first, and separates selected ones; it also separates a duplicate from its original ("Kein Duplikat": the duplicate becomes an original of its own, normalized again, its full text fetched when it was skipped). Kept with the articles; pruning belongs to the epic Verdichtung und Daten-Lifecycle.
+- Privacy: none
+
+### Extraktion (`extraction`)
+- Store: SQL table `extraction`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | article_id | bigint | yes | | Foreign key to `article`, `ON DELETE CASCADE`. Index. |
+  | model | varchar(200) | yes | | The model as Ollama names it, e.g. `qwen3.5:9b`. |
+  | schema_version | varchar(20) | yes | | `event_schema.SCHEMA_VERSION`: the fields, their meaning and the prompt the model answered to. |
+  | extracted_at | timestamptz | yes | now() | |
+  | duration_ms | integer | yes | | The model call, waiting for an LLM slot included. |
+  | input_chars | integer | yes | | Characters of the cleaned text the model saw. |
+  | truncated | boolean | yes | | The text was cut to fit the model's context (`OLLAMA_NUM_CTX`). UI: Text gekürzt. |
+  | statements_dropped | integer | yes | 0 | Statements whose quote is not in that text: not stored, nor an event left without one. |
+
+- Relationships: belongs to one Artikel; has any number of Ereigniskandidaten.
+- Rules: made by the job "Ereignisse extrahieren" (`extraction_service`) for an article that passes the pre-filter: an original (never a duplicate, never a later copy of a linked article) of a source that extracts, in a listed language, with enough text, not too old - at most a number per hour, newest first (Plattform-Einstellungen). One per article; an article whose extraction job failed comes back only when the admin requeues the job. Every text the model writes is English, every quote verbatim. Kept with the metadata.
+- Privacy: none
+
+### Ereigniskandidat (`event_candidate`)
+- Store: SQL table `event_candidate`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | extraction_id | bigint | yes | | Foreign key to `extraction`, `ON DELETE CASCADE`. Index. |
+  | article_id | bigint | yes | | Foreign key to `article`, `ON DELETE CASCADE`. Index. |
+  | position | smallint | yes | | Its place in the model's answer, the most important first. |
+  | event_type | varchar(40) | yes | | `armed_conflict`, `terrorism`, `civil_unrest`, `natural_disaster`, `accident`, `cyber_incident`, `infrastructure_outage`, `supply_chain_disruption`, `energy_supply`, `commodity_market`, `monetary_policy`, `fiscal_policy`, `trade_policy` (tariffs, sanctions, export controls), `regulation`, `election_politics`, `diplomacy`, `corporate`, `labor`, `health`, `legal`, `economic_data`, `other`; check constraint. UI: German labels (`extraction_service.EVENT_TYPE_LABELS`). |
+  | status | varchar(20) | yes | | `start`, `update`, `escalation`, `closure`, `resumption` (as the states of an Ereignis), `unknown`; check constraint. UI: Beginn, Fortsetzung, Eskalation, Abschluss, Wiederaufnahme, Status unbekannt. |
+  | title | text | yes | | English, at most 200 characters. |
+  | summary | text | yes | | English, at most 1000 characters. |
+  | country | varchar(2) | no | | ISO 3166-1 alpha-2, where the article states it (rule 5). |
+  | place | text | no | | As the article names it. |
+  | time_note | text | no | | When the event happens, as the article states it, in a few English words, e.g. "on Friday morning", "effective Nov. 7". No date of the model's own: tried in development, it filled in the publication day for 24 of 27 candidates (rule 5); a date is derived later, in code, with the epic Ereignisidentität und zeitliche Entwicklung. |
+  | actors | jsonb | yes | `[]` | `[{name, role}]`: who acts or is directly concerned. Entities come with their epic. |
+  | impacts | jsonb | yes | `[]` | `[{target, target_kind, direction, horizon, description}]`: only effects the article itself names; `target_kind` company, sector, commodity, country, market, other; `direction` positive, negative, mixed, unclear; `horizon` days, weeks, months, years, unknown. Not a Wirkungsannahme of the platform. |
+
+- Relationships: belongs to one Extraktion and its Artikel; has one or more Aussagen.
+- Rules: stored only with at least one Aussage that has a Beleg. Assigned to an Ereignis with the epic Ereignisidentität und zeitliche Entwicklung.
+- Privacy: none (actors may name persons; once entities exist they follow rule 13)
+
+### Aussage (`statement`)
+- Store: SQL table `statement`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | candidate_id | bigint | yes | | Foreign key to `event_candidate`, `ON DELETE CASCADE`. Index. |
+  | position | smallint | yes | | |
+  | kind | varchar(20) | yes | | `fact`, `claim`, `source_forecast`, `interpretation` (rule 6); check constraint. UI: Tatsache, Behauptung, Quellenprognose, Interpretation. |
+  | text | text | yes | | English, one sentence. |
+
+- Relationships: belongs to one Ereigniskandidat; has one Beleg (from the article it was extracted from).
+- Privacy: none
+
+### Beleg (`evidence`)
+- Store: SQL table `evidence`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | statement_id | bigint | yes | | Foreign key to `statement`, `ON DELETE CASCADE`. Index. |
+  | article_id | bigint | yes | | The article the quote is from; foreign key to `article`, `ON DELETE CASCADE`. Index. |
+  | quote | text | yes | | The passage as it stands in the article's cleaned text - found there despite spaces, typographic quotes and dashes the model wrote differently, at least 10 characters. |
+
+- Relationships: belongs to one Aussage and one Artikel.
+- Rules: a permissible evidence quote, kept after the raw text is deleted (rule 8).
 - Privacy: none
 
 ### Backfill (`backfill`)

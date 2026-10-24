@@ -4,8 +4,9 @@ Every tick checks readiness and writes a heartbeat file that the Docker health c
 runs, every lease renewal writes it as well, so a long job never makes the worker look dead. Once an
 hour the worker deletes finished jobs whose retention period has passed; once a minute it queues a
 backup job if a backup is due (app/services/backup_service.py), a fetch job for every source whose
-next fetch is due (app/services/ingestion_service.py) and a normalization for every article whose full
-text is settled (app/services/normalization_service.py).
+next fetch is due (app/services/ingestion_service.py), a normalization for every article whose full
+text is settled (app/services/normalization_service.py) and, with an Ollama configured, an extraction for the
+articles that pass its pre-filter, within the hour's budget (app/services/extraction_service.py).
 """
 import logging
 import os
@@ -14,7 +15,8 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from functools import partial
 from pathlib import Path
 
 from sqlalchemy import Engine
@@ -27,7 +29,8 @@ from app.jobs.handlers import build_handlers
 from app.jobs.runner import Handler, run_next_job
 from app.llm.limiter import LlmCallLimiter
 from app.logging_config import configure_logging
-from app.services import backup_service, ingestion_service, normalization_service
+from app.llm.ollama import OllamaClient
+from app.services import backup_service, extraction_service, ingestion_service, normalization_service
 from app.services.health_service import HealthReport, check_readiness
 from app.db.models import JobStatus
 from app.services.job_service import LEASE_SECONDS, purge_finished_jobs
@@ -44,6 +47,8 @@ BACKUP_CHECK_INTERVAL_SECONDS = 60
 FETCH_CHECK_INTERVAL_SECONDS = 60
 # An article is normalized at most this late after its full text is settled.
 NORMALIZE_CHECK_INTERVAL_SECONDS = 60
+# An article reaches the extraction at most this late after its normalization; the budget counts per hour.
+EXTRACT_CHECK_INTERVAL_SECONDS = 60
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:
@@ -56,18 +61,26 @@ def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> Health
 def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = HEARTBEAT_FILE) -> None:
     engine = create_db_engine(settings)
     expected_revision = head_revision()
+    llm = None
+    if settings.ollama_base_url:
+        llm = partial(OllamaClient, settings.ollama_base_url, settings.ollama_model, settings.ollama_num_ctx)
     handlers = build_handlers(
-        engine, settings.backup_dir, LlmCallLimiter(engine, stop_event), stop_event, settings.fetch_contact
+        engine, settings.backup_dir, LlmCallLimiter(engine, stop_event), stop_event, settings.fetch_contact, llm
     )
     owner = worker_identity()
     # Several renewals per lease, and at least one heartbeat per poll interval (app/worker/healthcheck.py).
     renew_interval = min(settings.worker_poll_interval_seconds, LEASE_SECONDS / 3)
     logger.info(
         "Worker started",
-        extra={"poll_interval_seconds": settings.worker_poll_interval_seconds, "job_kinds": sorted(handlers), "owner": owner},
+        extra={
+            "poll_interval_seconds": settings.worker_poll_interval_seconds, "job_kinds": sorted(handlers), "owner": owner,
+            "llm_model": settings.ollama_model if llm else None,
+        },
     )
-    was_ready = None
-    next_purge = next_backup_check = next_fetch_check = next_normalize_check = time.monotonic()
+    if llm is None:
+        logger.warning("No Ollama configured (OLLAMA_BASE_URL): no event extraction is queued")
+    was_ready = llm_served = None
+    next_purge = next_backup_check = next_fetch_check = next_normalize_check = next_extract_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -87,6 +100,9 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and time.monotonic() >= next_normalize_check:
                 next_normalize_check = time.monotonic() + NORMALIZE_CHECK_INTERVAL_SECONDS
                 _enqueue_due_normalizations(engine)
+            if report.ready and llm and time.monotonic() >= next_extract_check:
+                next_extract_check = time.monotonic() + EXTRACT_CHECK_INTERVAL_SECONDS
+                llm_served = _enqueue_due_extractions(engine, llm, llm_served)
             # After a job, take the next one at once; wait only while the queue is empty.
             if report.ready and _run_next_job(engine, handlers, owner, renew_interval, heartbeat_file):
                 continue
@@ -153,6 +169,30 @@ def _enqueue_due_normalizations(engine: Engine) -> None:
         return
     if job_ids:
         logger.info("Normalization jobs queued", extra={"jobs": len(job_ids)})
+
+
+def _enqueue_due_extractions(engine: Engine, llm: Callable[[], OllamaClient], was_served: bool | None) -> bool:
+    """Queue extractions while Ollama serves the model: queued before it is pulled, they would only fail. Returns
+    whether it does; a change is logged, the state itself not every minute."""
+    with llm() as client:
+        served = client.serves_model()
+    if served != was_served:
+        fields = {"model": client.model}
+        if served:
+            logger.info("LLM model available", extra=fields)
+        else:
+            logger.warning("LLM model not available: Ollama unreachable or the model not pulled", extra=fields)
+    if not served:
+        return False
+    try:
+        job_ids = extraction_service.enqueue_due(engine)
+    except SQLAlchemyError as error:
+        # Checked again at the next interval; the articles wait meanwhile.
+        logger.warning("Extraction check failed: %s", getattr(error, "orig", None) or error)
+        return True
+    if job_ids:
+        logger.info("Extraction jobs queued", extra={"jobs": len(job_ids)})
+    return True
 
 
 def worker_identity() -> str:

@@ -463,6 +463,46 @@ a:focus-visible {
   color: var(--color-muted);
 }
 
+/* The kind of an extracted statement (templates/article.html): a fact as stored, a claim or a forecast as
+   someone's word, an interpretation as the article's own. */
+.status-fact {
+  color: var(--color-success-text);
+  background: var(--color-success-background);
+}
+
+.status-claim,
+.status-source_forecast {
+  color: var(--color-warning-text);
+  background: var(--color-warning-background);
+}
+
+.status-interpretation {
+  color: var(--color-primary);
+  background: #e6eefa;
+}
+
+/* Extracted statements, each with the quote that backs it (templates/article.html). */
+.statements {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quote {
+  margin: 0.25rem 0 0;
+  padding: 0.125rem 0 0.125rem 0.75rem;
+  color: var(--color-muted);
+  border-left: 3px solid var(--color-border);
+  overflow-wrap: anywhere;
+}
+
+.plain-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+
 /* Facts about one item as label and value, e.g. an article's metadata (templates/article.html): the values wrap,
    so the table fits a narrow screen without scrolling. */
 .table-details th {

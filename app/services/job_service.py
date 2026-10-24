@@ -40,6 +40,7 @@ FETCH_ARTICLE_JOB_KIND = "fetch_article"
 FETCH_ARTICLE_MAX_ATTEMPTS = 31
 BACKFILL_JOB_KIND = "backfill"
 NORMALIZE_JOB_KIND = "normalize_article"
+EXTRACT_EVENTS_JOB_KIND = "extract_events"
 KIND_LABELS = {
     TEST_JOB_KIND: "Testjob",
     BACKUP_JOB_KIND: "Datenbank-Backup",
@@ -47,6 +48,7 @@ KIND_LABELS = {
     FETCH_ARTICLE_JOB_KIND: "Volltext abrufen",
     BACKFILL_JOB_KIND: "Backfill abrufen",
     NORMALIZE_JOB_KIND: "Artikel normalisieren",
+    EXTRACT_EVENTS_JOB_KIND: "Ereignisse extrahieren",
 }
 
 

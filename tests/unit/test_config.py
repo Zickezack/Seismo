@@ -17,6 +17,7 @@ def test_required_variables_only_gives_defaults():
     assert settings.worker_poll_interval_seconds == 5.0
     assert settings.backup_dir == Path("/backups")
     assert settings.fetch_contact == ""
+    assert (settings.ollama_base_url, settings.ollama_model, settings.ollama_num_ctx) == ("", "qwen3.5:9b", 8192)
 
 
 def test_optional_variables_override_defaults():
@@ -141,3 +142,24 @@ def test_fetch_contact_must_be_a_single_line():
     # It goes into the User-Agent header; a line break would smuggle in a header of its own.
     with pytest.raises(ConfigError, match="^FETCH_CONTACT must be a single line$"):
         Settings.from_env(REQUIRED | {"FETCH_CONTACT": "ops@example.org\r\nX-Evil: 1"})
+
+
+def test_ollama_variables_are_read():
+    settings = Settings.from_env(
+        REQUIRED | {"OLLAMA_BASE_URL": " http://ollama:11434/ ", "OLLAMA_MODEL": "qwen3.5:27b", "OLLAMA_NUM_CTX": "16384"}
+    )
+
+    assert (settings.ollama_base_url, settings.ollama_model, settings.ollama_num_ctx) == ("http://ollama:11434", "qwen3.5:27b", 16384)
+
+
+@pytest.mark.parametrize(
+    ("variable", "value", "message"),
+    [
+        ("OLLAMA_BASE_URL", "ollama:11434", "OLLAMA_BASE_URL must start with http:// or https://"),
+        ("OLLAMA_NUM_CTX", "4096", "OLLAMA_NUM_CTX must be at least 6144"),
+        ("OLLAMA_NUM_CTX", "viel", "OLLAMA_NUM_CTX must be a number"),
+    ],
+)
+def test_invalid_ollama_variables_are_rejected(variable, value, message):
+    with pytest.raises(ConfigError, match=f"^{message}$"):
+        Settings.from_env(REQUIRED | {variable: value})

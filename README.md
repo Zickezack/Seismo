@@ -47,6 +47,17 @@ gets HTTP 403 there). The worker sends it; the api only shows a
 warning on the source list while it is missing. After setting it, recreate both containers
 (`docker compose up -d api worker`), then select the affected sources and use "Blockierte Volltexte abrufen".
 
+The event extraction asks an Ollama server (worker only; empty `OLLAMA_BASE_URL`: no extraction):
+
+| Variable | Rule |
+|----------|------|
+| `OLLAMA_BASE_URL` | The server, e.g. `http://192.168.1.20:11434`. Live: the LLM server in the LAN; the dev stack has its own. |
+| `OLLAMA_MODEL` | Optional, default `qwen3.5:9b`; it must be pulled on that server (`ollama pull`). |
+| `OLLAMA_NUM_CTX` | Optional, default `8192`, at least `6144`: the model's context in tokens; longer texts are cut to fit. |
+
+Which articles reach the model, and how many per hour, is set in the Plattform-Einstellungen (Ereignisextraktion)
+and per source (Ereignisse extrahieren).
+
 ## Run the stack
 
 ```sh
@@ -154,17 +165,6 @@ image `seismo:dev` (Dockerfile target `dev`).
   `docker compose -f docker-compose.yml -f .devcontainer/docker-compose.dev.yml up -d --build migrate api worker`
 - Logs: Docker Desktop, or `docker compose -p seismo-dev logs -f api worker` on the host.
 
-Inside the dev container (the database is reachable as host `db`):
-
-```sh
-python -m pytest                     # all tests; integration tests use the database <POSTGRES_DB>_test
-python -m pytest tests/unit          # without database
-python -m alembic upgrade head       # migrate the development database
-```
-
-Browser checks (skill `verify`) use Playwright with headless Chromium; every dev container build
-installs it (`python -m playwright install --with-deps chromium`). Every build also installs `pg_dump`
-and `pg_restore` for the backup tests (`scripts/install-postgres-client.sh`); without them those tests fail.
 The dev stack has an Ollama of its own for the event extraction, on the host's NVIDIA GPU (Docker
 Desktop with GPU support in WSL2). It is not started with the dev container; once, from a terminal on the
 host in the repository folder:
@@ -177,6 +177,17 @@ docker compose -f docker-compose.yml -f .devcontainer/docker-compose.dev.yml exe
 The models stay in the volume `ollama-models`. `api`, `worker` and the dev container reach it as
 `http://ollama:11434`. A larger model for development: pull it and set `OLLAMA_MODEL` in `.env`.
 
+Inside the dev container (the database is reachable as host `db`):
+
+```sh
+python -m pytest                     # all tests; integration tests use the database <POSTGRES_DB>_test
+python -m pytest tests/unit          # without database
+python -m alembic upgrade head       # migrate the development database
+```
+
+Browser checks (skill `verify`) use Playwright with headless Chromium; every dev container build
+installs it (`python -m playwright install --with-deps chromium`). Every build also installs `pg_dump`
+and `pg_restore` for the backup tests (`scripts/install-postgres-client.sh`); without them those tests fail.
 The `worker` of the dev stack makes backups only once its image is rebuilt (command above).
 
 New migration: `python -m alembic revision --autogenerate -m "<what changes>"`, then read and

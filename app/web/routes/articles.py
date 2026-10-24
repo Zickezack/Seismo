@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app.services import article_service, similarity_service
+from app.services import article_service, extraction_service, similarity_service
 from app.web.templating import flash, name_list, templates
 
 router = APIRouter(prefix="/articles", tags=["articles"])
@@ -27,7 +27,8 @@ def article_page(request: Request, article_id: int) -> Response:
     if detail is None:
         flash(request, NOT_FOUND, "error")
         return RedirectResponse("/articles", status_code=303)
-    return templates.TemplateResponse(request, "article.html", {"detail": detail})
+    extraction = extraction_service.latest_for_article(request.app.state.engine, article_id)
+    return templates.TemplateResponse(request, "article.html", {"detail": detail, "extraction": extraction})
 
 
 @router.post("/{article_id}/separate")

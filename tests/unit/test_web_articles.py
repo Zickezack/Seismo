@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import AuthSettings, Settings
-from app.services import article_service, similarity_service
+from app.services import article_service, extraction_service, similarity_service
 from app.services.article_service import ArticleListItem, ArticleOverview, SourceChoice
 from app.services.bulk import BulkResult
 from app.web.main import create_app
@@ -206,6 +206,7 @@ def detail(article_value, **fields):
 def page(monkeypatch):
     calls = {}
     monkeypatch.setattr(article_service, "detail", lambda _engine, article_id: calls.get("detail"))
+    monkeypatch.setattr(extraction_service, "latest_for_article", lambda _engine, article_id: calls.get("extraction"))
     return calls
 
 
@@ -286,3 +287,42 @@ def test_not_duplicate_passes_the_selection_and_reports_the_result(client, monke
     assert calls == [[5]]
     assert response.headers["location"] == "/articles/5"
     assert text_of(client.get("/articles").text, "flash") == "1 Duplikat getrennt."
+
+
+def test_the_article_page_shows_the_event_candidates_with_their_statements_and_quotes(client, page):
+    page["detail"] = detail(article(4))
+    candidate = extraction_service.CandidateView(
+        id=9, event_type="monetary_policy", status="update", title="ECB keeps rates unchanged", summary="The ECB held rates.",
+        country="DE", place="Frankfurt", time_note="on Thursday",
+        actors=[{"name": "ECB", "role": "central bank"}],
+        impacts=[{"target": "Euro", "target_kind": "market", "direction": "unclear", "horizon": "days", "description": ""}],
+        statements=[extraction_service.StatementView("fact", "The ECB held rates.", "Die EZB hat die Leitzinsen unverändert gelassen.")],
+    )
+    page["extraction"] = extraction_service.ExtractionView(
+        model="qwen3.5:9b", schema_version="1", extracted_at=NOW, duration_ms=41_200, input_chars=612, truncated=True,
+        statements_dropped=1, candidates=[candidate],
+    )
+
+    html = client.get("/articles/4").text
+
+    meta = text_of(html, "extraction-meta")
+    assert meta.startswith("Extrahiert") and "mit qwen3.5:9b, Schema 1, in 41.2&nbsp;s aus 612 Zeichen (Text gekürzt). 1 Aussage ohne auffindbares Zitat verworfen." in html
+    assert text_of(html, "candidate-title-9") == "ECB keeps rates unchanged"
+    assert text_of(html, "candidate-facts-9") == "Geldpolitik · Fortsetzung · Frankfurt, DE · on Thursday"
+    actors = re.search(r'data-testid="candidate-actors-9">(.*?)</p>', html).group(1)
+    assert actors == "<strong>Akteure:</strong> ECB (central bank)"
+    assert "<li>Euro (Markt): unklar, Tage</li>" in html
+    statements = re.search(r'data-testid="candidate-statements-9">(.*?)</ul>', html, re.DOTALL).group(1)
+    assert '<span class="status status-fact">Tatsache</span> The ECB held rates.' in statements
+    assert '<blockquote class="quote">Die EZB hat die Leitzinsen unverändert gelassen.</blockquote>' in statements
+
+
+def test_an_article_not_extracted_yet_says_so_and_one_without_events_too(client, page):
+    page["detail"] = detail(article(4))
+    assert text_of(client.get("/articles/4").text, "no-extraction") == "Noch nicht extrahiert."
+
+    page["extraction"] = extraction_service.ExtractionView(
+        model="qwen3.5:9b", schema_version="1", extracted_at=NOW, duration_ms=900, input_chars=600, truncated=False,
+        statements_dropped=0, candidates=[],
+    )
+    assert text_of(client.get("/articles/4").text, "no-candidates") == "Das Modell fand kein Ereignis mit Beleg im Text."

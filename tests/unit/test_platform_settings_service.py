@@ -34,11 +34,20 @@ def test_every_setting_has_a_form_field_and_every_default_fits_its_range():
 
     assert set(FORM_FIELDS) == set(defaults.__dict__)
     for name, field in FORM_FIELDS.items():
-        if field.kind == "domains":
+        if field.kind in ("domains", "text"):
             # Valid, and already as the form stores it.
             assert field.parse(getattr(defaults, name)) == getattr(defaults, name)
         else:
             assert field.minimum <= getattr(defaults, name) <= field.maximum
+
+
+def test_language_list_is_stored_sorted_once_each_and_refuses_what_is_no_code():
+    field = FORM_FIELDS["extraction_languages"]
+
+    assert field.parse(" EN, de;fr  en ") == "de,en,fr"
+    for raw in ("", "deutsch", "e1"):
+        with pytest.raises(InvalidSetting, match="^Sprachen: bitte Sprachcodes wie de, en, fr angeben"):
+            field.parse(raw)
 
 
 def test_domain_list_is_stored_sorted_once_each_and_names_what_is_no_domain():

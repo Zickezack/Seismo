@@ -12,6 +12,9 @@ AUTH_VARIABLES = ("ADMIN_USERNAME", "ADMIN_PASSWORD", "SESSION_SECRET")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 MIN_ADMIN_PASSWORD_LENGTH = 12
 MIN_SESSION_SECRET_LENGTH = 32
+# The extraction's instructions and the room for its answer take 4000 tokens (extraction_service.RESERVED_TOKENS);
+# this leaves about 2000 for the article's text.
+MIN_OLLAMA_NUM_CTX = 6144
 
 
 class ConfigError(ValueError):
@@ -31,6 +34,11 @@ class Settings:
     backup_dir: Path = Path("/backups")
     # How a source can reach the operator (e-mail or URL), sent in the User-Agent of every fetch.
     fetch_contact: str = ""
+    # The LLM server (architecture.md, "Environments and LLM"); empty: no extraction is queued.
+    ollama_base_url: str = ""
+    ollama_model: str = "qwen3.5:9b"
+    # The context the model runs with, in tokens: the article's text is cut to fit it.
+    ollama_num_ctx: int = 8192
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "Settings":
@@ -53,6 +61,9 @@ class Settings:
             ),
             backup_dir=Path(environ.get("BACKUP_DIR", "").strip() or cls.backup_dir),
             fetch_contact=_single_line(environ, "FETCH_CONTACT"),
+            ollama_base_url=_base_url(environ, "OLLAMA_BASE_URL"),
+            ollama_model=_single_line(environ, "OLLAMA_MODEL") or cls.ollama_model,
+            ollama_num_ctx=_ollama_num_ctx(environ),
         )
 
     @property
@@ -112,6 +123,20 @@ def _single_line(environ, name):
     # It goes into an HTTP header, where a line break would start a header of its own.
     if any(char in value for char in "\r\n"):
         raise ConfigError(f"{name} must be a single line")
+    return value
+
+
+def _base_url(environ, name):
+    value = _single_line(environ, name).rstrip("/")
+    if value and not value.startswith(("http://", "https://")):
+        raise ConfigError(f"{name} must start with http:// or https://")
+    return value
+
+
+def _ollama_num_ctx(environ):
+    value = _positive_number(environ, "OLLAMA_NUM_CTX", Settings.ollama_num_ctx, int)
+    if value < MIN_OLLAMA_NUM_CTX:
+        raise ConfigError(f"OLLAMA_NUM_CTX must be at least {MIN_OLLAMA_NUM_CTX}")
     return value
 
 

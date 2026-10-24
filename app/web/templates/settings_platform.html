@@ -19,11 +19,20 @@
 </div>
 {% endmacro %}
 
+{% macro text_field(field) %}
+<div class="field">
+  <label for="{{ field.name }}">{{ field.label }}</label>
+  <input id="{{ field.name }}" name="{{ field.name }}" type="text" spellcheck="false" required
+         value="{{ settings[field.name] }}" aria-describedby="{{ field.name }}-hint" data-testid="{{ field.name }}">
+  <p class="hint" id="{{ field.name }}-hint">{{ field.hint }}</p>
+</div>
+{% endmacro %}
+
 {% macro section(id, title, names) %}
 <details class="card section" id="{{ id }}" open data-testid="section-{{ id }}">
   <summary><h2>{{ title }}</h2></summary>
   <form class="form-grid" method="post" action="/settings/platform" data-inline-save data-testid="form-{{ id }}">
-    {% for name in names %}{% if fields[name].kind == "domains" %}{{ domain_field(fields[name]) }}{% else %}{{ number_field(fields[name]) }}{% endif %}{% endfor %}
+    {% for name in names %}{% if fields[name].kind == "domains" %}{{ domain_field(fields[name]) }}{% elif fields[name].kind == "text" %}{{ text_field(fields[name]) }}{% else %}{{ number_field(fields[name]) }}{% endif %}{% endfor %}
     <div class="form-actions">
       <button class="button" type="submit" data-testid="save-{{ id }}">Speichern</button>
       <span class="save-status" data-save-status role="status" data-testid="status-{{ id }}"></span>
@@ -35,6 +44,7 @@
 {% set sections = [
   ("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls"]),
   ("abruf", "Abruf", ["article_max_age_days", "domain_min_interval_seconds", "tdm_blocked_domains"]),
+  ("extraktion", "Ereignisextraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour"]),
   ("aufbewahrung", "Aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
   ("backups", "Backups", ["backup_interval_hours", "backups_to_keep"]),
 ] %}

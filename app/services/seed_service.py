@@ -89,4 +89,4 @@ def _form_of(item: dict) -> dict[str, str]:
         "terms_note": "",
     }
     form |= {name: str(value) for name, value in item.items() if name != "key"}
-    return form | {"is_active": "on"}
+    return form | {"is_active": "on", "extract_events": "on"}

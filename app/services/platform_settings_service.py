@@ -1,4 +1,5 @@
 """Plattform-Einstellungen: global for the instance, admin only (requirements.md, "Settings")."""
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
 
@@ -24,10 +25,19 @@ class PlatformSettings:
     domain_min_interval_seconds: int = 10
     # One domain per line; a full text from it or a subdomain is not fetched (tdm_policy).
     tdm_blocked_domains: str = "\n".join(tdm_policy.STARTER_BLOCKED_DOMAINS)
+    # The event extraction's pre-filter and budget (extraction_service): ISO 639-1 codes, comma-separated.
+    extraction_languages: str = "de,en,es,fr,it,nl,pt"
+    extraction_min_text_chars: int = 500
+    extraction_max_age_days: int = 3
+    extractions_per_hour: int = 30
 
     @property
     def blocked_domains(self) -> list[str]:
         return self.tdm_blocked_domains.split()
+
+    @property
+    def extraction_language_codes(self) -> list[str]:
+        return self.extraction_languages.split(",")
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,23 @@ class DomainListField:
             raise InvalidSetting(f"{self.label}: {error}.") from None
 
 
+@dataclass(frozen=True)
+class LanguageListField:
+    """Language codes (ISO 639-1, or 639-3 for one without), separated by commas or spaces; stored sorted, each once."""
+
+    name: str
+    label: str
+    hint: str
+    kind = "text"
+
+    def parse(self, raw: str) -> str:
+        codes = sorted({code.lower() for code in re.split(r"[\s,;]+", raw) if code})
+        invalid = [code for code in codes if not re.fullmatch(r"[a-z]{2,3}", code)]
+        if invalid or not codes:
+            raise InvalidSetting(f"{self.label}: bitte Sprachcodes wie de, en, fr angeben, durch Kommas getrennt.")
+        return ",".join(codes)
+
+
 FORM_FIELDS = {
     field.name: field
     for field in (
@@ -100,6 +127,32 @@ FORM_FIELDS = {
             "Domains ohne Volltext",
             "Eine Domain pro Zeile, gilt auch für ihre Subdomains: deren Bedingungen verbieten Text- und Data-Mining, "
             "ihre Artikel bleiben ohne Volltext. Ein maschinenlesbarer Vorbehalt (TDMRep) gilt zusätzlich, für jede Domain.",
+        ),
+        LanguageListField(
+            "extraction_languages",
+            "Sprachen",
+            "Nur Artikel in diesen Sprachen gehen an das LLM, erkannt am Text, sonst wie die Quelle sie angibt. Codes wie de, en, fr.",
+        ),
+        NumberField(
+            "extraction_min_text_chars",
+            "Mindestlänge des Texts (Zeichen)",
+            "Kürzere Texte tragen selten ein Ereignis mit Belegen.",
+            0,
+            100000,
+        ),
+        NumberField(
+            "extraction_max_age_days",
+            "Höchstalter (Tage)",
+            "Ab der Veröffentlichung, sonst ab dem Abruf. Ältere Artikel extrahiert der Worker nicht mehr.",
+            1,
+            30,
+        ),
+        NumberField(
+            "extractions_per_hour",
+            "Extraktionen pro Stunde (höchstens)",
+            "Die neuesten zuerst; was nicht drankommt, wartet, bis es zu alt ist. 0 hält die Extraktion an.",
+            0,
+            1000,
         ),
         NumberField(
             "succeeded_jobs_retention_days", "Erledigte Jobs aufbewahren (Tage)", "Danach löscht der Worker sie.", 1, 3650
