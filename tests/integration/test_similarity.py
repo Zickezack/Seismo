@@ -119,7 +119,8 @@ def test_not_duplicate_keeps_the_pair_apart_for_good_and_fetches_a_skipped_full_
         [same_page] = article_repository.insert_new(connection, [{
             "source_id": source_id, "source_name": "Q", "source_url": "https://q.example/rss", "item_key": "p",
             "url": "https://a.example/o.html?utm_source=rss", "canonical_url": "https://a.example/o.html", "title": "Meldung p",
-            "published_at": NOW, "language": "en",
+            # Clearly after the original: NOW of test_ingestion and of test_normalization may be a second apart.
+            "published_at": NOW + timedelta(hours=1), "language": "en",
         }])
         duplicate_service.mark_new(connection, [same_page])
     normalize_all(database)
