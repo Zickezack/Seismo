@@ -13,8 +13,16 @@ from app.llm.ollama import LlmRejected, LlmUnreachable, OllamaClient
 from app.repositories.backup_repository import ToolInterrupted
 from app.repositories.job_repository import ClaimedJob
 from app.db.models import BACKFILL_PRIORITY
-from app.services import backfill_service, backup_service, extraction_service, ingestion_service, normalization_service
+from app.services import (
+    backfill_service,
+    backup_service,
+    event_service,
+    extraction_service,
+    ingestion_service,
+    normalization_service,
+)
 from app.services.job_service import (
+    ASSIGN_EVENT_JOB_KIND,
     BACKFILL_JOB_KIND,
     BACKUP_JOB_KIND,
     EXTRACT_EVENTS_JOB_KIND,
@@ -28,7 +36,7 @@ from app.sources.errors import HostBusy, SourceRejected
 TEST_JOB_SECONDS = 5
 
 
-# Makes the client for one extraction job; None while no Ollama is configured (OLLAMA_BASE_URL).
+# Makes the client for one LLM job; None while no Ollama is configured (OLLAMA_BASE_URL).
 LlmFactory = Callable[[], OllamaClient] | None
 # A job that lost Ollama comes back after this; the worker claims none while Ollama does not serve the model.
 LLM_WAIT = timedelta(seconds=60)
@@ -51,19 +59,26 @@ def build_handlers(
         # Reads only the raw text: no request, no slot.
         NORMALIZE_JOB_KIND: lambda job: normalization_service.normalize(engine, job.payload["article_id"]),
         EXTRACT_EVENTS_JOB_KIND: lambda job: run_extraction_job(engine, job, llm, limiter, stop_event),
+        ASSIGN_EVENT_JOB_KIND: lambda job: run_llm_job(
+            llm, lambda client: event_service.assign(engine, job.payload["candidate_id"], client, limiter)
+        ),
     }
 
 
 def run_extraction_job(
     engine: Engine, job: ClaimedJob, llm: LlmFactory, limiter: LlmCallLimiter, stop_event: threading.Event | None = None
 ) -> Effect | None:
+    return run_llm_job(llm, lambda client: extraction_service.extract(engine, job.payload["article_id"], client, limiter, stop_event))
+
+
+def run_llm_job(llm: LlmFactory, work: Callable[[OllamaClient], Effect | None]) -> Effect | None:
     """A request the server refuses fails at once. An unreachable server is waited for without counting the attempt
     (JobDeferred); a timeout or an unusable answer is retried with it."""
     if llm is None:
         raise PermanentJobError("Kein Ollama konfiguriert (OLLAMA_BASE_URL)")
     try:
         with llm() as client:
-            return extraction_service.extract(engine, job.payload["article_id"], client, limiter, stop_event)
+            return work(client)
     except LlmRejected as error:
         raise PermanentJobError(str(error)) from None
     except LlmUnreachable:

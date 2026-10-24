@@ -12,7 +12,7 @@
     <a class="brand" href="/">Seismo</a>
     {% if admin %}
     <nav class="site-nav" aria-label="Hauptnavigation">
-      {% for href, label, name in [("/", "Dashboard", "dashboard"), ("/sources", "Quellen", "sources"), ("/articles", "Artikel", "articles"), ("/jobs", "Jobs", "jobs"), ("/settings/platform", "Einstellungen", "settings")] %}
+      {% for href, label, name in [("/", "Dashboard", "dashboard"), ("/sources", "Quellen", "sources"), ("/articles", "Artikel", "articles"), ("/events", "Ereignisse", "events"), ("/jobs", "Jobs", "jobs"), ("/settings/platform", "Einstellungen", "settings")] %}
       <a href="{{ href }}" data-testid="nav-{{ name }}"{% if request.url.path == href or (href != "/" and request.url.path.startswith(href)) %} aria-current="page"{% endif %}>{{ label }}</a>
       {% endfor %}
     </nav>

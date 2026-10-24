@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Ereignis{% endblock %}
+{% block content %}
+{% set event = detail.event %}
+<h1 data-testid="event-title">{{ event.title }}</h1>
+
+<section class="card stack">
+  <div class="table-container">
+    <table class="table table-details" data-testid="event-meta">
+      <tbody>
+        <tr><th scope="row">Ereignis-ID</th><td data-testid="meta-id">{{ event.id }}</td></tr>
+        <tr><th scope="row">Typ</th><td>{{ event.type_label }}</td></tr>
+        <tr><th scope="row">Land</th><td>{{ event.country or "–" }}</td></tr>
+        <tr><th scope="row">Zuerst berichtet</th><td>{{ event.first_reported_at|local_time }}</td></tr>
+        <tr><th scope="row">Zuletzt berichtet</th><td>{{ event.last_reported_at|local_time }}</td></tr>
+        <tr><th scope="row">Berichte</th><td data-testid="meta-reports">{{ event.report_count }} aus {{ event.source_count }} {{ "Quelle" if event.source_count == 1 else "Quellen" }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">Name, Typ und Land stammen vom ersten Bericht. Die Ähnlichkeit vergleicht die englischen Wörter von Titel, Zusammenfassung, Ort und Akteuren (TF-IDF-Kosinus, 0 bis 1).</p>
+</section>
+
+<section class="stack" data-testid="reports-section">
+  <h2>Berichte ({{ detail.reports|length }})</h2>
+  <div class="table-container">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Veröffentlicht</th>
+          <th>Bericht</th>
+          <th>Quelle</th>
+          <th>Status</th>
+          <th>Zugeordnet durch</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for report in detail.reports %}
+        <tr data-testid="report-{{ report.id }}">
+          <td>{{ report.moment|local_time }}</td>
+          <td class="cell-title"><a href="/articles/{{ report.article_id }}#events" data-testid="report-article-{{ report.id }}">{{ report.title }}</a><span class="hint">{{ report.article_title or report.article_url }}</span></td>
+          <td class="cell-wrap">{{ report.source_display_name }}</td>
+          <td>{{ report.status_label }}</td>
+          <td data-testid="report-method-{{ report.id }}">{{ report.method_label }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -268,10 +268,32 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | inference_confidence | varchar(10) | no | | `high`, `medium`, `low`: how sure type, status and impacts follow from the article, as the model rates it (rule 7); check constraint; empty before schema 2. UI: Schlussfolgerung hoch, mittel, niedrig, unbekannt. |
   | actors | jsonb | yes | `[]` | `[{name, role, quote}]`: who acts or is directly concerned; an actor without a quote found in the text is left out (schema 2). Entities come with their epic. |
   | impacts | jsonb | yes | `[]` | `[{target, target_kind, direction, horizon, description, quote}]`: only effects the article itself names, an impact without a quote found left out (schema 2); `target_kind` company, sector, commodity, country, market, other; `direction` positive, negative, mixed, unclear; `horizon` days, weeks, months, years, unknown. Not a Wirkungsannahme of the platform. |
+  | event_id | bigint | no | | Its Ereignis; empty until assigned. Foreign key to `event`, `ON DELETE SET NULL`. Index. |
+  | assignment_method | varchar(10) | no | | How it came to its event: `new` (it founded it), `score` (similar enough by its words), `llm` (in between, the LLM judged it the same incident); check constraint. UI: Neues Ereignis, Ähnlichkeit, LLM. |
+  | assignment_score | double precision | no | | Its similarity to the event when assigned: TF-IDF cosine of the English words of title, summary, place and actors with the event's most similar report, 0 to 1, three decimals. Empty for one that founded its event. |
+  | assigned_at | timestamptz | no | | |
 
-- Relationships: belongs to one Extraktion and its Artikel; has one or more Aussagen.
-- Rules: stored only with at least one Aussage that has a Beleg. Assigned to an Ereignis with the epic Ereignisidentität und zeitliche Entwicklung.
+- Relationships: belongs to one Extraktion and its Artikel; has one or more Aussagen; belongs to one Ereignis once assigned.
+- Rules: stored only with at least one Aussage that has a Beleg. Assigned to an Ereignis by the job "Ereignis zuordnen" (see Ereignis).
 - Privacy: none (actors may name persons; once entities exist they follow rule 13)
+
+### Ereignis (`event`)
+- Store: SQL table `event`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | The stable event ID (rule 1). UI: Ereignis-ID. |
+  | title | text | yes | | Of the report that founded it, English; kept as later reports come in. |
+  | event_type | varchar(40) | yes | | Of the founding report; the values of Ereigniskandidat, check constraint. |
+  | country | varchar(2) | no | | Of the founding report; empty where it states none (rule 5). |
+  | first_reported_at | timestamptz | yes | | The publication (else fetch) time of its earliest report. |
+  | last_reported_at | timestamptz | yes | | The same of its latest report. Index. |
+  | created_at | timestamptz | yes | now() | |
+
+- Relationships: has one or more Ereigniskandidaten, its reports.
+- Rules: one incident with its direct continuation - an attack and its death toll, a quake and its aftershocks - never a topic (the admin's decision of 2026-10-24). The job "Ereignis zuordnen" (`event_service`) assigns every Ereigniskandidat without one, the earliest report first, so the first report founds the event: compared with the events reported from 7 days before to 7 days after it - from 0.5 similarity it joins the most similar, below 0.2 it founds a new one, in between the LLM chooses among the up to 3 most similar or none. Never an event that has a report of the same article. The assignment runs under an advisory lock, after comparing again: two workers never found two events for one incident. The list (UI: Ereignisse, `/events`) shows the 100 most recently reported; the event page (`/events/<id>`) its reports, the earliest first, each with its article and how it came to the event. Merging and splitting, with their audit trail (rule 3), come with story 3 of the epic.
+- Privacy: none
 
 ### Aussage (`statement`)
 - Store: SQL table `statement`

@@ -428,6 +428,7 @@ class CandidateView:
     location_quote: str | None = None
     time_quote: str | None = None
     inference_confidence: str | None = None  # None before schema 2
+    event_id: int | None = None  # None until assigned (event_service)
 
     @property
     def type_label(self) -> str:
@@ -530,7 +531,7 @@ def latest_for_article(engine: Engine, article_id: int) -> ExtractionView | None
             id=row.id, event_type=row.event_type, status=row.status, title=row.title, summary=row.summary,
             country=row.country, place=row.place, time_note=row.time_note, actors=row.actors, impacts=row.impacts,
             statements=by_candidate.get(row.id, []), location_quote=row.location_quote, time_quote=row.time_quote,
-            inference_confidence=row.inference_confidence,
+            inference_confidence=row.inference_confidence, event_id=row.event_id,
         )
         for row in candidates
     ]

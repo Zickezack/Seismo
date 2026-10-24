@@ -309,19 +309,35 @@ class FakeLlm:
         return self.served
 
 
-def test_extractions_are_queued_only_while_ollama_serves_the_model_and_a_change_is_logged(monkeypatch, caplog):
+def test_llm_jobs_are_queued_only_while_ollama_serves_the_model_and_a_change_is_logged(monkeypatch, caplog):
     queued = []
-    monkeypatch.setattr(worker.extraction_service, "enqueue_due", lambda engine: queued.append(engine) or [7])
+    monkeypatch.setattr(worker.extraction_service, "enqueue_due", lambda engine: queued.append(("extract", engine)) or [7])
+    monkeypatch.setattr(worker.event_service, "enqueue_due", lambda engine: queued.append(("assign", engine)) or [8, 9])
 
     with caplog.at_level(logging.INFO, logger=worker.__name__):
-        missing = worker._enqueue_due_extractions("engine", FakeLlm(served=False), None)
-        still_missing = worker._enqueue_due_extractions("engine", FakeLlm(served=False), missing)
-        served = worker._enqueue_due_extractions("engine", FakeLlm(served=True), still_missing)
+        missing = worker._enqueue_due_llm_jobs("engine", FakeLlm(served=False), None)
+        still_missing = worker._enqueue_due_llm_jobs("engine", FakeLlm(served=False), missing)
+        served = worker._enqueue_due_llm_jobs("engine", FakeLlm(served=True), still_missing)
 
-    assert (missing, still_missing, served, queued) == (False, False, True, ["engine"])
+    assert (missing, still_missing, served, queued) == (False, False, True, [("extract", "engine"), ("assign", "engine")])
     assert [record.getMessage() for record in caplog.records] == [
         "LLM model not available: Ollama unreachable or the model not pulled", "LLM model available", "Extraction jobs queued",
+        "Assignment jobs queued",
     ]
+
+
+def test_a_failing_extraction_check_does_not_keep_the_assignments_from_being_queued(monkeypatch, caplog):
+    def failing(_engine):
+        raise OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+    queued = []
+    monkeypatch.setattr(worker.extraction_service, "enqueue_due", failing)
+    monkeypatch.setattr(worker.event_service, "enqueue_due", lambda engine: queued.append(engine) or [])
+
+    with caplog.at_level(logging.WARNING, logger=worker.__name__):
+        assert worker._enqueue_due_llm_jobs("engine", FakeLlm(served=True), True)
+
+    assert queued == ["engine"] and "Extraction check failed: connection lost" in caplog.text
 
 
 def test_the_worker_s_stop_grace_period_outlasts_its_longest_job():

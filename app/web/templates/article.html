@@ -42,6 +42,7 @@
     {# A detail's quote as its tooltip: the evidence stays at hand without crowding the page. #}
     <p class="hint" data-testid="candidate-facts-{{ candidate.id }}">{{ candidate.type_label }} · {{ candidate.status_label }} · <span{% if candidate.location_quote %} title="{{ candidate.location_quote }}"{% endif %}>{{ candidate.where }}</span> · <span{% if candidate.time_quote %} title="{{ candidate.time_quote }}"{% endif %}>{{ candidate.when }}</span> · {{ candidate.inference_label }}</p>
     <p>{{ candidate.summary }}</p>
+    <p class="hint" data-testid="candidate-event-{{ candidate.id }}">{% if candidate.event_id %}Ereignis: <a href="/events/{{ candidate.event_id }}">#{{ candidate.event_id }}</a>{% else %}Noch keinem Ereignis zugeordnet.{% endif %}</p>
     {% if candidate.actors %}<p data-testid="candidate-actors-{{ candidate.id }}"><strong>Akteure:</strong> {% for actor in candidate.actors %}<span{% if actor.quote %} title="{{ actor.quote }}"{% endif %}>{{ actor.name }}{% if actor.role %} ({{ actor.role }}){% endif %}</span>{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
     {% if candidate.impact_lines %}
     <div><strong>Wirkungen laut Artikel:</strong>

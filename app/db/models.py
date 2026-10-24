@@ -126,6 +126,14 @@ class ValidationResult(StrEnum):
     INCOMPLETE = "incomplete"  # cut before its end
 
 
+class AssignmentMethod(StrEnum):
+    """How an event candidate came to its event (event_service)."""
+
+    NEW = "new"  # nothing alike: it founded the event
+    SCORE = "score"  # similar enough by its words
+    LLM = "llm"  # in between: the LLM judged it the same incident
+
+
 class BackfillStatus(StrEnum):
     RUNNING = "running"
     DONE = "done"
@@ -425,6 +433,26 @@ class Extraction(Base):
     )
 
 
+class Event(Base):
+    """One real-world event (UI term: Ereignis): an incident with its continuation, collecting every report of it. Its
+    id is the stable event ID (datamodel.md, rule 1)."""
+
+    __tablename__ = "event"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    # Of the report that founded it, in English: kept, so the event reads the same as reports come in.
+    title: Mapped[str] = mapped_column(Text)
+    event_type: Mapped[str] = mapped_column(String(40))
+    country: Mapped[str | None] = mapped_column(String(2))
+    # The publication (else fetch) times of its first and latest report; the latest decides whether a new report may
+    # still join it (event_service.OPEN_FOR).
+    first_reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (CheckConstraint(event_type.in_([s.value for s in EventType]), name="event_type"),)
+
+
 class EventCandidate(Base):
     """An event as one article reports it (UI term: Ereigniskandidat), before it is assigned to an event."""
 
@@ -450,10 +478,17 @@ class EventCandidate(Base):
     inference_confidence: Mapped[str | None] = mapped_column(String(10))
     actors: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     impacts: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    # Its event (event_service); empty until assigned.
+    event_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="SET NULL"), index=True)
+    assignment_method: Mapped[str | None] = mapped_column(String(10))
+    # Its similarity to the event when assigned (TF-IDF cosine); empty for one that founded its event.
+    assignment_score: Mapped[float | None] = mapped_column(Float)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         CheckConstraint(event_type.in_([s.value for s in EventType]), name="event_type"),
         CheckConstraint(status.in_([s.value for s in EventStatus]), name="status"),
+        CheckConstraint(assignment_method.in_([s.value for s in AssignmentMethod]), name="assignment_method"),
         CheckConstraint(inference_confidence.in_([s.value for s in ConfidenceLevel]), name="inference_confidence"),
     )
 

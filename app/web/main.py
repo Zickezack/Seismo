@@ -12,7 +12,7 @@ from app.logging_config import configure_logging
 from app.services.auth_service import session_signing_key
 from app.web.access import SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, NotAuthenticated, redirect_to_login, require_admin
 from app.web.middleware import log_requests
-from app.web.routes import articles, auth, dashboard, health, jobs, sources
+from app.web.routes import articles, auth, dashboard, events, health, jobs, sources
 from app.web.routes import settings as platform_settings
 from app.web.templating import STATIC_DIR
 
@@ -53,6 +53,7 @@ def create_app(settings: Settings, auth_settings: AuthSettings) -> FastAPI:
     app.include_router(dashboard.router, dependencies=[Depends(require_admin)])
     app.include_router(sources.router, dependencies=[Depends(require_admin)])
     app.include_router(articles.router, dependencies=[Depends(require_admin)])
+    app.include_router(events.router, dependencies=[Depends(require_admin)])
     app.include_router(jobs.router, dependencies=[Depends(require_admin)])
     app.include_router(platform_settings.router, dependencies=[Depends(require_admin)])
     return app

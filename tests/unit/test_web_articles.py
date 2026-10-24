@@ -320,6 +320,23 @@ def test_the_article_page_shows_the_event_candidates_with_their_statements_and_q
     statements = re.search(r'data-testid="candidate-statements-9">(.*?)</ul>', html, re.DOTALL).group(1)
     assert '<span class="status status-fact">Tatsache</span> The ECB held rates. <span class="hint">Extraktion hoch · Quelle mittel</span>' in statements
     assert '<blockquote class="quote">Die EZB hat die Leitzinsen unverändert gelassen.</blockquote>' in statements
+    assert text_of(html, "candidate-event-9") == "Noch keinem Ereignis zugeordnet."
+
+
+def test_an_assigned_candidate_links_to_its_event(client, page):
+    page["detail"] = detail(article(4))
+    candidate = extraction_service.CandidateView(
+        id=9, event_type="monetary_policy", status="update", title="ECB keeps rates unchanged", summary="The ECB held rates.",
+        country=None, place=None, time_note=None, actors=[], impacts=[], event_id=12,
+    )
+    page["extraction"] = extraction_service.ExtractionView(
+        model="qwen3.5:9b", schema_version="2", extracted_at=NOW, duration_ms=900, input_chars=600, truncated=False,
+        statements_dropped=0, candidates=[candidate],
+    )
+
+    html = client.get("/articles/4").text
+
+    assert re.search(r'data-testid="candidate-event-9">(.*?)</p>', html).group(1) == 'Ereignis: <a href="/events/12">#12</a>'
 
 
 def test_an_article_not_extracted_yet_says_so_and_one_without_events_too(client, page):

@@ -351,3 +351,23 @@ def test_extractions_stored_so_far_were_valid_and_an_invalid_run_goes_on_downgra
     with engine.connect() as connection:
         assert connection.execute(text("SELECT schema_version FROM extraction")).scalars().all() == ["1"]
     upgrade(engine)
+
+
+def test_candidates_stored_so_far_wait_for_their_event(engine):
+    upgrade(engine, "29544a69c420")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO article (source_name, source_url, item_key, url) VALUES ('Q', 'https://q.example/rss', 'a', 'https://q.example/a')"))
+        connection.execute(text("INSERT INTO extraction (article_id, model, schema_version, duration_ms, input_chars, truncated) SELECT id, 'm', '2', 1, 1, false FROM article"))
+        connection.execute(text(
+            "INSERT INTO event_candidate (extraction_id, article_id, position, event_type, status, title, summary) "
+            "SELECT x.id, x.article_id, 0, 'accident', 'start', 'T', 'S' FROM extraction x"
+        ))
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        row = connection.execute(text("SELECT event_id, assignment_method, assigned_at FROM event_candidate")).one()
+        events = connection.execute(text("SELECT count(*) FROM event")).scalar_one()
+    assert (tuple(row), events) == ((None, None, None), 0)
+    downgrade(engine, "29544a69c420")
+    upgrade(engine)

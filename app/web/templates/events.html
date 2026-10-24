@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Ereignisse{% endblock %}
+{% block content %}
+<h1>Ereignisse</h1>
+
+<section class="card stack">
+  <p class="hint" data-testid="event-count">
+    {% if overview.total > overview.events|length %}Angezeigt: die zuletzt berichteten {{ overview.events|length }} von {{ overview.total }} Ereignissen.{% else %}{{ overview.total }} {{ "Ereignis" if overview.total == 1 else "Ereignisse" }}.{% endif %}
+    {% if overview.waiting %}{{ overview.waiting }} {{ "Ereigniskandidat wartet" if overview.waiting == 1 else "Ereigniskandidaten warten" }} auf die Zuordnung.{% endif %}
+  </p>
+  <p class="hint">Ein Ereignis ist ein Vorfall mit seiner Fortsetzung, nicht ein Thema. Ein neuer Bericht kommt zu einem Ereignis, das bis sieben Tage davor oder danach berichtet wurde: bei ähnlichen Worten von selbst, im Zweifel entscheidet das LLM.</p>
+</section>
+
+{% if overview.events %}
+<div class="table-container">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Ereignis</th>
+        <th>Zuletzt berichtet</th>
+        <th>Zuerst berichtet</th>
+        <th>Typ</th>
+        <th>Land</th>
+        <th>Berichte</th>
+        <th>Quellen</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for event in overview.events %}
+      <tr data-testid="event-{{ event.id }}">
+        <td class="cell-title"><a href="/events/{{ event.id }}" data-testid="event-title-{{ event.id }}">{{ event.title }}</a></td>
+        <td>{{ event.last_reported_at|local_time }}</td>
+        <td>{{ event.first_reported_at|local_time }}</td>
+        <td class="cell-wrap">{{ event.type_label }}</td>
+        <td>{{ event.country or "–" }}</td>
+        <td data-testid="event-reports-{{ event.id }}">{{ event.report_count }}</td>
+        <td data-testid="event-sources-{{ event.id }}">{{ event.source_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p data-testid="no-events">Noch keine Ereignisse. Der Worker ordnet extrahierte Ereigniskandidaten einmal pro Minute zu, solange Ollama das Modell bereitstellt.</p>
+{% endif %}
+{% endblock %}
