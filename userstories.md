@@ -37,8 +37,8 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 11. As an analyst, I want the EIA Open Data API as a source of energy data releases (e.g. the weekly petroleum and natural gas storage reports), with its API key from the environment, since EIA's robots.txt excludes its RSS feeds.
 
 ### Epic: Normalisierung, Deduplizierung und Clustering
-1. As an analyst, I want article HTML cleaned to plain text and the metadata normalised (canonical URL, title, UTC timestamps, detected language), so all later steps work on consistent data.
 2. As an analyst, I want identical articles recognised by canonical URL and content hash, so repeated fetches never create duplicate articles.
+   - Note (2026-10-24): some hosts answer an error page with HTTP 200 and it is stored as the full text (the EC press corner: "temporarily unavailable" in 24 languages); such pages share a content hash and must not make different articles duplicates.
 3. As an analyst, I want near-duplicate and syndicated articles linked to each other without blindly merging different events, and wrong links correctable, so the same report from several outlets is recognised and every article stays traceable to its source.
 
 ### Epic: Strukturierte Ereignisextraktion
@@ -109,6 +109,9 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 7. As an admin, I want full-text fetches that a host's bot protection blocks (e.g. the BFS article pages on www.admin.ch answer HTTP 403 to the Seismo User-Agent) recognised per source and resolved through an allowed route - a contact in the User-Agent, an official API or feed with the full text, or the publisher's permission - never by disguising the fetcher, so such sources still deliver complete texts.
 8. As an analyst, I want every Quelle to carry its region - the continent it reports from, or worldwide - and the source list sortable and filterable by it, with the starter catalogue bringing the region of each source, so coverage stays balanced across continents and can be viewed per continent.
 9. As an admin, I want full texts fetched only where the publisher allows text and data mining - honouring a machine-readable reservation (TDMRep: the `tdm-reservation` header or meta tag, `/.well-known/tdmrep.json`) and a list of hosts whose terms forbid it, starting with those found for the starter catalogue (BBC, France 24, The Guardian, SRF, tagesschau, SCMP, Times of India, CNBC, FreightWaves, The Loadstar, OilPrice, Rigzone, Defense News) - and otherwise keeping only the article's metadata, so articles found through GDELT respect their publishers' terms as well.
+
+### Epic: Normalisierung, Deduplizierung und Clustering
+1. As an analyst, I want article HTML cleaned to plain text and the metadata normalised (canonical URL, title, UTC timestamps, detected language), so all later steps work on consistent data.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.

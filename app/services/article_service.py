@@ -35,6 +35,11 @@ class ArticleListItem:
     full_text_status: str
     full_text_error: str | None
     full_text_bytes: int | None  # size of the raw text while it is kept
+    detected_language: str | None
+    published_at_source: str | None
+    normalization_status: str
+    normalization_error: str | None
+    text_chars: int | None  # length of the cleaned text while the raw text is kept
 
     @property
     def full_text_label(self) -> str:
@@ -47,7 +52,23 @@ class ArticleListItem:
 
     @property
     def language_label(self) -> str:
-        return source_service.LANGUAGES.get(self.language, self.language) if self.language else "–"
+        """The language recognised in the text, else the one the source states."""
+        language = self.detected_language or self.language
+        return source_service.LANGUAGES.get(language, language) if language else "–"
+
+    @property
+    def published_note(self) -> str:
+        """Where the publication time came from, when not simply from the feed."""
+        return {"page": "laut Seite", "gdelt": "von GDELT gesehen"}.get(self.published_at_source or "", "")
+
+    @property
+    def text_note(self) -> str:
+        """What normalization made of the raw text."""
+        if self.normalization_status == "failed":
+            return "Text nicht lesbar"
+        if self.text_chars is None:
+            return ""
+        return f"Text {self.text_chars}\u00a0Zeichen" if self.text_chars else "kein Text erkannt"
 
 
 @dataclass(frozen=True)

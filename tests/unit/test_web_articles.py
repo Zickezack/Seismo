@@ -19,7 +19,8 @@ def article(article_id, **fields):
     values = dict(
         id=article_id, url=f"https://example.org/{article_id}.html", title=f"Meldung <{article_id}>", published_at=NOW,
         fetched_at=NOW, language="de", source_id=2, source_display_name="EZB", source_exists=True,
-        full_text_status="stored", full_text_error=None, full_text_bytes=48_000,
+        full_text_status="stored", full_text_error=None, full_text_bytes=48_000, detected_language=None,
+        published_at_source="feed", normalization_status="pending", normalization_error=None, text_chars=None,
     )
     return ArticleListItem(**values | fields)
 
@@ -116,3 +117,30 @@ def test_full_text_status_size_and_reason(client, overview):
     assert '<span class="status status-disallowed">Gesperrt</span>' in html
     assert text_of(html, "full-text-error-10") == "Durch robots.txt gesperrt"
     assert tag_of(html, "full-text-error-11") is None
+
+
+def test_list_shows_the_detected_language_where_the_time_came_from_and_the_text_length(client, monkeypatch):
+    overview = ArticleOverview(
+        source_id=None,
+        sources=[],
+        articles=[
+            article(1, language="en", detected_language="de", published_at_source="page", normalization_status="done", text_chars=4512),
+            article(2, published_at_source="gdelt", normalization_status="done", text_chars=0),
+            article(3, normalization_status="failed", normalization_error="PdfReadError: EOF marker not found"),
+            article(4),
+        ],
+        matching=4,
+    )
+    monkeypatch.setattr(article_service, "overview", lambda _engine, _source: overview)
+
+    html = client.get("/articles").text
+
+    assert '<td>Deutsch</td>' in re.search(r'data-testid="article-1".*?</tr>', html, re.DOTALL).group(0)
+    assert text_of(html, "published-note-1") == "laut Seite"
+    assert text_of(html, "published-note-2") == "von GDELT gesehen"
+    assert tag_of(html, "published-note-4") is None
+    assert text_of(html, "text-note-1") == "Text 4512\u00a0Zeichen"
+    assert text_of(html, "text-note-2") == "kein Text erkannt"
+    assert text_of(html, "text-note-3") == "Text nicht lesbar"
+    assert 'title="PdfReadError: EOF marker not found"' in tag_of(html, "text-note-3")
+    assert tag_of(html, "text-note-4") is None

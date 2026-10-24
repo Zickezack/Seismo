@@ -39,12 +39,14 @@ FETCH_ARTICLE_JOB_KIND = "fetch_article"
 # hours (userstories.md, Quellenadapter und Ingestion, story 4). A deferral to a request slot counts none.
 FETCH_ARTICLE_MAX_ATTEMPTS = 31
 BACKFILL_JOB_KIND = "backfill"
+NORMALIZE_JOB_KIND = "normalize_article"
 KIND_LABELS = {
     TEST_JOB_KIND: "Testjob",
     BACKUP_JOB_KIND: "Datenbank-Backup",
     FETCH_SOURCE_JOB_KIND: "Quelle abrufen",
     FETCH_ARTICLE_JOB_KIND: "Volltext abrufen",
     BACKFILL_JOB_KIND: "Backfill abrufen",
+    NORMALIZE_JOB_KIND: "Artikel normalisieren",
 }
 
 

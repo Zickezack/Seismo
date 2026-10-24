@@ -21,6 +21,7 @@ from sqlalchemy import Connection, Engine
 from app.db.models import BACKFILL_PRIORITY, LIVE_PRIORITY, FullTextStatus
 from app.repositories import article_repository, raw_text_repository, source_repository
 from app.services import job_service, platform_settings_service, source_service, tdm_policy
+from app.services.urls import clean_url
 from app.services.fetch_policy_service import PoliteHttp
 from app.services.bulk import BulkResult
 from app.services.source_service import Source
@@ -35,6 +36,9 @@ logger = logging.getLogger(__name__)
 MAX_KEY_BYTES = 1000
 MAX_URL_LENGTH = 2000
 MAX_TITLE_LENGTH = 1000
+# A publication time further ahead is none - a feed's or a page's (normalization_service): NHC's feed dated an item
+# a day and a half ahead.
+MAX_PUBLICATION_AHEAD = timedelta(days=1)
 # What the raw-data layer keeps: what the normalisation can turn into text.
 FULL_TEXT_TYPES = {"text/html", "application/xhtml+xml", "text/plain", "application/pdf"}
 FULL_TEXT_ACCEPT = "text/html, application/xhtml+xml;q=0.9, application/pdf;q=0.8, text/plain;q=0.7, */*;q=0.1"
@@ -119,7 +123,8 @@ def fetch_source(
     except Exception as error:
         _record_failure(engine, source_id, error)
         raise
-    rows = article_rows(source, items, datetime.now(UTC) - timedelta(days=settings.article_max_age_days))
+    cutoff = datetime.now(UTC) - timedelta(days=settings.article_max_age_days)
+    rows = article_rows(source, items, cutoff, adapter.published_at_source)
 
     def store(connection: Connection) -> None:
         # Deleted meanwhile: its articles would point to nothing.
@@ -191,17 +196,19 @@ def fetch_full_text(
     if not article.source_active:
         reason = "Quelle gelöscht" if article.source_active is None else "Quelle inaktiv"
         return _settle(article_id, FullTextStatus.SKIPPED, reason)
+    # Without tracking parameters: some hosts disallow those links (Al Jazeera's ?traffic_source=).
+    url = article.canonical_url or clean_url(article.url)
     settings = platform_settings_service.current(engine)
-    if listed := tdm_policy.blocked_domain(article.url, settings.blocked_domains):
+    if listed := tdm_policy.blocked_domain(url, settings.blocked_domains):
         return _settle(article_id, FullTextStatus.RESERVED, _listed(listed))
     min_interval = request_interval(settings.domain_min_interval_seconds, article.source_min_request_interval_seconds)
     try:
         with HttpClient(contact) as http:
             polite = PoliteHttp(engine, http, min_interval, reserved_slot, backfill=backfill)
-            in_file = tdm_policy.file_layer(polite.tdm_rules(article.url), article.url)
+            in_file = tdm_policy.file_layer(polite.tdm_rules(url), url)
             if in_file.reserved:
                 return _settle(article_id, FullTextStatus.RESERVED, tdm_policy.decide(in_file).reason)
-            response = polite.get(article.url, FULL_TEXT_ACCEPT)
+            response = polite.get(url, FULL_TEXT_ACCEPT)
     except FetchDisallowed as error:
         return _settle(article_id, FullTextStatus.DISALLOWED, str(error))
     except AccessDenied as error:
@@ -241,16 +248,21 @@ def _settle(article_id: int, status: FullTextStatus, error: str) -> Callable[[Co
     return lambda connection: article_repository.finish_full_text(connection, article_id, status, error)
 
 
-def article_rows(source: Source, items: Iterable[FetchedItem], cutoff: datetime) -> list[dict]:
-    """The items as article rows, each key once.
+def article_rows(
+    source: Source, items: Iterable[FetchedItem], cutoff: datetime, published_at_source: str = "feed"
+) -> list[dict]:
+    """The items as article rows, each key once, with the link's canonical form and where their time came from.
 
     Items published before `cutoff` are left to the backfill (Plattform-Einstellung "Höchstalter neuer
-    Artikel"); an item without a date always comes, since its age is unknown. Items without a usable web
-    link are dropped. Source name and URL are copied, so an article keeps them after its source is deleted.
+    Artikel"); an item without a date always comes, since its age is unknown, and so does one dated further
+    ahead than MAX_PUBLICATION_AHEAD, as without a date. Items without a usable web link are dropped. Source
+    name and URL are copied, so an article keeps them after its source is deleted.
     """
+    latest = datetime.now(UTC) + MAX_PUBLICATION_AHEAD
     rows = {}
     for item in items:
-        if item.published_at is not None and item.published_at < cutoff:
+        published_at = item.published_at if item.published_at and item.published_at <= latest else None
+        if published_at is not None and published_at < cutoff:
             continue
         url = item.url.strip()
         if len(url) > MAX_URL_LENGTH or urlsplit(url).scheme not in ("http", "https"):
@@ -264,8 +276,10 @@ def article_rows(source: Source, items: Iterable[FetchedItem], cutoff: datetime)
                 "source_url": source.url,
                 "item_key": key,
                 "url": url,
+                "canonical_url": clean_url(url),
                 "title": item.title[:MAX_TITLE_LENGTH] if item.title else None,
-                "published_at": item.published_at,
+                "published_at": published_at,
+                "published_at_source": published_at_source if published_at else None,
                 "language": item.language or source.language,
             },
         )

@@ -52,6 +52,9 @@ class GdeltAdapter:
     default_url = API_URL
     page_size = MAX_RECORDS
     backfill_reach = BACKFILL_REACH
+    published_at_source = "gdelt"  # seendate (seen_at)
+    # Its titles come tokenized, a blank around every punctuation mark: "7 : 32 a . m . EDT".
+    page_title_preferred = True
 
     def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
         return self._articles(source, http, request_url(source, datetime.now(UTC)))

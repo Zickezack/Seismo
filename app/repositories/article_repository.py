@@ -27,6 +27,7 @@ def get_for_full_text(connection: Connection, article_id: int) -> Row | None:
         select(
             Article.id,
             Article.url,
+            Article.canonical_url,
             Article.full_text_status,
             Source.is_active.label("source_active"),
             Source.min_request_interval_seconds.label("source_min_request_interval_seconds"),
@@ -55,6 +56,7 @@ def latest(connection: Connection, source_id: int | None, limit: int) -> Sequenc
             func.coalesce(Source.name, Article.source_name).label("source_display_name"),
             (Source.id.is_not(None)).label("source_exists"),
             func.octet_length(RawText.content).label("full_text_bytes"),
+            func.length(RawText.plain_text).label("text_chars"),
         )
         .outerjoin(Source, Source.id == Article.source_id)
         .outerjoin(RawText, RawText.article_id == Article.id)

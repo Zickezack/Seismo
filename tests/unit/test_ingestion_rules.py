@@ -1,6 +1,6 @@
 """Which fetched items become articles, and in what shape (ingestion_service.article_rows); the minimum interval
 of a source's requests."""
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -41,10 +41,27 @@ def test_row_copies_source_name_and_url_and_falls_back_to_the_source_language():
         "source_url": "https://www.ecb.europa.eu/rss/press.html",
         "item_key": "a",
         "url": "https://www.ecb.europa.eu/press/a.html",
+        "canonical_url": "https://www.ecb.europa.eu/press/a.html",
         "title": "Titel a",
         "published_at": NOW,
+        "published_at_source": "feed",
         "language": "en",
     }
+
+
+def test_row_keeps_the_link_and_fetches_it_without_tracking_parameters():
+    [row] = rows(item("a", url="https://www.ecb.europa.eu/press/a.html?utm_source=rss#top"))
+
+    assert row["url"] == "https://www.ecb.europa.eu/press/a.html?utm_source=rss#top"
+    assert row["canonical_url"] == "https://www.ecb.europa.eu/press/a.html"
+
+
+def test_where_the_time_came_from_is_the_adapter_s_and_none_without_a_time():
+    [gdelt] = ingestion_service.article_rows(SOURCE, [item("a")], CUTOFF, "gdelt")
+    [undated] = rows(item("b", published_at=None))
+
+    assert gdelt["published_at_source"] == "gdelt"
+    assert (undated["published_at"], undated["published_at_source"]) == (None, None)
 
 
 def test_language_of_the_item_wins_over_the_source():
@@ -57,6 +74,15 @@ def test_items_older_than_the_cutoff_are_left_to_the_backfill_undated_ones_alway
     kept = rows(item("old", published_at=datetime(2026, 10, 16, 11, 59, tzinfo=UTC)), item("edge", published_at=CUTOFF), item("undated", published_at=None))
 
     assert [row["item_key"] for row in kept] == ["edge", "undated"]
+
+
+def test_a_date_more_than_a_day_ahead_is_none():
+    soon, later = datetime.now(UTC) + timedelta(hours=20), datetime.now(UTC) + timedelta(days=1, hours=1)
+
+    kept, ahead = rows(item("kept", published_at=soon), item("ahead", published_at=later))
+
+    assert (kept["published_at"], kept["published_at_source"]) == (soon, "feed")
+    assert (ahead["published_at"], ahead["published_at_source"]) == (None, None)
 
 
 def test_items_without_usable_link_are_dropped():

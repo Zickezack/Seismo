@@ -181,7 +181,7 @@ def fetch_page(
         if final_attempt:
             return _end(backfill_id, BackfillStatus.FAILED, str(error))
         raise
-    rows = ingestion_service.article_rows(source, items, backfill.period_start)
+    rows = ingestion_service.article_rows(source, items, backfill.period_start, adapter.published_at_source)
     rows = [row | {"backfill_id": backfill_id} for row in rows]
     cursor, skipped = next_cursor(adapter.page_size, items, backfill.cursor, backfill.period_start)
 

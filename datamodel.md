@@ -158,16 +158,22 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | source_url | varchar(2000) | yes | | Feed URL of the source at fetch time. |
   | item_key | varchar(1000) | yes | | The item's id in its source (RSS guid, Atom id), else its link; above 1000 bytes `sha256:<hex>` of it. Unique with `source_id` (`uq_article_source_id`), so a repeated fetch stores nothing twice. |
   | url | varchar(2000) | yes | | Link of the article, `http` or `https`. |
-  | title | text | no | | As the source states it, at most 1000 characters. |
-  | published_at | timestamptz | no | | Publication time as the source states it, in UTC (RSS pubDate, Atom published, else the item's only date: RSS 1.0 dc:date, Atom updated); empty when it states none (rules 4 and 5). GDELT states none: when GDELT first saw the article (seendate, 15-minute steps), the admin's decision of 2026-10-23. UI: Veröffentlicht. |
+  | title | text | no | | As the source states it, at most 1000 characters; after normalization the page's own (og:title, else `<title>`) where the source states none or is GDELT, whose titles come tokenized (`7 : 32 a . m . EDT`). |
+  | published_at | timestamptz | no | | Publication time as the source states it, in UTC (RSS pubDate, Atom published, else the item's only date: RSS 1.0 dc:date, Atom updated); empty when it states none (rules 4 and 5). GDELT states none: when GDELT first saw the article (seendate, 15-minute steps), the admin's decision of 2026-10-23. A time more than a day ahead counts as none, the feed's and the page's alike. UI: Veröffentlicht. |
   | fetched_at | timestamptz | yes | now() | When it was stored. UI: Abgerufen. Index `ix_article_fetched_at`. |
   | language | varchar(10) | no | | ISO 639 code as the source states it for the item or the feed (GDELT: its English language name, translated), else the language of the Quelle; empty if neither has one. |
   | full_text_status | varchar(20) | yes | `pending` | `pending`, `stored`, `disallowed` (robots.txt), `unsupported` (content type), `failed`, `blocked` (the host refused it, HTTP 401 or 403, often a bot protection), `reserved` (the publisher reserves text and data mining: its domain is on the list, or TDMRep says so - nothing of the page is kept), `skipped` (source inactive or deleted, or stored before full texts existed); check constraint. Set once, from `pending`; only the admin's "Blockierte Volltexte abrufen" puts `blocked` back to `pending`. UI: Volltext - Ausstehend, Gespeichert, Gesperrt, Nicht unterstützt, Fehlgeschlagen, Blockiert, Vorbehalten, Übersprungen. |
   | full_text_error | text | no | | Why the full text is not stored, e.g. `HTTP 404`; when blocked, also whether a contact was in the User-Agent. Shown to the admin, never logged. |
   | backfill_id | bigint | no | | The Backfill that found it, foreign key `ON DELETE SET NULL`; empty for an article of the live fetch, also when a backfill finds it again. |
+  | canonical_url | varchar(2000) | no | | The link without tracking parameters (`utm_*`, `fbclid`, `traffic_source`, ...), fragment and default port, scheme and host in lower case (`app/services/urls.py`); after normalization the page's own `<link rel="canonical">` in that form. The full text is fetched from it; `url` keeps the link as the source gave it. |
+  | published_at_source | varchar(10) | no | | Where `published_at` came from: `feed`, `gdelt` (seendate) or `page` (the page's own full timestamp with time zone: `article:published_time`, JSON-LD `datePublished`); check constraint. Empty without a time. |
+  | detected_language | varchar(10) | no | | ISO 639-1 code recognised in the cleaned text (py3langid, among GDELT's languages), only from 200 characters on and at confidence 0.6; else empty (rule 5). UI: Sprache shows it, else `language`. |
+  | normalization_status | varchar(20) | yes | `pending` | `pending`, `done`, `failed` (a raw text no reader understands); check constraint. Partial index `ix_article_normalization_pending`. UI: Volltext - "Text n Zeichen", "kein Text erkannt", "Text nicht lesbar". |
+  | normalization_error | text | no | | Why the text could not be read. Shown to the admin, never logged. |
+  | normalized_at | timestamptz | no | | |
 
 - Relationships: belongs to a Quelle while it exists; has at most one Rohtext.
-- Rules: metadata is kept permanently. A source adapter (`app/sources/`) returns items in one shape; only items within the maximum age (Plattform-Einstellungen) and with a web link become articles.
+- Rules: metadata is kept permanently. A source adapter (`app/sources/`) returns items in one shape; only items within the maximum age (Plattform-Einstellungen) and with a web link become articles. Once its full text is settled, the worker normalizes an article (job "Artikel normalisieren", `normalization_service`): canonical URL, the page's title where the source states none or only GDELT's tokenized one, the page's publication time where the feed states none or only GDELT's seendate, detected language, cleaned text. A page without a main text (an app shell, an error page) gives none of its metadata: it may concern another page - the EC press corner's shell names its home page as canonical.
 - Privacy: none
 
 ### Rohtext (`raw_text`)
@@ -181,6 +187,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | content_type | varchar(200) | no | | The Content-Type header, with its charset. |
   | url | varchar(2000) | yes | | Where it was fetched from, after redirects. |
   | fetched_at | timestamptz | yes | now() | |
+  | plain_text | text | no | | The main text, cleaned: without navigation, ads and comments (trafilatura for HTML, pypdf for PDF); empty when none was found. Full text as well: it goes with the raw text (rule 8). |
 
 - Relationships: belongs to one Artikel.
 - Rules: the temporary raw-data layer: deleted after its source's retention period once processing has succeeded (rule 8, epic Verdichtung und Daten-Lifecycle); nothing deletes it yet. The normalisation turns it into plain text.

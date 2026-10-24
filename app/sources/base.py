@@ -40,6 +40,8 @@ class SourceAdapter(Protocol):
     default_url: str | None  # the URL a Quelle of this type gets when the admin leaves it empty
     page_size: int | None  # the most items one request returns; None: one request returns all there is (a feed)
     backfill_reach: timedelta | None  # how far back a backfill can go; None: as far as the source holds items
+    published_at_source: str  # what its items' published_at is: "feed" (as stated) or "gdelt" (when GDELT saw it)
+    page_title_preferred: bool  # the page's own title replaces its items' (normalization_service)
 
     def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
         """The source's current items. Raises SourceRejected or SourceUnavailable (app/sources/errors.py)."""

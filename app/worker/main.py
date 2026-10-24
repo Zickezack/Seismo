@@ -3,8 +3,9 @@
 Every tick checks readiness and writes a heartbeat file that the Docker health check reads. While a job
 runs, every lease renewal writes it as well, so a long job never makes the worker look dead. Once an
 hour the worker deletes finished jobs whose retention period has passed; once a minute it queues a
-backup job if a backup is due (app/services/backup_service.py) and a fetch job for every source whose
-next fetch is due (app/services/ingestion_service.py).
+backup job if a backup is due (app/services/backup_service.py), a fetch job for every source whose
+next fetch is due (app/services/ingestion_service.py) and a normalization for every article whose full
+text is settled (app/services/normalization_service.py).
 """
 import logging
 import os
@@ -26,7 +27,7 @@ from app.jobs.handlers import build_handlers
 from app.jobs.runner import Handler, run_next_job
 from app.llm.limiter import LlmCallLimiter
 from app.logging_config import configure_logging
-from app.services import backup_service, ingestion_service
+from app.services import backup_service, ingestion_service, normalization_service
 from app.services.health_service import HealthReport, check_readiness
 from app.db.models import JobStatus
 from app.services.job_service import LEASE_SECONDS, purge_finished_jobs
@@ -41,6 +42,8 @@ PURGE_INTERVAL_SECONDS = 60 * 60
 BACKUP_CHECK_INTERVAL_SECONDS = 60
 # A source is fetched at most this late after its interval; the smallest interval is 5 minutes.
 FETCH_CHECK_INTERVAL_SECONDS = 60
+# An article is normalized at most this late after its full text is settled.
+NORMALIZE_CHECK_INTERVAL_SECONDS = 60
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:
@@ -64,7 +67,7 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
         extra={"poll_interval_seconds": settings.worker_poll_interval_seconds, "job_kinds": sorted(handlers), "owner": owner},
     )
     was_ready = None
-    next_purge = next_backup_check = next_fetch_check = time.monotonic()
+    next_purge = next_backup_check = next_fetch_check = next_normalize_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -81,6 +84,9 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and time.monotonic() >= next_fetch_check:
                 next_fetch_check = time.monotonic() + FETCH_CHECK_INTERVAL_SECONDS
                 _enqueue_due_fetches(engine)
+            if report.ready and time.monotonic() >= next_normalize_check:
+                next_normalize_check = time.monotonic() + NORMALIZE_CHECK_INTERVAL_SECONDS
+                _enqueue_due_normalizations(engine)
             # After a job, take the next one at once; wait only while the queue is empty.
             if report.ready and _run_next_job(engine, handlers, owner, renew_interval, heartbeat_file):
                 continue
@@ -136,6 +142,17 @@ def _enqueue_due_fetches(engine: Engine) -> None:
         return
     if job_ids:
         logger.info("Fetch jobs queued", extra={"jobs": len(job_ids)})
+
+
+def _enqueue_due_normalizations(engine: Engine) -> None:
+    try:
+        job_ids = normalization_service.enqueue_due(engine)
+    except SQLAlchemyError as error:
+        # Checked again at the next interval; the articles wait meanwhile.
+        logger.warning("Normalization check failed: %s", getattr(error, "orig", None) or error)
+        return
+    if job_ids:
+        logger.info("Normalization jobs queued", extra={"jobs": len(job_ids)})
 
 
 def worker_identity() -> str:

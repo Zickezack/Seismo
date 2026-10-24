@@ -11,12 +11,13 @@ from app.llm.limiter import LlmCallLimiter
 from app.repositories.backup_repository import ToolInterrupted
 from app.repositories.job_repository import ClaimedJob
 from app.db.models import BACKFILL_PRIORITY
-from app.services import backfill_service, backup_service, ingestion_service
+from app.services import backfill_service, backup_service, ingestion_service, normalization_service
 from app.services.job_service import (
     BACKFILL_JOB_KIND,
     BACKUP_JOB_KIND,
     FETCH_ARTICLE_JOB_KIND,
     FETCH_SOURCE_JOB_KIND,
+    NORMALIZE_JOB_KIND,
     TEST_JOB_KIND,
 )
 from app.sources.errors import HostBusy, SourceRejected
@@ -33,6 +34,8 @@ def build_handlers(
         FETCH_SOURCE_JOB_KIND: lambda job: run_fetch_job(engine, job, fetch_contact),
         FETCH_ARTICLE_JOB_KIND: lambda job: run_full_text_job(engine, job, fetch_contact),
         BACKFILL_JOB_KIND: lambda job: run_backfill_job(engine, job, fetch_contact),
+        # Reads only the raw text: no request, no slot.
+        NORMALIZE_JOB_KIND: lambda job: normalization_service.normalize(engine, job.payload["article_id"]),
     }
 
 

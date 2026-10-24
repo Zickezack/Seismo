@@ -36,6 +36,7 @@ class FakeAdapter:
     label = "RSS"
     needs_query = False
     default_url = None
+    published_at_source = "feed"
 
     def __init__(self):
         self.items, self.error, self.fetches = [], None, 0
@@ -869,3 +870,19 @@ def test_a_redirect_to_a_listed_domain_is_not_kept(database, adapter, web):
     assert full_text(database, ids["a"])[0] == "reserved"
     assert "theguardian.com" in full_text(database, ids["a"])[1]
     assert raw_texts(database) == []
+
+
+def test_the_full_text_is_fetched_without_tracking_parameters(database, adapter, web):
+    # Al Jazeera's rule: links that carry its RSS tracking parameter are disallowed, the article itself is not.
+    web.robots["a.bank.example"] = (200, "User-agent: *\nDisallow: /*?traffic_source=\n")
+    ids = fetch_articles(database, adapter, item("a", url="https://a.bank.example/a.html?traffic_source=rss"))
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == ("stored", None)
+    assert "https://a.bank.example/a.html" in web.requests
+    assert not any("traffic_source" in url for url in web.requests)
+    [article] = articles(database)
+    assert (article.url, article.canonical_url) == (
+        "https://a.bank.example/a.html?traffic_source=rss", "https://a.bank.example/a.html"
+    )

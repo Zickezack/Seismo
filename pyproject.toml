@@ -23,6 +23,12 @@ dependencies = [
     "feedparser>=6.0.14,<7",
     # HTTP client of the source adapters (app/sources/http.py); Starlette's TestClient uses it as well.
     "httpx2>=2.15,<3",
+    # The main text of an article page, without navigation, ads and comments (app/services/normalization_service.py).
+    "trafilatura>=2.3,<3",
+    # The language of an article's text, with a confidence, so an unsure guess stays unknown (datamodel.md, rule 5).
+    "py3langid>=0.4,<0.5",
+    # The text of a full text served as PDF.
+    "pypdf>=6.21,<7",
 ]
 
 [project.optional-dependencies]

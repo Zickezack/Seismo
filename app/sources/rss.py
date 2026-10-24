@@ -20,6 +20,8 @@ class RssAdapter:
     default_url = None
     page_size = None
     backfill_reach = None
+    published_at_source = "feed"
+    page_title_preferred = False
 
     def fetch(self, source: SourceSettings, http: Http) -> list[FetchedItem]:
         response = http.get(source.url, ACCEPT)

@@ -43,6 +43,18 @@ class FullTextStatus(StrEnum):
     SKIPPED = "skipped"  # source inactive or deleted, or fetched before full texts existed
 
 
+class NormalizationStatus(StrEnum):
+    PENDING = "pending"
+    DONE = "done"
+    FAILED = "failed"  # the text could not be read; normalization_error says why
+
+
+class PublishedAtSource(StrEnum):
+    FEED = "feed"  # as the feed states it
+    GDELT = "gdelt"  # when GDELT first saw the article (seendate)
+    PAGE = "page"  # the page's own full timestamp (article:published_time, JSON-LD datePublished)
+
+
 class BackfillStatus(StrEnum):
     RUNNING = "running"
     DONE = "done"
@@ -239,11 +251,28 @@ class Article(Base):
     full_text_error: Mapped[str | None] = mapped_column(Text)
     # The backfill that found it; empty for live articles and once the backfill record is gone.
     backfill_id: Mapped[int | None] = mapped_column(ForeignKey("backfill.id", ondelete="SET NULL"), index=True)
+    # The link without tracking parameters, then the page's own canonical link; the full text is fetched from it.
+    canonical_url: Mapped[str | None] = mapped_column(String(2000))
+    published_at_source: Mapped[str | None] = mapped_column(String(10))
+    # Recognised in the text when sure enough; `language` stays as the source states it.
+    detected_language: Mapped[str | None] = mapped_column(String(10))
+    normalization_status: Mapped[str] = mapped_column(String(20), server_default=NormalizationStatus.PENDING.value)
+    # Shown to the admin, never logged (datamodel.md, rule 13).
+    normalization_error: Mapped[str | None] = mapped_column(Text)
+    normalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         UniqueConstraint(source_id, item_key),
         Index("ix_article_fetched_at", fetched_at),
         CheckConstraint(full_text_status.in_([s.value for s in FullTextStatus]), name="full_text_status"),
+        CheckConstraint(normalization_status.in_([s.value for s in NormalizationStatus]), name="normalization_status"),
+        CheckConstraint(published_at_source.in_([s.value for s in PublishedAtSource]), name="published_at_source"),
+        # The worker's sweep for articles to normalize (normalization_service.enqueue_due).
+        Index(
+            "ix_article_normalization_pending",
+            "id",
+            postgresql_where=normalization_status == NormalizationStatus.PENDING.value,
+        ),
     )
 
 
@@ -258,6 +287,8 @@ class RawText(Base):
     content_type: Mapped[str | None] = mapped_column(String(200))
     url: Mapped[str] = mapped_column(String(2000))  # after redirects
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The main text, cleaned (normalization_service): full text as well, so it shares the raw text's lifecycle.
+    plain_text: Mapped[str | None] = mapped_column(Text)
 
 
 class FetchHost(Base):

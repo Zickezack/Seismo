@@ -210,3 +210,27 @@ def test_existing_sources_start_without_a_region(engine):
 
     with engine.connect() as connection:
         assert connection.execute(text("SELECT region FROM source")).scalar_one() is None
+
+
+def test_articles_stored_so_far_wait_for_normalization_and_know_where_their_time_came_from(engine):
+    upgrade(engine, "d2bbb146df5d")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO source (name, adapter_type, url) VALUES ('EZB', 'rss', 'https://ecb.example/rss')"))
+        connection.execute(text("INSERT INTO source (name, adapter_type, url, query) VALUES ('GDELT', 'gdelt', 'https://api.example', 'x')"))
+        connection.execute(
+            text(
+                "INSERT INTO article (source_id, source_name, source_url, item_key, url, published_at) VALUES "
+                "((SELECT id FROM source WHERE name = 'EZB'), 'EZB', 'https://ecb.example/rss', 'a', 'https://e.example/a', now()), "
+                "((SELECT id FROM source WHERE name = 'GDELT'), 'GDELT', 'https://api.example', 'b', 'https://g.example/b', now()), "
+                "(NULL, 'Weg', 'https://gone.example/rss', 'c', 'https://gone.example/c', now()), "
+                "(NULL, 'Weg', 'https://gone.example/rss', 'd', 'https://gone.example/d', NULL)"
+            )
+        )
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        rows = dict(connection.execute(text("SELECT item_key, published_at_source FROM article")).all())
+        statuses = set(connection.execute(text("SELECT normalization_status FROM article")).scalars())
+    assert rows == {"a": "feed", "b": "gdelt", "c": "feed", "d": None}
+    assert statuses == {"pending"}
