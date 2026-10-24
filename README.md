@@ -165,6 +165,18 @@ python -m alembic upgrade head       # migrate the development database
 Browser checks (skill `verify`) use Playwright with headless Chromium; every dev container build
 installs it (`python -m playwright install --with-deps chromium`). Every build also installs `pg_dump`
 and `pg_restore` for the backup tests (`scripts/install-postgres-client.sh`); without them those tests fail.
+The dev stack has an Ollama of its own for the event extraction, on the host's NVIDIA GPU (Docker
+Desktop with GPU support in WSL2). It is not started with the dev container; once, from a terminal on the
+host in the repository folder:
+
+```sh
+docker compose -f docker-compose.yml -f .devcontainer/docker-compose.dev.yml up -d ollama
+docker compose -f docker-compose.yml -f .devcontainer/docker-compose.dev.yml exec ollama ollama pull qwen3.5:9b
+```
+
+The models stay in the volume `ollama-models`. `api`, `worker` and the dev container reach it as
+`http://ollama:11434`. A larger model for development: pull it and set `OLLAMA_MODEL` in `.env`.
+
 The `worker` of the dev stack makes backups only once its image is rebuilt (command above).
 
 New migration: `python -m alembic revision --autogenerate -m "<what changes>"`, then read and

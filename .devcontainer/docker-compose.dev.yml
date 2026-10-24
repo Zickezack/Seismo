@@ -25,6 +25,8 @@ x-after-migrate: &after-migrate
 x-watch-environment: &watch-environment
   # File events do not cross a bind mount from Windows; polling sees every change.
   WATCHFILES_FORCE_POLLING: "true"
+  # The dev stack's own Ollama (service ollama below); live names the LAN server in .env instead.
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
 
 services:
   dev:
@@ -51,6 +53,8 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       # Makes Claude Code keep .claude.json (account, project trust) inside the volume as well.
       CLAUDE_CONFIG_DIR: /home/vscode/.claude
+      # For extraction checks from the terminal: the same Ollama as the worker's.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
     depends_on:
       db:
         condition: service_healthy
@@ -70,5 +74,26 @@ services:
     environment: *watch-environment
     depends_on: *after-migrate
 
+  # Development only (architecture.md, "Environments and LLM"): an Ollama on the host's NVIDIA GPU, started by
+  # hand (README.md) and not in runServices - without GPU support in Docker it would keep the dev container from
+  # starting. The production stack never contains one.
+  ollama:
+    image: ollama/ollama:0.40.4
+    restart: unless-stopped
+    volumes:
+      # Pulled models survive a new container.
+      - ollama-models:/root/.ollama
+    environment:
+      # One model in the GPU's memory at a time, the rest of it for the context.
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
 volumes:
   claude-config:
+  ollama-models:
