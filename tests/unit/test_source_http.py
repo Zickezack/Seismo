@@ -210,3 +210,13 @@ def test_answer_within_the_total_timeout_is_kept():
         response = http.get(url, "text/plain")
 
     assert (response.status, response.content, response.content_type) == (200, b"ok", "text/plain")
+
+
+def test_request_urls_never_reach_the_log(caplog):
+    caplog.set_level("DEBUG")
+
+    with client(lambda request: httpx2.Response(200, text="{}")) as http:
+        http.get("https://api.eia.gov/v2/x/data/?api_key=SECRET-KEY", "application/json")
+
+    # httpx2 would log the URL with an API key or a Suchanfrage (datamodel.md, rule 13).
+    assert "SECRET-KEY" not in caplog.text

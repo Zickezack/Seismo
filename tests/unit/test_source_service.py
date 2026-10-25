@@ -141,6 +141,22 @@ def test_reliefweb_source_gets_the_api_address_and_an_optional_query(query, expe
     assert (values.url, values.query) == ("https://api.reliefweb.int/v2/reports", expected)
 
 
+@pytest.mark.parametrize("parameter", ["api_key", "API_KEY", "apikey", "access_token"])
+def test_a_url_with_an_api_key_is_refused_it_belongs_into_the_environment(parameter):
+    url = f"https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&{parameter}=SECRET"
+
+    with pytest.raises(InvalidSource, match=r"^URL: ohne API-Key angeben, er gehört in die Umgebung \(README\)\.$"):
+        source_service.parse(FORM | {"adapter_type": "eia", "url": url})
+
+
+def test_eia_source_takes_the_api_url_of_a_data_set_without_query():
+    url = "https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value"
+
+    values = source_service.parse(FORM | {"adapter_type": "eia", "url": url})
+
+    assert (values.adapter_type, values.url, values.query) == ("eia", url, None)
+
+
 def test_rss_needs_its_url():
     with pytest.raises(InvalidSource, match="^URL: bitte eine vollständige Adresse"):
         source_service.parse(FORM | {"url": ""})

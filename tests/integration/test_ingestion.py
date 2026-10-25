@@ -18,6 +18,7 @@ from app.repositories import platform_settings_repository
 from app.services import article_service, ingestion_service, job_service, source_service
 from app.sources import ADAPTERS
 from app.sources.base import FetchedItem
+from app.sources.eia import EiaAdapter
 from app.sources.errors import SourceRejected, SourceUnavailable
 from app.sources.gdelt import API_URL, GdeltAdapter
 from app.sources.http import HttpClient
@@ -887,3 +888,47 @@ def test_the_full_text_is_fetched_without_tracking_parameters(database, adapter,
     assert (article.url, article.canonical_url) == (
         "https://a.bank.example/a.html?traffic_source=rss", "https://a.bank.example/a.html"
     )
+
+
+EIA_URL = "https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value"
+EIA_SAMPLE = (FEEDS / "eia.json").read_bytes()
+
+
+def test_eia_release_end_to_end_stores_its_own_text_without_a_page_fetch(database, web, monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setitem(ADAPTERS, "eia", EiaAdapter())
+    monkeypatch.setenv("EIA_API_KEY", "SECRET-KEY")
+    # api.eia.gov answers robots.txt with 403, read as "everything disallowed"; the registered key is the permission.
+    web.robots["api.eia.gov"] = (403, "")
+    web.pages[EIA_URL.split("?")[0]] = (200, "application/json", EIA_SAMPLE)
+    eia = create(database, "EIA Gasspeicher", adapter_type="eia", url=EIA_URL, language="")
+    ingestion_service.enqueue_due_fetches(database)
+
+    run_jobs(database)
+
+    assert [url.split("?")[0] for url in web.requests] == ["https://api.eia.gov/v2/natural-gas/stor/wkly/data/"]
+    stored = articles(database)
+    assert [article.title for article in stored] == [
+        "EIA natural-gas/stor/wkly (weekly): 2026-10-16",
+        "EIA natural-gas/stor/wkly (weekly): 2026-10-09",
+        "EIA natural-gas/stor/wkly (weekly): 2026-10-02",
+    ]
+    assert all(article.source_id == eia and article.published_at is None for article in stored)
+    # Stored as the raw text at once: no full-text job, nothing asked of www.eia.gov.
+    assert [full_text(database, article.id) for article in stored] == [("stored", None)] * 3
+    assert jobs(database, job_service.FETCH_ARTICLE_JOB_KIND) == []
+    newest = raw_texts(database)[0]
+    assert newest.content_type == "text/plain; charset=utf-8" and newest.url == stored[0].url
+    assert b"3644 BCF (previous 3567, change +77)" in newest.content
+    # The key goes only into the request: neither into an article nor into the log.
+    assert not any("SECRET-KEY" in str(value) for article in stored for value in article)
+    assert "SECRET-KEY" not in caplog.text
+
+    # A later fetch stores no period twice.
+    make_due(database, eia)
+    ingestion_service.enqueue_due_fetches(database)
+    _set_host(database, next_slot_at=text("now()"), last_request_at=text("now() - interval '1 minute'"))
+    run_jobs(database, job_service.FETCH_SOURCE_JOB_KIND)
+
+    assert len(articles(database)) == 3
+    assert source_status(database, eia).consecutive_failures == 0

@@ -1,4 +1,5 @@
 """HTTP for the source adapters: one User-Agent, timeouts, a size limit and a few redirects."""
+import logging
 import socket
 import threading
 from collections.abc import Iterator, Mapping
@@ -23,6 +24,10 @@ MAX_REDIRECTS = 5
 RETRYABLE_STATUS = {408, 425, 429}
 # The host refuses this client, not the resource: often a bot protection (AccessDenied).
 REFUSED_STATUS = {401, 403}
+
+# httpx2 logs every request's URL at INFO: an API key (EIA_API_KEY) or a Suchanfrage would land in the log
+# (datamodel.md, rule 13). The callers log what was fetched without it.
+logging.getLogger("httpx2").setLevel(logging.WARNING)
 
 
 @dataclass(frozen=True)

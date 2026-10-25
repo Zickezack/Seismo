@@ -39,6 +39,12 @@ def insert_new(connection: Connection, rows: list[dict]) -> list[int]:
     return sorted(connection.execute(statement).scalars())
 
 
+def item_keys(connection: Connection, article_ids: list[int]) -> dict[int, str]:
+    """Each article's key in its source."""
+    statement = select(Article.id, Article.item_key).where(Article.id.in_(article_ids))
+    return {row.id: row.item_key for row in connection.execute(statement)}
+
+
 def get_for_full_text(connection: Connection, article_id: int) -> Row | None:
     """URL and full-text status of the article, whether its source still exists and is active, and the source's
     own minimum interval between requests."""

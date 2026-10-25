@@ -20,6 +20,7 @@ class RssAdapter:
     needs_query = False
     default_url = None
     page_size = None
+    offers_backfill = True
     backfill_reach = None
     published_at_source = "feed"
     page_title_preferred = False

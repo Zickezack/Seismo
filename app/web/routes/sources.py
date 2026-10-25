@@ -188,6 +188,7 @@ def _form_page(
         today = now.date()
         suggested_start = today - timedelta(days=DEFAULT_BACKFILL_DAYS)
         context |= {
+            "backfill_offered": backfill_service.offered(source),
             "backfills": backfill_service.list_for_source(engine, source.id),
             "backfill_earliest": earliest,
             "backfill_today": today,

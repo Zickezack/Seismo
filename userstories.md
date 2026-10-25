@@ -28,9 +28,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 2. As an admin, I want to remove several list items at once (a checkbox per item plus one bulk action) instead of clicking a separate delete button per item.
 3. As an admin, mass import and export of settings and selected or all data, so I can quickly set up a new instance or back up an existing one.
 
-### Epic: Quellenadapter und Ingestion
-11. As an analyst, I want the EIA Open Data API as a source of energy data releases (e.g. the weekly petroleum and natural gas storage reports), with its API key from the environment, since EIA's robots.txt excludes its RSS feeds.
-
 ### Epic: Normalisierung, Deduplizierung und Clustering
 2. As an analyst, I want identical articles recognised by canonical URL and content hash, so repeated fetches never create duplicate articles.
    - Note (2026-10-24): some hosts answer an error page with HTTP 200 and it is stored as the full text (the EC press corner: "temporarily unavailable" in 24 languages); such pages share a content hash and must not make different articles duplicates.
@@ -105,6 +102,8 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 9. As an admin, I want full texts fetched only where the publisher allows text and data mining - honouring a machine-readable reservation (TDMRep: the `tdm-reservation` header or meta tag, `/.well-known/tdmrep.json`) and a list of hosts whose terms forbid it, starting with those found for the starter catalogue (BBC, France 24, The Guardian, SRF, tagesschau, SCMP, Times of India, CNBC, FreightWaves, The Loadstar, OilPrice, Rigzone, Defense News) - and otherwise keeping only the article's metadata, so articles found through GDELT respect their publishers' terms as well.
 10. As an analyst, I want the ReliefWeb API as a source type, so humanitarian and conflict reports come in through the route ReliefWeb offers for automated access, since its robots.txt excludes the RSS feeds.
    - Decided (2026-10-25): the API requires an appname ReliefWeb approves by e-mail (`RELIEFWEB_APPNAME`); that approval counts as the publisher's permission, so robots.txt of api.reliefweb.int (`Disallow: /`) is not asked, the minimum interval still applies. Suchanfrage optional in ReliefWeb's query syntax; the full text comes from the report page as for any article; the publication time is `date.created`.
+11. As an analyst, I want the EIA Open Data API as a source of energy data releases (e.g. the weekly petroleum and natural gas storage reports), with its API key from the environment, since EIA's robots.txt excludes its RSS feeds.
+   - Decided (2026-10-25): the API returns numbers only; each of the newest 3 periods of a data set becomes one article whose text the adapter writes from them, each value with its change against the period before, stored as the raw text without a page fetch, then normalized and extracted as usual. The Quelle's URL is the API URL of a data set from EIA's API browser, without the key (`EIA_API_KEY`; a URL with `api_key` is refused). The registered key counts as EIA's permission: robots.txt of api.eia.gov (HTTP 403) is not asked. No backfill. httpx2's request log, which named every URL with its key or Suchanfrage, is off.
 
 ### Epic: Normalisierung, Deduplizierung und Clustering
 1. As an analyst, I want article HTML cleaned to plain text and the metadata normalised (canonical URL, title, UTC timestamps, detected language), so all later steps work on consistent data.

@@ -34,6 +34,7 @@ class ReliefWebAdapter:
     needs_query = False
     default_url = API_URL
     page_size = MAX_LIMIT
+    offers_backfill = True
     backfill_reach = None  # reports since 1996
     published_at_source = "feed"  # date.created: when ReliefWeb published it
     page_title_preferred = False

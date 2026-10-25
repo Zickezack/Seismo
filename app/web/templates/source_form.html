@@ -44,7 +44,7 @@
       <label for="url">URL</label>
       {# Not required: GDELT and ReliefWeb fill an empty one; the server checks it for every type. #}
       <input id="url" name="url" type="url" maxlength="{{ max_lengths.url }}" value="{{ values.url }}" aria-describedby="url-hint">
-      <p class="hint" id="url-hint">Adresse des Feeds, mit http:// oder https://. Bei GDELT und ReliefWeb leer lassen: die Adresse der API wird eingesetzt.</p>
+      <p class="hint" id="url-hint">Adresse des Feeds, mit http:// oder https://. Bei GDELT und ReliefWeb leer lassen: die Adresse der API wird eingesetzt. Bei EIA die „API URL“ eines Datensatzes aus dem EIA-Browser, ohne API-Key.</p>
     </div>
     <div class="field field-wide">
       <label for="query">Suchanfrage</label>
@@ -125,6 +125,7 @@
 <details class="card section" id="backfill" open data-testid="section-backfill">
   <summary><h2>Backfill</h2></summary>
   <div class="stack">
+    {% if backfill_offered %}
     <p class="hint">Holt einen vergangenen Zeitraum nach, Seite für Seite und immer erst, wenn kein laufender Abruf wartet. Neue Artikel bekommen ihre Volltexte ebenso nachrangig.</p>
     <form class="form-grid" method="post" action="/sources/{{ source.id }}/backfills" data-testid="backfill-form">
       <div class="field">
@@ -140,6 +141,9 @@
         <button class="button" type="submit" data-testid="start-backfill"{% if not source.is_active %} disabled{% endif %}>Backfill starten</button>
       </div>
     </form>
+    {% else %}
+    <p class="hint" data-testid="no-backfill">Für Quellen vom Typ {{ source.adapter_label }} gibt es keinen Backfill.</p>
+    {% endif %}
     {% if backfills %}
     <form class="stack" method="post" action="/sources/{{ source.id }}/backfills/cancel" data-bulk-form data-testid="backfill-list">
       <div class="toolbar">

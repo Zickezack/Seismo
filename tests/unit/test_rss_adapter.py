@@ -106,7 +106,7 @@ def test_asks_for_feeds_at_the_source_url():
 
 def test_registry_offers_rss():
     assert isinstance(ADAPTERS["rss"], RssAdapter)
-    assert ADAPTER_LABELS == {"rss": "RSS", "gdelt": "GDELT", "reliefweb": "ReliefWeb"}
+    assert ADAPTER_LABELS == {"rss": "RSS", "gdelt": "GDELT", "reliefweb": "ReliefWeb", "eia": "EIA"}
 
 
 @pytest.mark.parametrize(

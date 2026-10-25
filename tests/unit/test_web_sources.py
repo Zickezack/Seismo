@@ -447,6 +447,16 @@ def test_a_feed_backfill_has_no_earliest_day_and_an_inactive_source_cannot_start
     assert " disabled" in tag_of(html, "start-backfill")
 
 
+def test_a_source_without_backfill_says_so_instead_of_the_form(client, services, monkeypatch):
+    eia = source(6, "EIA Gasspeicher", adapter_type="eia", url="https://api.eia.gov/v2/natural-gas/stor/wkly/data/")
+    monkeypatch.setattr(source_service, "get", lambda _engine, source_id: eia)
+
+    html = client.get("/sources/6").text
+
+    assert tag_of(html, "backfill-form") is None
+    assert text_of(html, "no-backfill") == "Für Quellen vom Typ EIA gibt es keinen Backfill."
+
+
 def test_backfills_listed_with_progress_and_only_running_ones_selectable(client, services):
     services["backfills"] = [
         backfill(9, 5),

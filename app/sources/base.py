@@ -18,6 +18,9 @@ class FetchedItem:
     title: str | None
     published_at: datetime | None  # UTC, as the source states it; None when it states none (datamodel.md, rule 5)
     language: str | None  # ISO 639 code, as the source states it for the item or the whole source
+    # The item's full text as plain text, for a source that delivers it itself (EIA: written from its numbers);
+    # stored as the raw text instead of fetching the page. None: the page at `url` is fetched.
+    text: str | None = None
 
 
 class SourceSettings(Protocol):
@@ -42,6 +45,7 @@ class SourceAdapter(Protocol):
     needs_query: bool  # ... and must have one
     default_url: str | None  # the URL a Quelle of this type gets when the admin leaves it empty
     page_size: int | None  # the most items one request returns; None: one request returns all there is (a feed)
+    offers_backfill: bool  # whether a Quelle of this type can fetch a past period
     backfill_reach: timedelta | None  # how far back a backfill can go; None: as far as the source holds items
     published_at_source: str  # what its items' published_at is: "feed" (as stated) or "gdelt" (when GDELT saw it)
     page_title_preferred: bool  # the page's own title replaces its items' (normalization_service)

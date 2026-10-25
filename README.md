@@ -52,6 +52,13 @@ answers only an appname it has approved: request one with the form linked at htt
 (organisation, purpose and random characters, e.g. `ost-seismo-k7q2`); ReliefWeb replies by e-mail. Only the
 worker sends it; after setting it, recreate the worker (`docker compose up -d worker`).
 
+`EIA_API_KEY` (optional) is the key a Quelle of type EIA sends to the EIA Open Data API. Register for one
+at https://www.eia.gov/opendata/register.php (name and e-mail address; the key comes by e-mail at once). It is a
+secret: only the worker gets it, it never goes into a Quelle's URL (the form refuses an `api_key` parameter) and
+never into the log. After setting it, recreate the worker. An EIA Quelle's URL is the "API URL" that EIA's API
+browser (https://www.eia.gov/opendata/browser) shows for a data set, e.g.
+`https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value`.
+
 The event extraction asks an Ollama server (worker only; empty `OLLAMA_BASE_URL`: no extraction):
 
 | Variable | Rule |

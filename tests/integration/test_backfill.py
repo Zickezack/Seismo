@@ -294,3 +294,16 @@ def test_deleting_the_source_deletes_its_backfills_and_keeps_their_articles(data
     [article] = articles(database)
     assert (article.source_id, article.backfill_id) == (None, None)
     assert backfill.id
+
+
+def test_a_source_without_backfill_refuses_one(database):
+    eia = create(
+        database, "EIA Gasspeicher", adapter_type="eia",
+        url="https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value", language="",
+    )
+
+    assert not backfill_service.offered(source_service.get(database, eia))
+    with pytest.raises(InvalidBackfill, match="^Quellen vom Typ EIA haben keinen Backfill.$"):
+        start(database, eia)
+    with database.connect() as connection:
+        assert connection.execute(select(Backfill.id)).all() == []

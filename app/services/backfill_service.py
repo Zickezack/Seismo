@@ -93,6 +93,12 @@ def parse_period(form: Mapping[str, str], reach: timedelta | None, now: datetime
     return start, end
 
 
+def offered(source: source_service.Source) -> bool:
+    """Whether the source's adapter can fetch a past period (EIA: no, its history is a time series)."""
+    adapter = ADAPTERS.get(source.adapter_type)
+    return bool(adapter and adapter.offers_backfill)
+
+
 def earliest_day(source: source_service.Source, now: datetime) -> date | None:
     """The earliest Von the form accepts for this source, None when its adapter sets no limit."""
     adapter = ADAPTERS.get(source.adapter_type)
@@ -109,6 +115,8 @@ def start(engine: Engine, source_id: int, form: Mapping[str, str]) -> Backfill:
     adapter = ADAPTERS.get(source.adapter_type)
     if adapter is None:
         raise InvalidBackfill(f"Kein Adapter für den Typ „{source.adapter_type}“.")
+    if not adapter.offers_backfill:
+        raise InvalidBackfill(f"Quellen vom Typ {adapter.label} haben keinen Backfill.")
     period_start, period_end = parse_period(form, adapter.backfill_reach, datetime.now(UTC))
     with engine.begin() as connection:
         backfill_id = backfill_repository.insert_backfill(connection, source_id, period_start, period_end)
@@ -193,7 +201,7 @@ def fetch_page(
             return
         article_ids = article_repository.insert_new(connection, rows)
         originals = duplicate_service.mark_new(connection, article_ids)
-        ingestion_service.enqueue_full_texts(connection, originals, BACKFILL_PRIORITY)
+        ingestion_service.settle_full_texts(connection, originals, items, BACKFILL_PRIORITY)
         backfill_repository.record_page(connection, backfill_id, len(rows), len(article_ids), cursor)
         if cursor is not None:
             _enqueue_page(connection, backfill_id)

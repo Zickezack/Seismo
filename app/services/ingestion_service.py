@@ -41,6 +41,7 @@ MAX_TITLE_LENGTH = 1000
 MAX_PUBLICATION_AHEAD = timedelta(days=1)
 # What the raw-data layer keeps: what the normalisation can turn into text.
 FULL_TEXT_TYPES = {"text/html", "application/xhtml+xml", "text/plain", "application/pdf"}
+SUPPLIED_TEXT_TYPE = "text/plain; charset=utf-8"
 FULL_TEXT_ACCEPT = "text/html, application/xhtml+xml;q=0.9, application/pdf;q=0.8, text/plain;q=0.7, */*;q=0.1"
 
 
@@ -132,13 +133,28 @@ def fetch_source(
             return
         article_ids = article_repository.insert_new(connection, rows)
         originals = duplicate_service.mark_new(connection, article_ids)
-        enqueue_full_texts(connection, originals, LIVE_PRIORITY)
+        settle_full_texts(connection, originals, items, LIVE_PRIORITY)
         source_repository.mark_fetched(connection, source_id)
         # IDs and counts only, never titles (datamodel.md, rule 13).
         fields = {"source_id": source_id, "items": len(items), "new_articles": len(article_ids)}
         logger.info("Source fetched", extra=fields | {"duplicates": len(article_ids) - len(originals)})
 
     return store
+
+
+def settle_full_texts(connection: Connection, article_ids: list[int], items: Iterable[FetchedItem], priority: int) -> None:
+    """Each new original's full text: the text its source delivered with it (FetchedItem.text, e.g. EIA), stored
+    as the raw text at once, else a full-text job for its page."""
+    supplied = {_item_key(item.key): item for item in items if item.text}
+    keys = article_repository.item_keys(connection, article_ids) if supplied else {}
+    to_fetch = []
+    for article_id in article_ids:
+        item = supplied.get(keys.get(article_id, ""))
+        if item is None:
+            to_fetch.append(article_id)
+        elif article_repository.finish_full_text(connection, article_id, FullTextStatus.STORED, None):
+            raw_text_repository.insert_raw_text(connection, article_id, item.text.encode(), SUPPLIED_TEXT_TYPE, item.url)
+    enqueue_full_texts(connection, to_fetch, priority)
 
 
 def enqueue_full_texts(connection: Connection, article_ids: Iterable[int], priority: int) -> None:

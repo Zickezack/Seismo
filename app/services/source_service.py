@@ -2,7 +2,7 @@
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from sqlalchemy import Connection, Engine, Row
 
@@ -50,6 +50,7 @@ MAX_NAME_LENGTH = 200
 MAX_URL_LENGTH = 2000
 MAX_TERMS_NOTE_LENGTH = 2000
 MAX_QUERY_LENGTH = 1000
+SECRET_PARAMETERS = {"api_key", "apikey", "api-key", "access_token"}
 FETCH_INTERVAL_MINUTES = (5, 1440)
 # Full texts are kept only temporarily (requirements.md, "Data Sources and Data Rights"); 0 deletes
 # a raw text as soon as its processing has succeeded.
@@ -286,6 +287,9 @@ def _url(raw: str) -> str:
         raise error
     if len(url) > MAX_URL_LENGTH:
         raise InvalidSource(f"URL: höchstens {MAX_URL_LENGTH} Zeichen.")
+    # The URL is stored and shown; a key belongs into the environment (e.g. EIA_API_KEY, README).
+    if any(name.lower() in SECRET_PARAMETERS for name, _value in parse_qsl(parts.query)):
+        raise InvalidSource("URL: ohne API-Key angeben, er gehört in die Umgebung (README).")
     return url
 
 

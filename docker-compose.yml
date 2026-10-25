@@ -86,6 +86,8 @@ services:
       FETCH_CONTACT: ${FETCH_CONTACT:-}
       # The appname ReliefWeb approved; without it a ReliefWeb Quelle fails (README.md).
       RELIEFWEB_APPNAME: ${RELIEFWEB_APPNAME:-}
+      # The key of the EIA Open Data API; without it an EIA Quelle fails (README.md).
+      EIA_API_KEY: ${EIA_API_KEY:-}
       # The LLM server in the LAN (architecture.md, "Environments and LLM"); empty: no event extraction.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}

@@ -52,6 +52,7 @@ class GdeltAdapter:
     needs_query = True
     default_url = API_URL
     page_size = MAX_RECORDS
+    offers_backfill = True
     backfill_reach = BACKFILL_REACH
     published_at_source = "gdelt"  # seendate (seen_at)
     # Its titles come tokenized, a blank around every punctuation mark: "7 : 32 a . m . EDT".

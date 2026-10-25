@@ -130,8 +130,8 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   |-------|------|----------|---------|-------|
   | id | bigint identity | yes | | |
   | name | varchar(200) | yes | | Unique regardless of case (unique index `uq_source_name` on `lower(name)`). Sorted with the ICU collation `de-x-icu`. UI: Name. |
-  | adapter_type | varchar(20) | yes | | Adapter that fetches the source: `rss`, `gdelt` (GDELT DOC 2.0 API), `reliefweb` (ReliefWeb API v2, reports). Checked in the service, not by a constraint, so a new adapter needs no migration. UI: Typ. |
-  | url | varchar(2000) | yes | | Feed or API address, `http` or `https` with a host. Left empty for `gdelt` and `reliefweb`, the API address is filled in. Not unique: one endpoint can serve several sources, e.g. every GDELT query. |
+  | adapter_type | varchar(20) | yes | | Adapter that fetches the source: `rss`, `gdelt` (GDELT DOC 2.0 API), `reliefweb` (ReliefWeb API v2, reports), `eia` (EIA Open Data API v2, data releases). Checked in the service, not by a constraint, so a new adapter needs no migration. UI: Typ. |
+  | url | varchar(2000) | yes | | Feed or API address, `http` or `https` with a host. Left empty for `gdelt` and `reliefweb`, the API address is filled in; for `eia` the API URL of one data set from EIA's API browser. Never with an API key: a parameter `api_key`, `apikey`, `api-key` or `access_token` is refused, the key comes from the environment. Not unique: one endpoint can serve several sources, e.g. every GDELT query. |
   | query | text | no | | The search of an adapter that accepts one, in its syntax, at most 1000 characters; required for `gdelt`, optional for `reliefweb` (empty: every new report), empty for `rss`. UI: Suchanfrage. |
   | is_active | boolean | yes | true | Only active sources are fetched. UI: Aktiv / Inaktiv. |
   | extract_events | boolean | yes | true | Its articles pass the event extraction's pre-filter. UI: Ereignisse extrahieren. |
@@ -164,10 +164,10 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | source_id | bigint | no | | Foreign key to `source`, `ON DELETE SET NULL`: empty once the source is deleted. |
   | source_name | varchar(200) | yes | | Name of the source at fetch time; shown once the source is deleted, otherwise its current name. |
   | source_url | varchar(2000) | yes | | Feed URL of the source at fetch time. |
-  | item_key | varchar(1000) | yes | | The item's id in its source (RSS guid, Atom id, `reliefweb:<report id>`), else its link; above 1000 bytes `sha256:<hex>` of it. Unique with `source_id` (`uq_article_source_id`), so a repeated fetch stores nothing twice. |
+  | item_key | varchar(1000) | yes | | The item's id in its source (RSS guid, Atom id, `reliefweb:<report id>`, `eia:<route>:<period>`), else its link; above 1000 bytes `sha256:<hex>` of it. Unique with `source_id` (`uq_article_source_id`), so a repeated fetch stores nothing twice. |
   | url | varchar(2000) | yes | | Link of the article, `http` or `https`. |
   | title | text | no | | As the source states it, at most 1000 characters; after normalization the page's own (og:title, else `<title>`) where the source states none or is GDELT, whose titles come tokenized (`7 : 32 a . m . EDT`). |
-  | published_at | timestamptz | no | | Publication time as the source states it, in UTC (RSS pubDate, Atom published, else the item's only date: RSS 1.0 dc:date, Atom updated); empty when it states none (rules 4 and 5). GDELT states none: when GDELT first saw the article (seendate, 15-minute steps), the admin's decision of 2026-10-23. ReliefWeb: when it posted the report (`date.created`, to the second; `date.original`, the original publisher's day, is not used). A time more than a day ahead counts as none, the feed's and the page's alike. UI: Veröffentlicht. |
+  | published_at | timestamptz | no | | Publication time as the source states it, in UTC (RSS pubDate, Atom published, else the item's only date: RSS 1.0 dc:date, Atom updated); empty when it states none (rules 4 and 5). GDELT states none: when GDELT first saw the article (seendate, 15-minute steps), the admin's decision of 2026-10-23. ReliefWeb: when it posted the report (`date.created`, to the second; `date.original`, the original publisher's day, is not used). EIA states none: empty. A time more than a day ahead counts as none, the feed's and the page's alike. UI: Veröffentlicht. |
   | fetched_at | timestamptz | yes | now() | When it was stored. UI: Abgerufen. Index `ix_article_fetched_at`. |
   | language | varchar(10) | no | | ISO 639 code as the source states it for the item or the feed (GDELT: its English language name, translated), else the language of the Quelle; empty if neither has one. |
   | full_text_status | varchar(20) | yes | `pending` | `pending`, `stored`, `disallowed` (robots.txt), `unsupported` (content type), `failed`, `blocked` (the host refused it, HTTP 401 or 403, often a bot protection), `reserved` (the publisher reserves text and data mining: its domain is on the list, or TDMRep says so - nothing of the page is kept), `skipped` (source inactive or deleted, stored before full texts existed, or a duplicate by its link: the page is the original's); check constraint. Set once, from `pending`; only the admin's "Blockierte Volltexte abrufen" puts `blocked` back to `pending`. UI: Volltext - Ausstehend, Gespeichert, Gesperrt, Nicht unterstützt, Fehlgeschlagen, Blockiert, Vorbehalten, Übersprungen. |
@@ -196,9 +196,9 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | Field | Type | Required | Default | Notes |
   |-------|------|----------|---------|-------|
   | article_id | bigint | yes | | Primary key; foreign key to `article`, `ON DELETE CASCADE`. |
-  | content | bytea | yes | | The answer as received, not decoded: HTML, XHTML, plain text or PDF, at most 10 MB. PostgreSQL compresses it (TOAST). |
+  | content | bytea | yes | | The answer as received, not decoded: HTML, XHTML, plain text or PDF, at most 10 MB. PostgreSQL compresses it (TOAST). For a source that delivers the text itself (EIA: written by the adapter from the release's numbers, one line per series with its change against the previous period) that text as UTF-8, `text/plain`, stored with the article - no page is fetched. |
   | content_type | varchar(200) | no | | The Content-Type header, with its charset. |
-  | url | varchar(2000) | yes | | Where it was fetched from, after redirects. |
+  | url | varchar(2000) | yes | | Where it was fetched from, after redirects; for a delivered text the article's link. |
   | fetched_at | timestamptz | yes | now() | |
   | plain_text | text | no | | The main text, cleaned: without navigation, ads and comments (trafilatura for HTML, pypdf for PDF); empty when none was found. Full text as well: it goes with the raw text (rule 8). |
 
