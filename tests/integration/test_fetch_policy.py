@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from app.repositories import fetch_host_repository
 from app.services.fetch_policy_service import PoliteHttp
-from app.sources.errors import HostBusy, SourceUnavailable
+from app.sources.errors import FetchDisallowed, HostBusy, SourceUnavailable
 from app.sources.http import HttpClient
 from tests.integration.alembic_helpers import upgrade
 
@@ -91,6 +91,30 @@ def test_robots_txt_is_asked_once_a_day(database, web):
     PoliteHttp(database, http, 1).get("https://bank.example/c", "*/*")
 
     assert requests.count("https://bank.example/robots.txt") == 2
+
+
+def test_a_permitted_request_skips_robots_txt_but_keeps_the_interval(database):
+    requests = []
+
+    def answer(request):
+        requests.append(str(request.url))
+        # api.reliefweb.int: every path disallowed, access granted by an approved appname instead.
+        if request.url.path == "/robots.txt":
+            return httpx2.Response(200, text="User-agent: *\nDisallow: /\n")
+        return httpx2.Response(200, text="{}")
+
+    http = HttpClient("", httpx2.MockTransport(answer))
+
+    PoliteHttp(database, http, 10).get("https://api.example/v2/reports", "*/*", permitted=True)
+    with pytest.raises(HostBusy):
+        PoliteHttp(database, http, 10).get("https://api.example/v2/reports?page=2", "*/*", permitted=True)
+
+    assert requests == ["https://api.example/v2/reports"]
+    # Without the permission robots.txt still rules.
+    with database.begin() as connection:
+        connection.execute(text("UPDATE fetch_host SET next_slot_at = now(), last_request_at = NULL"))
+    with pytest.raises(FetchDisallowed):
+        PoliteHttp(database, http, 10).get("https://api.example/v2/reports", "*/*")
 
 
 def test_a_late_job_still_keeps_the_minimum_interval(database, web, monkeypatch):

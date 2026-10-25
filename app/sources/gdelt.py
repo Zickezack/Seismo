@@ -48,6 +48,7 @@ LANGUAGES = {
 
 class GdeltAdapter:
     label = "GDELT"
+    accepts_query = True
     needs_query = True
     default_url = API_URL
     page_size = MAX_RECORDS

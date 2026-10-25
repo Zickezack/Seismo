@@ -16,6 +16,7 @@ ACCEPT = (
 
 class RssAdapter:
     label = "RSS"
+    accepts_query = False
     needs_query = False
     default_url = None
     page_size = None

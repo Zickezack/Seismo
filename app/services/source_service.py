@@ -290,17 +290,20 @@ def _url(raw: str) -> str:
 
 
 def _query(raw: str, adapter: SourceAdapter | None) -> str | None:
-    """Required for an adapter that needs one, not allowed for the others; unchecked while the type is invalid."""
+    """Required for an adapter that needs one, optional for one that accepts one, not allowed for the others;
+    unchecked while the type is invalid."""
     query = raw.strip()
     if adapter is None:
         return query or None
-    if not adapter.needs_query:
+    if not adapter.accepts_query:
         if query:
-            types = ", ".join(each.label for each in ADAPTERS.values() if each.needs_query)
-            raise InvalidSource(f"Suchanfrage: nur für den Typ {types}.")
+            types = ", ".join(each.label for each in ADAPTERS.values() if each.accepts_query)
+            raise InvalidSource(f"Suchanfrage: nur für die Typen {types}.")
         return None
     if not query:
-        raise InvalidSource("Suchanfrage: bitte angeben.")
+        if adapter.needs_query:
+            raise InvalidSource("Suchanfrage: bitte angeben.")
+        return None
     if len(query) > MAX_QUERY_LENGTH:
         raise InvalidSource(f"Suchanfrage: höchstens {MAX_QUERY_LENGTH} Zeichen.")
     return query

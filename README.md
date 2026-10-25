@@ -47,6 +47,11 @@ gets HTTP 403 there). The worker sends it; the api only shows a
 warning on the source list while it is missing. After setting it, recreate both containers
 (`docker compose up -d api worker`), then select the affected sources and use "Blockierte Volltexte abrufen".
 
+`RELIEFWEB_APPNAME` (optional) is the appname a Quelle of type ReliefWeb sends with every API request. ReliefWeb
+answers only an appname it has approved: request one with the form linked at https://apidoc.reliefweb.int/#appname
+(organisation, purpose and random characters, e.g. `ost-seismo-k7q2`); ReliefWeb replies by e-mail. Only the
+worker sends it; after setting it, recreate the worker (`docker compose up -d worker`).
+
 The event extraction asks an Ollama server (worker only; empty `OLLAMA_BASE_URL`: no extraction):
 
 | Variable | Rule |

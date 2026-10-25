@@ -84,6 +84,8 @@ services:
       <<: *app-environment
       # Sent in the User-Agent of every source fetch, so a source can reach the operator.
       FETCH_CONTACT: ${FETCH_CONTACT:-}
+      # The appname ReliefWeb approved; without it a ReliefWeb Quelle fails (README.md).
+      RELIEFWEB_APPNAME: ${RELIEFWEB_APPNAME:-}
       # The LLM server in the LAN (architecture.md, "Environments and LLM"); empty: no event extraction.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}

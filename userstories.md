@@ -23,22 +23,27 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 
 ## Backlog
 
-### Epic: Architecture
-1. Modularize the code of the app --> Efficiency in AI
-2.
-
 ### Epic: Admin / Settings UX
 1. As an admin, I want a settings page with multiple independent sections to show a quick-navigation row and collapsible sections, so I can jump straight to and focus on just the part I need.
 2. As an admin, I want to remove several list items at once (a checkbox per item plus one bulk action) instead of clicking a separate delete button per item.
 3. As an admin, mass import and export of settings and selected or all data, so I can quickly set up a new instance or back up an existing one.
 
 ### Epic: Quellenadapter und Ingestion
-10. As an analyst, I want the ReliefWeb API as a source type, so humanitarian and conflict reports come in through the route ReliefWeb offers for automated access, since its robots.txt excludes the RSS feeds.
 11. As an analyst, I want the EIA Open Data API as a source of energy data releases (e.g. the weekly petroleum and natural gas storage reports), with its API key from the environment, since EIA's robots.txt excludes its RSS feeds.
 
+### Epic: Normalisierung, Deduplizierung und Clustering
+2. As an analyst, I want identical articles recognised by canonical URL and content hash, so repeated fetches never create duplicate articles.
+   - Note (2026-10-24): some hosts answer an error page with HTTP 200 and it is stored as the full text (the EC press corner: "temporarily unavailable" in 24 languages); such pages share a content hash and must not make different articles duplicates.
+3. As an analyst, I want near-duplicate and syndicated articles linked to each other without blindly merging different events, and wrong links correctable, so the same report from several outlets is recognised and every article stays traceable to its source.
+
 ### Epic: Strukturierte Ereignisextraktion
+1. As an analyst, I want a versioned event schema and an LLM extraction via Ollama - for articles that pass a configurable relevance pre-filter - that turns an article into event candidates with event type, actors, location, time, status and impacts, each statement labelled as fact, claim, forecast or interpretation and backed by a text quote, so events are structured and evidence-based.
+2. As an analyst, I want the LLM output validated against the JSON schema, invalid output retried and logged, missing details marked as unknown instead of invented, separate confidence values for extraction, source quality and inference, and the model version, schema version and extraction time stored, so every extracted statement is traceable.
+3. As an admin, I want the worker's stop grace period (`stop_grace_period` in `docker-compose.yml`) to be longer than the longest LLM call, so a deploy or restart lets a running extraction finish instead of killing it and repeating the call once its lease has expired.
+4. As an admin, I want LLM jobs to wait while Ollama is unreachable instead of using up their attempts, so a switched-off or restarting LLM machine delays the extraction but never makes jobs fail.
 
 ### Epic: Ereignisidentität und zeitliche Entwicklung
+1. As an analyst, I want each event candidate assigned to an existing event (Ereignis) or turned into a new event with a stable event ID, so several reports about the same event form one consistent event record.
 2. As an analyst, I want every change to an event's state (start, update, escalation, closure, resumption) stored as a timestamped version with its source evidence, and contradicting reports kept side by side instead of merged into one fact, so the development of an event is traceable.
 3. As an analyst, I want to merge and split wrongly grouped events, with every merge and split recorded in an audit trail, so grouping errors can be corrected.
 
@@ -98,21 +103,11 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 7. As an admin, I want full-text fetches that a host's bot protection blocks (e.g. the BFS article pages on www.admin.ch answer HTTP 403 to the Seismo User-Agent) recognised per source and resolved through an allowed route - a contact in the User-Agent, an official API or feed with the full text, or the publisher's permission - never by disguising the fetcher, so such sources still deliver complete texts.
 8. As an analyst, I want every Quelle to carry its region - the continent it reports from, or worldwide - and the source list sortable and filterable by it, with the starter catalogue bringing the region of each source, so coverage stays balanced across continents and can be viewed per continent.
 9. As an admin, I want full texts fetched only where the publisher allows text and data mining - honouring a machine-readable reservation (TDMRep: the `tdm-reservation` header or meta tag, `/.well-known/tdmrep.json`) and a list of hosts whose terms forbid it, starting with those found for the starter catalogue (BBC, France 24, The Guardian, SRF, tagesschau, SCMP, Times of India, CNBC, FreightWaves, The Loadstar, OilPrice, Rigzone, Defense News) - and otherwise keeping only the article's metadata, so articles found through GDELT respect their publishers' terms as well.
+10. As an analyst, I want the ReliefWeb API as a source type, so humanitarian and conflict reports come in through the route ReliefWeb offers for automated access, since its robots.txt excludes the RSS feeds.
+   - Decided (2026-10-25): the API requires an appname ReliefWeb approves by e-mail (`RELIEFWEB_APPNAME`); that approval counts as the publisher's permission, so robots.txt of api.reliefweb.int (`Disallow: /`) is not asked, the minimum interval still applies. Suchanfrage optional in ReliefWeb's query syntax; the full text comes from the report page as for any article; the publication time is `date.created`.
 
 ### Epic: Normalisierung, Deduplizierung und Clustering
 1. As an analyst, I want article HTML cleaned to plain text and the metadata normalised (canonical URL, title, UTC timestamps, detected language), so all later steps work on consistent data.
-2. As an analyst, I want identical articles recognised by canonical URL and content hash, so repeated fetches never create duplicate articles.
-3. As an analyst, I want near-duplicate and syndicated articles linked to each other without blindly merging different events, and wrong links correctable, so the same report from several outlets is recognised and every article stays traceable to its source.
-
-### Epic: Strukturierte Ereignisextraktion
-1. As an analyst, I want a versioned event schema and an LLM extraction via Ollama - for articles that pass a configurable relevance pre-filter - that turns an article into event candidates with event type, actors, location, time, status and impacts, each statement labelled as fact, claim, forecast or interpretation and backed by a text quote, so events are structured and evidence-based.
-2. As an analyst, I want the LLM output validated against the JSON schema, invalid output retried and logged, missing details marked as unknown instead of invented, separate confidence values for extraction, source quality and inference, and the model version, schema version and extraction time stored, so every extracted statement is traceable.
-3. As an admin, I want the worker's stop grace period (`stop_grace_period` in `docker-compose.yml`) to be longer than the longest LLM call, so a deploy or restart lets a running extraction finish instead of killing it and repeating the call once its lease has expired.
-4. As an admin, I want LLM jobs to wait while Ollama is unreachable instead of using up their attempts, so a switched-off or restarting LLM machine delays the extraction but never makes jobs fail.
-
-### Epic: Ereignisidentität und zeitliche Entwicklung
-1. As an analyst, I want each event candidate assigned to an existing event (Ereignis) or turned into a new event with a stable event ID, so several reports about the same event form one consistent event record.
-   - Decided (2026-10-24): the same event is one incident with its direct continuation, not the same topic; a candidate is compared by TF-IDF cosine of its English title, summary, place and actors with the events whose reports reach to within 7 days of its own (open for 7 days after the last report, and a report found late by a backfill may precede the first by as much) - from 0.5 assigned, below 0.2 a new event, in between the LLM decides among up to 3; never to an event with a candidate of the same article; a list of events and a page per event, read-only.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.

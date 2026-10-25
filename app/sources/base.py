@@ -24,19 +24,22 @@ class SourceSettings(Protocol):
     """What an adapter reads of a Quelle."""
 
     url: str
-    query: str | None  # set only for an adapter that needs one
+    query: str | None  # set only for an adapter that accepts one
     last_fetched_at: datetime | None  # the last successful fetch, e.g. to ask an API for what is new since
 
 
 class Http(Protocol):
     """How an adapter sends a request: HttpClient, or the fetch policy around it (fetch_policy_service.PoliteHttp)."""
 
-    def get(self, url: str, accept: str) -> HttpResponse: ...
+    def get(self, url: str, accept: str, permitted: bool = False) -> HttpResponse:
+        """`permitted`: the publisher approved this access explicitly (e.g. ReliefWeb's appname), so robots.txt is
+        not asked; the request slots and pauses still apply."""
 
 
 class SourceAdapter(Protocol):
     label: str  # the source type as the UI shows it, e.g. "RSS"
-    needs_query: bool  # a Quelle of this type has a Suchanfrage; the others have none
+    accepts_query: bool  # a Quelle of this type may have a Suchanfrage; the others have none
+    needs_query: bool  # ... and must have one
     default_url: str | None  # the URL a Quelle of this type gets when the admin leaves it empty
     page_size: int | None  # the most items one request returns; None: one request returns all there is (a feed)
     backfill_reach: timedelta | None  # how far back a backfill can go; None: as far as the source holds items

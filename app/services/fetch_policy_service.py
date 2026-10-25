@@ -89,15 +89,23 @@ class PoliteHttp:
         self._reserved_slot = reserved_slot
         self._backfill = backfill
 
-    def get(self, url: str, accept: str) -> HttpResponse:
-        """Raises FetchDisallowed, HostBusy, or what HttpClient.get raises."""
+    def get(self, url: str, accept: str, permitted: bool = False) -> HttpResponse:
+        """Raises FetchDisallowed, HostBusy, or what HttpClient.get raises.
+
+        `permitted`: the publisher approved this access explicitly - the publisher's permission, an allowed route
+        (architecture.md) - so robots.txt is not asked; ReliefWeb's API approves an appname and disallows every
+        path in its robots.txt. The minimum interval and pauses still apply.
+        """
         host, robots_url = _host_of(url)
         known = self._known_unless_paused(host)
         with self._pausing_on_retry_after(host):
-            rules = self._robots(host, robots_url, known)
-            if not rules.allows(url):
-                raise FetchDisallowed("Durch robots.txt gesperrt")
-            self._wait_for_turn(host, max(self._min_interval, rules.crawl_delay()))
+            interval = self._min_interval
+            if not permitted:
+                rules = self._robots(host, robots_url, known)
+                if not rules.allows(url):
+                    raise FetchDisallowed("Durch robots.txt gesperrt")
+                interval = max(interval, rules.crawl_delay())
+            self._wait_for_turn(host, interval)
             return self._http.get(url, accept)
 
     def tdm_rules(self, url: str) -> str | None:

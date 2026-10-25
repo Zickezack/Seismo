@@ -1,0 +1,41 @@
+{
+  "time": 14,
+  "totalCount": 4,
+  "count": 4,
+  "data": [
+    {
+      "id": 4235445,
+      "score": 1,
+      "fields": {
+        "title": "IOM Hurricane  Melissa\nSituation Report 19",
+        "url": "https://reliefweb.int/node/4235445",
+        "url_alias": "https://reliefweb.int/report/jamaica/iom-hurricane-melissa-situation-report-19",
+        "date": {"created": "2026-10-25T08:14:03+00:00"},
+        "language": [{"code": "en"}, {"code": "es"}]
+      }
+    },
+    {
+      "id": 4235440,
+      "score": 1,
+      "fields": {
+        "title": "PAM Mali : note de pays",
+        "url": "https://reliefweb.int/node/4235440",
+        "date": {"created": "2026-10-25T09:14:03+02:00"},
+        "language": [{"code": "fr"}]
+      }
+    },
+    {
+      "id": 4235431,
+      "score": 1,
+      "fields": {
+        "url": "https://reliefweb.int/node/4235431",
+        "date": {"created": "2026-10-25"}
+      }
+    },
+    {
+      "id": 4235400,
+      "score": 1,
+      "fields": {"title": "Ohne Link", "date": {"created": "2026-10-24T22:00:00+00:00"}}
+    }
+  ]
+}

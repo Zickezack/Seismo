@@ -34,6 +34,7 @@ class FakeAdapter:
     """Returns `items`, or raises `error`; records each fetch."""
 
     label = "RSS"
+    accepts_query = False
     needs_query = False
     default_url = None
     published_at_source = "feed"

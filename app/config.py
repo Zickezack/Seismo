@@ -112,6 +112,14 @@ class AuthSettings:
         )
 
 
+def source_credential(name: str, environ: Mapping[str, str] | None = None) -> str:
+    """An access key a source adapter sends (e.g. RELIEFWEB_APPNAME), read when it fetches: only the worker
+    fetches, and a source without one fails with a message at the source instead of stopping the worker.
+    Empty when unset."""
+    environ = os.environ if environ is None else environ
+    return environ.get(name, "").strip()
+
+
 def _require(environ, names):
     missing = [name for name in names if not environ.get(name, "").strip()]
     if missing:

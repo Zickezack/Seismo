@@ -121,7 +121,7 @@ def test_gdelt_source_gets_the_api_address_and_keeps_its_query():
     [
         (GDELT | {"query": "  "}, "Suchanfrage: bitte angeben."),
         (GDELT | {"query": "x" * 1001}, "Suchanfrage: höchstens 1000 Zeichen."),
-        (FORM | {"query": "inflation"}, "Suchanfrage: nur für den Typ GDELT."),
+        (FORM | {"query": "inflation"}, "Suchanfrage: nur für die Typen GDELT, ReliefWeb."),
     ],
 )
 def test_query_is_required_for_gdelt_and_not_allowed_for_rss(form, message):
@@ -129,6 +129,16 @@ def test_query_is_required_for_gdelt_and_not_allowed_for_rss(form, message):
         source_service.parse(form)
 
     assert str(error.value) == message
+
+
+RELIEFWEB = FORM | {"adapter_type": "reliefweb", "url": ""}
+
+
+@pytest.mark.parametrize(("query", "expected"), [("  ", None), (" country:Sudan ", "country:Sudan")])
+def test_reliefweb_source_gets_the_api_address_and_an_optional_query(query, expected):
+    values = source_service.parse(RELIEFWEB | {"query": query})
+
+    assert (values.url, values.query) == ("https://api.reliefweb.int/v2/reports", expected)
 
 
 def test_rss_needs_its_url():
