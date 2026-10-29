@@ -249,6 +249,30 @@ def test_a_duplicate_s_page_offers_to_separate_it_from_its_original(client, page
     assert tag_of(html, "similar-section") is None
 
 
+def test_an_original_with_duplicates_gets_a_quick_navigation_and_every_section_is_expanded(client, page):
+    page["detail"] = detail(article(4), duplicates=[related(5, duplicate_reason="url")])
+
+    html = client.get("/articles/4").text
+
+    assert re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html) == ["events", "duplicates", "similar"]
+    for name in ("events", "duplicates", "similar"):
+        assert tag_of(html, f"{name}-section") == f'<details class="section" id="{name}" open data-testid="{name}-section">'
+
+
+@pytest.mark.parametrize("fields", [
+    {},
+    {"article_value": article(5, duplicate_of_id=4, duplicate_reason="url"), "original": related(4)},
+])
+def test_two_sections_get_no_quick_navigation(client, page, fields):
+    article_value = fields.pop("article_value", article(4))
+    page["detail"] = detail(article_value, **fields)
+
+    html = client.get(f"/articles/{article_value.id}").text
+
+    assert tag_of(html, "section-nav") is None
+    assert tag_of(html, "events-section") is not None
+
+
 def test_an_article_without_relations_says_so_and_an_unknown_one_goes_back_to_the_list(client, page, overview):
     page["detail"] = detail(article(8))
     assert text_of(client.get("/articles/8").text, "no-similar") == "Keine ähnlichen Artikel."

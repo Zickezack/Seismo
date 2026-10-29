@@ -24,7 +24,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ## Backlog
 
 ### Epic: Admin / Settings UX
-1. As an admin, I want a settings page with multiple independent sections to show a quick-navigation row and collapsible sections, so I can jump straight to and focus on just the part I need.
 2. As an admin, I want to remove several list items at once (a checkbox per item plus one bulk action) instead of clicking a separate delete button per item.
 3. As an admin, mass import and export of settings and selected or all data, so I can quickly set up a new instance or back up an existing one.
 
@@ -108,6 +107,10 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ### Epic: Ereignisidentität und zeitliche Entwicklung
 1. As an analyst, I want each event candidate assigned to an existing event (Ereignis) or turned into a new event with a stable event ID, so several reports about the same event form one consistent event record.
    - Decided (2026-10-24): the same event is one incident with its direct continuation, not the same topic; a candidate is compared by TF-IDF cosine of its English title, summary, place and actors with the events whose reports reach to within 7 days of its own (open for 7 days after the last report, and a report found late by a backfill may precede the first by as much) - from 0.5 assigned, below 0.2 a new event, in between the LLM decides among up to 3; never to an event with a candidate of the same article; a list of events and a page per event, read-only.
+
+### Epic: Admin / Settings UX
+1. As an admin, I want a settings page with multiple independent sections to show a quick-navigation row and collapsible sections, so I can jump straight to and focus on just the part I need.
+   - Done (2026-10-29): the Plattform-Einstellungen and the source form had both since the job queue and backfill stories; the article page added (Ereigniskandidaten, Duplikat, Duplikate, Ähnliche Artikel), every section collapsible, the quick navigation from three sections on.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.

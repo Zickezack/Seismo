@@ -177,6 +177,11 @@ a {
   margin-bottom: var(--space);
 }
 
+/* A section's body without a card of its own (templates/article.html): the section keeps the gap below. */
+.section > .stack {
+  margin-bottom: 0;
+}
+
 /* Forms: short fields two to a row on wider screens; actions and wide fields span the full row
    (requirements.md, "Basic UI Requirements / Styleguide", item 7). */
 
