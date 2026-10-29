@@ -24,7 +24,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ## Backlog
 
 ### Epic: Admin / Settings UX
-2. As an admin, I want to remove several list items at once (a checkbox per item plus one bulk action) instead of clicking a separate delete button per item.
 3. As an admin, mass import and export of settings and selected or all data, so I can quickly set up a new instance or back up an existing one.
 
 ### Epic: Ereignisidentität und zeitliche Entwicklung
@@ -111,6 +110,8 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ### Epic: Admin / Settings UX
 1. As an admin, I want a settings page with multiple independent sections to show a quick-navigation row and collapsible sections, so I can jump straight to and focus on just the part I need.
    - Done (2026-10-29): the Plattform-Einstellungen and the source form had both since the job queue and backfill stories; the article page added (Ereigniskandidaten, Duplikat, Duplikate, Ähnliche Artikel), every section collapsible, the quick navigation from three sections on.
+2. As an admin, I want to remove several list items at once (a checkbox per item plus one bulk action) instead of clicking a separate delete button per item.
+   - Done (2026-10-29): already built with the source management (story 1 of Quellenadapter und Ingestion): Quellen are the only list items that can be deleted, and their list deletes the selected ones all or nothing, after the confirmation with countdown; no list has a delete button per row.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.
