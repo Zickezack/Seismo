@@ -17,6 +17,7 @@
     <thead>
       <tr>
         <th>Ereignis</th>
+        <th>Zustand</th>
         <th>Zuletzt berichtet</th>
         <th>Zuerst berichtet</th>
         <th>Typ</th>
@@ -29,6 +30,7 @@
       {% for event in overview.events %}
       <tr data-testid="event-{{ event.id }}">
         <td class="cell-title"><a href="/events/{{ event.id }}" data-testid="event-title-{{ event.id }}">{{ event.title }}</a></td>
+        <td data-testid="event-state-{{ event.id }}">{{ event.state_label }}</td>
         <td>{{ event.last_reported_at|local_time }}</td>
         <td>{{ event.first_reported_at|local_time }}</td>
         <td class="cell-wrap">{{ event.type_label }}</td>

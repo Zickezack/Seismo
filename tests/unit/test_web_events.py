@@ -1,18 +1,19 @@
 """Ereignisse pages in the web layer, without a database: the service is replaced."""
 import re
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.services import event_service
-from app.services.event_service import EventDetail, EventListItem, EventOverview, ReportView
+from app.services.event_service import EventDetail, EventListItem, EventOverview, ReportView, StateEffect, StateView
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
 
 
 def event(event_id, **fields):
     values = dict(id=event_id, title=f"Earthquake <{event_id}>", event_type="natural_disaster", country="CN",
-                  first_reported_at=NOW, last_reported_at=NOW, report_count=3, source_count=2)
+                  first_reported_at=NOW, last_reported_at=NOW, state="update", report_count=3, source_count=2)
     return EventListItem(**values | fields)
 
 
@@ -83,6 +84,41 @@ def test_the_event_page_lists_its_reports_with_their_article_and_how_each_came(c
     ]
     # Without a title, the article's link names it.
     assert '<span class="hint">https://example.org/3</span>' in html
+
+
+def test_the_event_page_shows_its_versions_and_marks_a_contradicting_report(client, pages):
+    later = NOW + timedelta(hours=3)
+    states = [
+        StateView(5, "start", NOW, NOW, 1, "Report 1", "on Friday morning", 10, "Xinhua"),
+        StateView(6, "closure", later, later, None, None, None, None, None),
+    ]
+    pages["detail"] = EventDetail(event(7, state="closure"), [
+        report(1, "new", status="start", effect=StateEffect.VERSION),
+        report(2, "score", 0.734, status="resumption", effect=StateEffect.CONTRADICTS, contradicted_state="start"),
+    ], states)
+
+    html = client.get("/events/7").text
+
+    assert text_of(html, "meta-state") == "Abschluss"
+    assert text_of(html, "meta-contradictions") == "1 Bericht widerspricht"
+    assert [text_of(html, f"state-status-{number}") for number in (5, 6)] == ["Beginn", "Abschluss"]
+    assert tag_of(html, "state-report-5") == '<a href="/articles/10#events" data-testid="state-report-5">'
+    assert "Zeitangabe im Artikel: on Friday morning" in html
+    # A version whose report is gone stays, without a link.
+    row = re.search(r'data-testid="state-6">(.*?)</tr>', html, re.DOTALL).group(1)
+    assert "Bericht nicht mehr vorhanden" in row and tag_of(html, "state-report-6") is None
+    assert text_of(html, "report-effect-1") == "Zustandswechsel"
+    assert '<span class="status status-contradicts">widerspricht (Beginn)</span>' in html
+
+
+def test_an_event_without_a_known_state_says_so(client, pages):
+    pages["detail"] = EventDetail(event(7, state=None), [report(1, "new", status="unknown")], [])
+
+    html = client.get("/events/7").text
+
+    assert text_of(html, "meta-state") == "–" and tag_of(html, "meta-contradictions") is None
+    assert text_of(html, "no-states") == "Kein Bericht nennt bisher einen Zustand."
+    assert text_of(client.get("/events").text, "event-state-2") == "Fortsetzung"
 
 
 def test_an_unknown_event_goes_back_to_the_list(client, pages):

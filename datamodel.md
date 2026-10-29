@@ -291,8 +291,25 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | last_reported_at | timestamptz | yes | | The same of its latest report. Index. |
   | created_at | timestamptz | yes | now() | |
 
-- Relationships: has one or more Ereigniskandidaten, its reports.
-- Rules: one incident with its direct continuation - an attack and its death toll, a quake and its aftershocks - never a topic (the admin's decision of 2026-10-24). The job "Ereignis zuordnen" (`event_service`) assigns every Ereigniskandidat without one, the earliest report first, so the first report founds the event: compared with the events reported from 7 days before to 7 days after it - from 0.5 similarity it joins the most similar, below 0.2 it founds a new one, in between the LLM chooses among the up to 3 most similar or none. Never an event that has a report of the same article. The assignment runs under an advisory lock, after comparing again: two workers never found two events for one incident. The list (UI: Ereignisse, `/events`) shows the 100 most recently reported; the event page (`/events/<id>`) its reports, the earliest first, each with its article and how it came to the event. Merging and splitting, with their audit trail (rule 3), come with story 3 of the epic.
+- Relationships: has one or more Ereigniskandidaten, its reports; has Ereigniszustände, its versions.
+- Rules: one incident with its direct continuation - an attack and its death toll, a quake and its aftershocks - never a topic (the admin's decision of 2026-10-24). The job "Ereignis zuordnen" (`event_service`) assigns every Ereigniskandidat without one, the earliest report first, so the first report founds the event: compared with the events reported from 7 days before to 7 days after it - from 0.5 similarity it joins the most similar, below 0.2 it founds a new one, in between the LLM chooses among the up to 3 most similar or none. Never an event that has a report of the same article. The assignment runs under an advisory lock, after comparing again: two workers never found two events for one incident. The list (UI: Ereignisse, `/events`) shows the 100 most recently reported; the event page (`/events/<id>`) its reports, the earliest first, each with its article and how it came to the event. Its state is its latest Ereigniszustand (UI: Zustand, in the list and on the page); the page shows the versions (UI: Verlauf) and what each report does to the state in effect at its time (UI: Zum Zustand - Zustandswechsel, bestätigt, widerspricht with the state it contradicts). Merging and splitting, with their audit trail (rule 3), come with story 3 of the epic.
+- Privacy: none
+
+### Ereigniszustand (`event_state`)
+- Store: SQL table `event_state`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | event_id | bigint | yes | | Foreign key to `event`, `ON DELETE CASCADE`. Index with `valid_from`. |
+  | status | varchar(20) | yes | | `start`, `update`, `escalation`, `closure`, `resumption` (never `unknown`); check constraint. UI: Beginn, Fortsetzung, Eskalation, Abschluss, Wiederaufnahme. |
+  | valid_from | timestamptz | yes | | The time of the report that stated it: its article's publication, else its fetch. UI: Seit. |
+  | candidate_id | bigint | no | | The report that stated it - its Beleg is that report's statements and quotes; foreign key to `event_candidate`, `ON DELETE SET NULL`: the version stays. Index. UI: Laut Bericht. |
+  | recorded_at | timestamptz | yes | now() | When Seismo learned it (rule 11): a report found later may state an earlier version. UI: Erfasst. |
+
+- Relationships: belongs to one Ereignis; stated by one Ereigniskandidat.
+- Rules: appended in the transaction that assigns its report (`event_service.state_effect`), never changed (rule 3). A report is weighed against the version in effect at its own time - the latest from before it, of equal times the one recorded last: the earliest known status founds the state; while ongoing (start, update, escalation, resumption) an update confirms it, an escalation or a closure is a new version, a start or a resumption contradicts it; while closed a closure confirms it, a resumption is a new version, anything else contradicts it; the same status always confirms; unknown has no effect (the admin's decision of 2026-10-29). A contradicting report adds nothing and keeps its own statements beside the state (rule 6). The reports assigned before were replayed by migration `5d0c7e1a9b42` in the order they were assigned, `recorded_at` their assignment time. A date from an article's time note ("on Friday") is not derived; the version shows it beside its time.
 - Privacy: none
 
 ### Aussage (`statement`)

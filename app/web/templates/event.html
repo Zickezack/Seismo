@@ -9,6 +9,7 @@
     <table class="table table-details" data-testid="event-meta">
       <tbody>
         <tr><th scope="row">Ereignis-ID</th><td data-testid="meta-id">{{ event.id }}</td></tr>
+        <tr><th scope="row">Zustand</th><td data-testid="meta-state">{{ event.state_label }}{% if detail.contradictions %} <span class="hint" data-testid="meta-contradictions">{{ detail.contradictions }} {{ "Bericht widerspricht" if detail.contradictions == 1 else "Berichte widersprechen" }}</span>{% endif %}</td></tr>
         <tr><th scope="row">Typ</th><td>{{ event.type_label }}</td></tr>
         <tr><th scope="row">Land</th><td>{{ event.country or "–" }}</td></tr>
         <tr><th scope="row">Zuerst berichtet</th><td>{{ event.first_reported_at|local_time }}</td></tr>
@@ -18,6 +19,40 @@
     </table>
   </div>
   <p class="hint">Name, Typ und Land stammen vom ersten Bericht. Die Ähnlichkeit vergleicht die englischen Wörter von Titel, Zusammenfassung, Ort und Akteuren (TF-IDF-Kosinus, 0 bis 1).</p>
+</section>
+
+{# Every version stays: a later one never replaces an earlier one (datamodel.md, rule 3). #}
+<section class="stack" data-testid="states-section">
+  <h2>Verlauf ({{ detail.states|length }})</h2>
+  <p class="hint">Jeder Bericht wird am Zustand zu seiner eigenen Zeit gemessen: Ein neuer Zustand entsteht nur aus einem passenden Übergang (eine Eskalation oder ein Abschluss eines laufenden Ereignisses, die Wiederaufnahme eines abgeschlossenen). Ein Bericht, der dazu nicht passt, ändert nichts und bleibt unten als widersprechend stehen; seine Aussagen behält er.</p>
+  {% if detail.states %}
+  <div class="table-container">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Seit</th>
+          <th>Zustand</th>
+          <th>Laut Bericht</th>
+          <th>Quelle</th>
+          <th>Erfasst</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for state in detail.states %}
+        <tr data-testid="state-{{ state.id }}">
+          <td>{{ state.valid_from|local_time }}</td>
+          <td data-testid="state-status-{{ state.id }}">{{ state.status_label }}</td>
+          <td class="cell-title">{% if state.article_id %}<a href="/articles/{{ state.article_id }}#events" data-testid="state-report-{{ state.id }}">{{ state.report_title }}</a>{% if state.time_note %}<span class="hint">Zeitangabe im Artikel: {{ state.time_note }}</span>{% endif %}{% else %}<span class="hint">Bericht nicht mehr vorhanden</span>{% endif %}</td>
+          <td class="cell-wrap">{{ state.source_display_name or "–" }}</td>
+          <td>{{ state.recorded_at|local_time }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p data-testid="no-states">Kein Bericht nennt bisher einen Zustand.</p>
+  {% endif %}
 </section>
 
 <section class="stack" data-testid="reports-section">
@@ -30,6 +65,7 @@
           <th>Bericht</th>
           <th>Quelle</th>
           <th>Status</th>
+          <th>Zum Zustand</th>
           <th>Zugeordnet durch</th>
         </tr>
       </thead>
@@ -40,6 +76,7 @@
           <td class="cell-title"><a href="/articles/{{ report.article_id }}#events" data-testid="report-article-{{ report.id }}">{{ report.title }}</a><span class="hint">{{ report.article_title or report.article_url }}</span></td>
           <td class="cell-wrap">{{ report.source_display_name }}</td>
           <td>{{ report.status_label }}</td>
+          <td data-testid="report-effect-{{ report.id }}">{% if report.effect == "contradicts" %}<span class="status status-contradicts">{{ report.effect_label }}</span>{% else %}{{ report.effect_label }}{% endif %}</td>
           <td data-testid="report-method-{{ report.id }}">{{ report.method_label }}</td>
         </tr>
         {% endfor %}

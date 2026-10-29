@@ -11,6 +11,11 @@ CHOICES best. Never an event with a candidate of the same article: the model tol
 The worker queues the candidates without an event once a minute, the earliest report first, so the first report
 founds the event and the later ones find it. The job compares and asks outside any transaction and assigns in the one
 that completes it, under an advisory lock, after comparing again: a decision the events changed under is made anew.
+
+The development of an event (story 2): each report is weighed against the state in effect at its own time
+(state_effect), and one that changes it adds a version (Ereigniszustand) in the same transaction. Versions are only
+ever added. A report that contradicts the state changes nothing and stays beside it, as every report keeps its own
+statements: nothing is merged into one fact (datamodel.md, rule 6).
 """
 import json
 import logging
@@ -18,12 +23,13 @@ import math
 import re
 from collections import Counter
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 
 from sqlalchemy import Connection, Engine, Row
 
-from app.db.models import AssignmentMethod
+from app.db.models import AssignmentMethod, EventStatus
 from app.jobs.errors import JobDeferred
 from app.llm.limiter import LlmCallLimiter
 from app.llm.ollama import OllamaClient
@@ -61,6 +67,44 @@ only with JSON in the given schema.
   when it is about none of them."""
 # Its reason before its answer: a model that names what decides it first decides better. Not stored.
 MAX_REASON_CHARS = 300
+
+
+class StateEffect(StrEnum):
+    """What a report does to the state of its event (story 2)."""
+
+    VERSION = "version"  # it changes the state: a new version
+    CONFIRMS = "confirms"
+    CONTRADICTS = "contradicts"  # kept beside the state, never merged into it
+    NONE = "none"  # its status is unknown
+
+
+EFFECT_LABELS = {
+    StateEffect.VERSION: "Zustandswechsel",
+    StateEffect.CONFIRMS: "bestätigt",
+    StateEffect.CONTRADICTS: "widerspricht",
+    StateEffect.NONE: "–",
+}
+
+
+def state_effect(current: str | None, reported: str) -> StateEffect:
+    """The admin's rule of 2026-10-29: the earliest known status founds the state; while it is ongoing an update
+    confirms it, an escalation or a closure changes it, a start or a resumption contradicts it; once closed only a
+    resumption changes it, a closure confirms it, anything else contradicts it. The same status always confirms -
+    another outlet reporting the same start or escalation. The migration 5d0c7e1a9b42 replayed the reports assigned
+    before with a copy of this rule: change both together only if it is to apply to the past as well."""
+    if reported == EventStatus.UNKNOWN:
+        return StateEffect.NONE
+    if current is None:
+        return StateEffect.VERSION
+    if reported == current:
+        return StateEffect.CONFIRMS
+    if current == EventStatus.CLOSURE:
+        return StateEffect.VERSION if reported == EventStatus.RESUMPTION else StateEffect.CONTRADICTS
+    if reported == EventStatus.UPDATE:
+        return StateEffect.CONFIRMS
+    if reported in (EventStatus.ESCALATION, EventStatus.CLOSURE):
+        return StateEffect.VERSION
+    return StateEffect.CONTRADICTS
 
 
 class UnusableChoice(Exception):
@@ -149,6 +193,9 @@ def _apply(connection: Connection, candidate: Row, decision: Decision) -> int:
         event_id = event_repository.create_event(connection, values)
     score = None if decision.score is None else round(decision.score, 3)
     event_repository.assign(connection, candidate.id, event_id, decision.method, score, candidate.moment)
+    current = event_repository.state_at(connection, event_id, candidate.moment)
+    if state_effect(current, candidate.status) == StateEffect.VERSION:
+        event_repository.add_state(connection, event_id, candidate.status, candidate.moment, candidate.id)
     return event_id
 
 
@@ -253,12 +300,17 @@ class EventListItem:
     country: str | None
     first_reported_at: datetime
     last_reported_at: datetime
+    state: str | None  # of its latest version; None while no report stated a known one
     report_count: int
     source_count: int
 
     @property
     def type_label(self) -> str:
         return EVENT_TYPE_LABELS[self.event_type]
+
+    @property
+    def state_label(self) -> str:
+        return STATUS_LABELS[self.state] if self.state else "–"
 
 
 @dataclass(frozen=True)
@@ -282,10 +334,18 @@ class ReportView:
     article_url: str
     moment: datetime
     source_display_name: str
+    effect: StateEffect = StateEffect.NONE  # on the state in effect at its time, as the versions stand now
+    contradicted_state: str | None = None  # the state it contradicts
 
     @property
     def status_label(self) -> str:
         return STATUS_LABELS[self.status]
+
+    @property
+    def effect_label(self) -> str:
+        if self.effect == StateEffect.CONTRADICTS:
+            return f"{EFFECT_LABELS[self.effect]} ({STATUS_LABELS[self.contradicted_state]})"
+        return EFFECT_LABELS[self.effect]
 
     @property
     def method_label(self) -> str:
@@ -299,9 +359,33 @@ class ReportView:
 
 
 @dataclass(frozen=True)
+class StateView:
+    """A version of the event's state with the report that stated it."""
+
+    id: int
+    status: str
+    valid_from: datetime
+    recorded_at: datetime
+    candidate_id: int | None
+    report_title: str | None  # None once its article is gone
+    time_note: str | None
+    article_id: int | None
+    source_display_name: str | None
+
+    @property
+    def status_label(self) -> str:
+        return STATUS_LABELS[self.status]
+
+
+@dataclass(frozen=True)
 class EventDetail:
     event: EventListItem
     reports: list[ReportView] = field(default_factory=list)  # the earliest first
+    states: list[StateView] = field(default_factory=list)  # the earliest first
+
+    @property
+    def contradictions(self) -> int:
+        return sum(report.effect == StateEffect.CONTRADICTS for report in self.reports)
 
 
 def overview(engine: Engine) -> EventOverview:
@@ -317,9 +401,10 @@ def detail(engine: Engine, event_id: int) -> EventDetail | None:
         row = event_repository.get(connection, event_id)
         if row is None:
             return None
-        reports = [_report(each) for each in event_repository.reports(connection, event_id)]
+        states = [_state(each) for each in event_repository.states(connection, event_id)]
+        reports = [_report(each, states) for each in event_repository.reports(connection, event_id)]
     counts = {"report_count": len(reports), "source_count": len({report.source_display_name for report in reports})}
-    return EventDetail(_list_item(row, **counts), reports)
+    return EventDetail(_list_item(row, **counts), reports, states)
 
 
 def _list_item(row: Row, **values) -> EventListItem:
@@ -327,5 +412,21 @@ def _list_item(row: Row, **values) -> EventListItem:
     return EventListItem(**{each.name: mapping[each.name] for each in fields(EventListItem)})
 
 
-def _report(row: Row) -> ReportView:
-    return ReportView(**{each.name: row._mapping[each.name] for each in fields(ReportView)})
+def _report(row: Row, states: list[StateView]) -> ReportView:
+    """A report with what it does to the version in effect at its time; the versions are the earliest first."""
+    values = {each.name: row._mapping[each.name] for each in fields(ReportView) if each.name in row._mapping}
+    report = ReportView(**values)
+    if any(state.candidate_id == report.id for state in states):
+        return replace(report, effect=StateEffect.VERSION)
+    in_effect = [state.status for state in states if state.valid_from <= report.moment]
+    current = in_effect[-1] if in_effect else None
+    effect = state_effect(current, report.status)
+    # A change by today's versions that made none when it was assigned: a late report has since added a version
+    # before it. Neither confirming nor contradicting, it stays without a label rather than a guess.
+    if effect == StateEffect.VERSION:
+        effect = StateEffect.NONE
+    return replace(report, effect=effect, contradicted_state=current if effect == StateEffect.CONTRADICTS else None)
+
+
+def _state(row: Row) -> StateView:
+    return StateView(**{each.name: row._mapping[each.name] for each in fields(StateView)})

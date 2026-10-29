@@ -24,7 +24,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ## Backlog
 
 ### Epic: Ereignisidentität und zeitliche Entwicklung
-2. As an analyst, I want every change to an event's state (start, update, escalation, closure, resumption) stored as a timestamped version with its source evidence, and contradicting reports kept side by side instead of merged into one fact, so the development of an event is traceable.
 3. As an analyst, I want to merge and split wrongly grouped events, with every merge and split recorded in an audit trail, so grouping errors can be corrected.
 
 ### Epic: Entitäten und Wissensmodell
@@ -103,6 +102,8 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ### Epic: Ereignisidentität und zeitliche Entwicklung
 1. As an analyst, I want each event candidate assigned to an existing event (Ereignis) or turned into a new event with a stable event ID, so several reports about the same event form one consistent event record.
    - Decided (2026-10-24): the same event is one incident with its direct continuation, not the same topic; a candidate is compared by TF-IDF cosine of its English title, summary, place and actors with the events whose reports reach to within 7 days of its own (open for 7 days after the last report, and a report found late by a backfill may precede the first by as much) - from 0.5 assigned, below 0.2 a new event, in between the LLM decides among up to 3; never to an event with a candidate of the same article; a list of events and a page per event, read-only.
+2. As an analyst, I want every change to an event's state (start, update, escalation, closure, resumption) stored as a timestamped version with its source evidence, and contradicting reports kept side by side instead of merged into one fact, so the development of an event is traceable.
+   - Decided (2026-10-29): a report is compared with the state in effect at its own time (publication, else fetch): the earliest known status founds the state; while ongoing an update confirms, an escalation or a closure is a new version, a start or a resumption contradicts; while closed a closure confirms, a resumption is a new version, anything else contradicts; unknown has no effect. A contradicting report changes nothing and stays visible next to the state. Versions are appended, never changed, with the time they were recorded; the existing reports are replayed by the migration in the order they were assigned.
 
 ### Epic: Admin / Settings UX
 1. As an admin, I want a settings page with multiple independent sections to show a quick-navigation row and collapsible sections, so I can jump straight to and focus on just the part I need.

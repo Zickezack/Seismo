@@ -493,6 +493,30 @@ class EventCandidate(Base):
     )
 
 
+class EventState(Base):
+    """One version of an event's state (UI term: Ereigniszustand), stated by one report (event_service.state_effect).
+    Appended, never changed (datamodel.md, rule 3)."""
+
+    __tablename__ = "event_state"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(20))
+    # The time of the report that stated it: its article's publication, else its fetch.
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # The report; the version stays should its article ever go.
+    candidate_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("event_candidate.id", ondelete="SET NULL"), index=True
+    )
+    # When Seismo learned it (datamodel.md, rule 11): a late report may state an earlier version.
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(status.in_([s.value for s in EventStatus if s != EventStatus.UNKNOWN]), name="status"),
+        Index("ix_event_state_event_id_valid_from", event_id, valid_from),
+    )
+
+
 class Statement(Base):
     """One statement of an event candidate (UI term: Aussage), with its kind (datamodel.md, rule 6)."""
 

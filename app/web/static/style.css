@@ -476,7 +476,8 @@ a:focus-visible {
 }
 
 .status-claim,
-.status-source_forecast {
+.status-source_forecast,
+.status-contradicts {
   color: var(--color-warning-text);
   background: var(--color-warning-background);
 }

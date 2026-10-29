@@ -20,6 +20,7 @@ from app.llm.ollama import OllamaClient
 from app.repositories import extraction_repository
 from app.services import event_service, job_service
 from app.services.event_service import ASSIGN_FROM, NEW_BELOW
+from tests.integration.alembic_helpers import downgrade, upgrade
 from tests.integration.test_duplicates import database  # noqa: F401
 from tests.integration.test_extraction import Ollama, refused, source
 from tests.integration.test_ingestion import NOW, jobs
@@ -41,7 +42,7 @@ def reported(database, key, *reports, published_at=NOW):
     """An article of `published_at` whose extraction found these reports; their candidate ids."""
     article_id = article(database, source(database, f"Q{key}"), key, published_at=published_at, url=f"https://news.example/{key}.html")
     candidates = [
-        {"event_type": each["event_type"], "status": "start", "title": each["title"], "summary": each["summary"],
+        {"event_type": each["event_type"], "status": each.get("status", "start"), "title": each["title"], "summary": each["summary"],
          "country": each["country"], "place": each["place"], "actors": [{"name": name, "role": "", "quote": name} for name in each["actors"]],
          "impacts": [], "statements": []}
         for each in reports
@@ -226,3 +227,62 @@ def test_an_llm_decision_the_events_to_choose_from_changed_under_is_made_again(d
         effect(connection)
 
     assert assigned(database)[rescue].event_id is None
+
+
+def versions(database, event_id):
+    return [(state.status, state.candidate_id) for state in event_service.detail(database, event_id).states]
+
+
+def test_a_change_adds_a_version_a_contradiction_stays_beside_it(database):
+    hours = [NOW - timedelta(hours=back) for back in (4, 3, 2, 1, 0)]
+    [start] = reported(database, "a", QUAKE | {"status": "start"}, published_at=hours[0])
+    [worse] = reported(database, "b", SAME_QUAKE | {"status": "escalation"}, published_at=hours[1])
+    [again] = reported(database, "c", SAME_QUAKE | {"status": "start"}, published_at=hours[2])
+    [over] = reported(database, "d", SAME_QUAKE | {"status": "closure"}, published_at=hours[3])
+    [back] = reported(database, "e", SAME_QUAKE | {"status": "resumption"}, published_at=hours[4])
+
+    assign_all(database, Ollama(status=503))
+
+    event_id = assigned(database)[start].event_id
+    assert {row.event_id for row in assigned(database).values()} == {event_id}
+    assert versions(database, event_id) == [("start", start), ("escalation", worse), ("closure", over), ("resumption", back)]
+    detail = event_service.detail(database, event_id)
+    assert [state.valid_from for state in detail.states] == [hours[0], hours[1], hours[3], hours[4]]
+    assert all(state.recorded_at is not None for state in detail.states)
+    assert [report.effect_label for report in detail.reports] == [
+        "Zustandswechsel", "Zustandswechsel", "widerspricht (Eskalation)", "Zustandswechsel", "Zustandswechsel"
+    ]
+    assert (detail.event.state, detail.contradictions) == ("resumption", 1)
+    assert event_service.overview(database).events[0].state == "resumption"
+
+
+def test_a_late_report_adds_its_version_where_it_belongs_and_never_replaces_one(database):
+    [start] = reported(database, "a", QUAKE | {"status": "start"}, published_at=NOW - timedelta(hours=2))
+    [over] = reported(database, "b", SAME_QUAKE | {"status": "closure"}, published_at=NOW)
+    assign_all(database, Ollama(status=503))
+    # Found later, by a backfill: an escalation between the two, and an unknown status.
+    [worse] = reported(database, "c", SAME_QUAKE | {"status": "escalation"}, published_at=NOW - timedelta(hours=1))
+    [vague] = reported(database, "d", SAME_QUAKE | {"status": "unknown"}, published_at=NOW - timedelta(minutes=30))
+
+    assign_all(database, Ollama(status=503))
+
+    event_id = assigned(database)[start].event_id
+    assert assigned(database)[worse].event_id == assigned(database)[vague].event_id == event_id
+    assert versions(database, event_id) == [("start", start), ("escalation", worse), ("closure", over)]
+
+
+def test_the_migration_replays_the_assigned_reports_into_the_same_versions(database):
+    [start] = reported(database, "a", QUAKE | {"status": "update"}, published_at=NOW - timedelta(hours=2))
+    reported(database, "b", SAME_QUAKE | {"status": "start"}, published_at=NOW - timedelta(hours=1))
+    reported(database, "c", SAME_QUAKE | {"status": "closure"}, published_at=NOW)
+    assign_all(database, Ollama(status=503))
+    event_id = assigned(database)[start].event_id
+    recorded = versions(database, event_id)
+    assigned_at = {row.id: row.assigned_at for row in assigned(database).values()}
+
+    downgrade(database, "940fb34413a5")
+    upgrade(database)
+
+    assert versions(database, event_id) == recorded == [("update", start), ("closure", recorded[1][1])]
+    for state in event_service.detail(database, event_id).states:
+        assert state.recorded_at == assigned_at[state.candidate_id]

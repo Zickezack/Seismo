@@ -5,13 +5,20 @@ from datetime import datetime, timedelta
 from sqlalchemy import Connection, Row, exists, func, insert, literal, select, text, update
 from sqlalchemy.orm import aliased
 
-from app.db.models import Article, Event, EventCandidate, Job, Source
+from app.db.models import Article, Event, EventCandidate, EventState, Job, Source
 
 # Of the two-key advisory lock that serialises the assignments (7301 LLM slots, 7302 duplicate checks).
 EVENT_LOCK_NAMESPACE = 7303
 
 # When a report was made: its article's publication, else its fetch.
 _MOMENT = func.coalesce(Article.published_at, Article.fetched_at)
+# The version of an event's state in effect at a moment: the latest from before it, of equal times the one recorded last.
+_IN_EFFECT_ORDER = (EventState.valid_from.desc(), EventState.id.desc())
+# An event's state now: its latest version.
+_CURRENT_STATE = (
+    select(EventState.status).where(EventState.event_id == Event.id).order_by(*_IN_EFFECT_ORDER).limit(1)
+    .scalar_subquery().label("state")
+)
 
 
 def lock_assignment(connection: Connection) -> None:
@@ -42,13 +49,14 @@ def count_unassigned(connection: Connection) -> int:
 
 
 def get_for_assignment(connection: Connection, candidate_id: int) -> Row | None:
-    """What a candidate is compared by, its event if it has one, and when it was reported."""
+    """What a candidate is compared by, its event if it has one, when it was reported, and the state it reports."""
     statement = (
         select(
             EventCandidate.id,
             EventCandidate.article_id,
             EventCandidate.event_id,
             EventCandidate.event_type,
+            EventCandidate.status,
             EventCandidate.title,
             EventCandidate.summary,
             EventCandidate.country,
@@ -123,6 +131,45 @@ def assign(connection: Connection, candidate_id: int, event_id: int, method: str
     )
 
 
+def state_at(connection: Connection, event_id: int, moment: datetime) -> str | None:
+    """The status of the version in effect at `moment`; None before the event's first version."""
+    statement = (
+        select(EventState.status)
+        .where(EventState.event_id == event_id, EventState.valid_from <= moment)
+        .order_by(*_IN_EFFECT_ORDER)
+        .limit(1)
+    )
+    return connection.execute(statement).scalar_one_or_none()
+
+
+def add_state(connection: Connection, event_id: int, status: str, valid_from: datetime, candidate_id: int) -> None:
+    values = {"event_id": event_id, "status": status, "valid_from": valid_from, "candidate_id": candidate_id}
+    connection.execute(insert(EventState).values(values))
+
+
+def states(connection: Connection, event_id: int) -> Sequence[Row]:
+    """The event's versions, the earliest first, each with the report that stated it."""
+    statement = (
+        select(
+            EventState.id,
+            EventState.status,
+            EventState.valid_from,
+            EventState.recorded_at,
+            EventState.candidate_id,
+            EventCandidate.title.label("report_title"),
+            EventCandidate.time_note,
+            Article.id.label("article_id"),
+            func.coalesce(Source.name, Article.source_name).label("source_display_name"),
+        )
+        .outerjoin(EventCandidate, EventCandidate.id == EventState.candidate_id)
+        .outerjoin(Article, Article.id == EventCandidate.article_id)
+        .outerjoin(Source, Source.id == Article.source_id)
+        .where(EventState.event_id == event_id)
+        .order_by(EventState.valid_from, EventState.id)
+    )
+    return connection.execute(statement).all()
+
+
 def latest(connection: Connection, limit: int) -> Sequence[Row]:
     """The most recently reported events with their number of reports and of sources."""
     reports = (
@@ -138,7 +185,7 @@ def latest(connection: Connection, limit: int) -> Sequence[Row]:
         .subquery()
     )
     statement = (
-        select(Event.__table__, reports.c.report_count, reports.c.source_count)
+        select(Event.__table__, _CURRENT_STATE, reports.c.report_count, reports.c.source_count)
         .join(reports, reports.c.event_id == Event.id)
         .order_by(Event.last_reported_at.desc(), Event.id.desc())
         .limit(limit)
@@ -151,7 +198,7 @@ def count(connection: Connection) -> int:
 
 
 def get(connection: Connection, event_id: int) -> Row | None:
-    return connection.execute(select(Event.__table__).where(Event.id == event_id)).one_or_none()
+    return connection.execute(select(Event.__table__, _CURRENT_STATE).where(Event.id == event_id)).one_or_none()
 
 
 def reports(connection: Connection, event_id: int) -> Sequence[Row]:
