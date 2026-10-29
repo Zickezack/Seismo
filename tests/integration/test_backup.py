@@ -133,6 +133,15 @@ def test_a_backup_job_is_queued_once_while_one_is_due(database, backup_dir):
     assert job_count(database) == 1
 
 
+def test_a_backup_now_is_queued_besides_the_schedule_but_never_twice(database, backup_dir, test_settings):
+    (backup_dir / backup_service.backup_name(test_settings.postgres_db, NOW)).touch()
+
+    assert backup_service.enqueue_now(database) is not None
+    assert backup_service.enqueue_now(database) is None
+    assert backup_service.enqueue_if_due(database, backup_dir, now=NOW + timedelta(days=2)) is None
+    assert job_count(database) == 1
+
+
 def test_no_backup_job_while_the_newest_backup_is_younger_than_the_interval(database, backup_dir, test_settings):
     platform_settings_service.save(database, {"backup_interval_hours": "6"})
     (backup_dir / backup_service.backup_name(test_settings.postgres_db, NOW)).touch()

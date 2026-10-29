@@ -61,6 +61,9 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}
       OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-}
     restart: unless-stopped
+    volumes:
+      # The same backups as the worker's: the Plattform-Einstellungen list them, download them and take uploads.
+      - ${BACKUP_HOST_DIR:-db-backups}:/backups
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

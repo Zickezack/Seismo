@@ -3,19 +3,23 @@
 A backup is a pg_dump file `<database>-<UTC time>.dump` in the backup directory (Settings.backup_dir).
 The newest file is the schedule: a backup is due once it is older than the backup interval
 (Plattform-Einstellungen), so a manual backup counts as well and a new interval applies at once.
+An uploaded backup (`<database>-upload-<UTC time>.dump`) waits for a restore and counts for neither.
 """
 import logging
 import re
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import BinaryIO
 
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.repositories import backup_repository
 from app.services import job_service, platform_settings_service
+from app.services.bulk import BulkResult
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +34,19 @@ PREVIOUS_SUFFIX = "_before_restore_"
 # PostgreSQL cuts longer database names, which could make two of them equal.
 MAX_DATABASE_NAME_BYTES = 63
 SWAP_ATTEMPTS = 3
+# An uploaded backup is `<database>-upload-<UTC time>.dump`: created_at_of never reads it as a backup made here.
+UPLOAD_MARK = "-upload"
+UPLOAD_PARTIAL_SUFFIX = ".dump.uploading"
+# The first bytes of a file in pg_dump's custom format, the one create_backup writes.
+PG_DUMP_SIGNATURE = b"PGDMP"
 
 
 class RestoreError(Exception):
     """The restore cannot start or did not finish; the database is unchanged. Shown to the admin as is."""
+
+
+class InvalidBackup(ValueError):
+    """An upload that is kept as no backup; nothing was stored. Shown to the admin as is."""
 
 
 @dataclass(frozen=True)
@@ -41,6 +54,16 @@ class BackupFile:
     path: Path
     created_at: datetime  # UTC, from the file name
     size_bytes: int
+
+
+@dataclass(frozen=True)
+class StoredBackup:
+    """A backup file as the Plattform-Einstellungen list it."""
+
+    name: str
+    created_at: datetime  # UTC: when it was made here, or uploaded
+    size_bytes: int
+    uploaded: bool
 
 
 @dataclass(frozen=True)
@@ -77,6 +100,70 @@ def list_backups(backup_dir: Path, database: str) -> list[BackupFile]:
     return sorted(backups, key=lambda backup: backup.created_at, reverse=True)
 
 
+def stored_backups(backup_dir: Path, database: str) -> list[StoredBackup]:
+    """Every backup file of this database the admin can download, delete or restore: the complete backups and
+    the uploaded ones, newest first."""
+    stored = [StoredBackup(backup.path.name, backup.created_at, backup.size_bytes, False)
+              for backup in list_backups(backup_dir, database)]
+    for path in backup_repository.files(backup_dir, BACKUP_SUFFIX):
+        uploaded_at = created_at_of(f"{database}{UPLOAD_MARK}", path.name)
+        if uploaded_at is not None:
+            stored.append(StoredBackup(path.name, uploaded_at, path.stat().st_size, True))
+    return sorted(stored, key=lambda backup: backup.created_at, reverse=True)
+
+
+def stored_path(backup_dir: Path, database: str, name: str) -> Path | None:
+    """The file of a listed backup; None for any other name, so a request never reaches another file."""
+    if name in {backup.name for backup in stored_backups(backup_dir, database)}:
+        return backup_dir / name
+    return None
+
+
+def store_upload(backup_dir: Path, database: str, source: BinaryIO, now: datetime | None = None) -> StoredBackup:
+    """Keep an uploaded pg_dump file for a restore from the command line (README.md, "Restore").
+
+    Its name marks it as uploaded: the schedule and the number of backups to keep count only the backups made
+    here, so an upload neither delays the next backup nor pushes one out.
+    """
+    if source.read(len(PG_DUMP_SIGNATURE)) != PG_DUMP_SIGNATURE:
+        raise InvalidBackup("Die Datei ist kein Backup von pg_dump (Format custom), wie es Seismo anlegt.")
+    source.seek(0)
+    if not backup_dir.is_dir():
+        raise InvalidBackup(f"Backup-Verzeichnis {backup_dir} fehlt (BACKUP_DIR, README.md).")
+    now = now or datetime.now(UTC)
+    target = backup_dir / backup_name(f"{database}{UPLOAD_MARK}", now)
+    partial = target.with_name(target.name.removesuffix(BACKUP_SUFFIX) + UPLOAD_PARTIAL_SUFFIX)
+    try:
+        backup_repository.save(source, partial)
+        partial.rename(target)
+    except FileExistsError:
+        raise InvalidBackup("Eben wurde schon ein Backup hochgeladen, bitte in einer Sekunde erneut.") from None
+    finally:
+        backup_repository.delete([partial])
+    backup = StoredBackup(target.name, now, target.stat().st_size, True)
+    logger.info("Backup uploaded", extra={"file": target.name, "size_bytes": backup.size_bytes})
+    return backup
+
+
+def delete_stored(backup_dir: Path, database: str, names: Iterable[str]) -> BulkResult:
+    """Delete the selected backup files, all or nothing: a name that is not listed (meanwhile deleted by the
+    number to keep, or never a backup) deletes none."""
+    names = sorted(set(names))
+    listed = {backup.name for backup in stored_backups(backup_dir, database)}
+    blocked = [f"{name} (nicht gefunden)" for name in names if name not in listed]
+    if blocked or not names:
+        return BulkResult(processed=0, blocked=blocked)
+    backup_repository.delete([backup_dir / name for name in names])
+    logger.info("Backups deleted", extra={"files": names})
+    return BulkResult(processed=len(names), blocked=[])
+
+
+def enqueue_now(engine: Engine) -> int | None:
+    """Queue a backup besides the schedule; None while one is waiting or running already."""
+    with engine.begin() as connection:
+        return _enqueue(connection)
+
+
 def is_due(backups: list[BackupFile], interval_hours: int, now: datetime) -> bool:
     return not backups or now - backups[0].created_at >= timedelta(hours=interval_hours)
 
@@ -90,12 +177,16 @@ def enqueue_if_due(engine: Engine, backup_dir: Path, now: datetime | None = None
         interval_hours = platform_settings_service.load(connection).backup_interval_hours
         if not is_due(list_backups(backup_dir, database), interval_hours, now):
             return None
-        return job_service.enqueue(
-            connection,
-            job_service.BACKUP_JOB_KIND,
-            dedupe_key=job_service.BACKUP_JOB_KIND,
-            max_attempts=job_service.BACKUP_MAX_ATTEMPTS,
-        )
+        return _enqueue(connection)
+
+
+def _enqueue(connection: Connection) -> int | None:
+    return job_service.enqueue(
+        connection,
+        job_service.BACKUP_JOB_KIND,
+        dedupe_key=job_service.BACKUP_JOB_KIND,
+        max_attempts=job_service.BACKUP_MAX_ATTEMPTS,
+    )
 
 
 def create_backup(

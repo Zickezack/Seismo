@@ -46,6 +46,8 @@
         </select>
         <button class="button button-secondary" type="submit" formaction="/sources/set-region" data-bulk-action data-testid="set-region" disabled>Region setzen</button>
       </span>
+      {# A download: the page stays, the selection too (Import in the Plattform-Einstellungen). #}
+      <button class="button button-secondary" type="submit" formaction="/sources/export" data-bulk-action data-testid="export" disabled>Exportieren</button>
       <button class="button button-danger" type="submit" formaction="/sources/delete" data-bulk-action data-confirm="Quelle|Quellen" data-testid="delete" disabled>Löschen</button>
     </div>
     <a class="button" href="/sources/new" data-testid="new-source">Quelle hinzufügen</a>

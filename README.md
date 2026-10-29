@@ -104,7 +104,9 @@ deleted. Both are set under **Einstellungen -> Backups** (default: every 24 hour
 
 - File: `<POSTGRES_DB>-<UTC time>.dump`, e.g. `seismo-20261023T030000Z.dump`, compressed `pg_dump`
   format. A dump that broke off never gets this name.
-- Place: `/backups` in the worker container. By default that is the Docker volume `db-backups` on the
+- Uploaded: `<POSTGRES_DB>-upload-<UTC time>.dump`, a backup from elsewhere waiting for a restore. It
+  counts neither for the schedule nor for the number to keep, and stays until it is deleted.
+- Place: `/backups` in the worker and the api container (the api lists, serves and takes uploads). By default that is the Docker volume `db-backups` on the
   same disk as the database - it covers mistakes and broken migrations, not a lost disk. For that, set
   `BACKUP_HOST_DIR` to an absolute host path, e.g. a mounted NAS share, writable for user id 10001:
   `sudo install -d -o 10001 /mnt/nas/seismo-backups`.
@@ -119,6 +121,19 @@ the worker container's console):
 python -m app.backup list      # the backups, newest first
 python -m app.backup create    # a backup now, e.g. before a risky change
 ```
+
+The same without a console, under **Einstellungen -> Backup-Dateien**: every backup with download, upload of
+a backup file (only `pg_dump`'s custom format, as Seismo writes it), deleting selected ones, and "Backup jetzt
+erstellen", which queues the job. A restore cannot run from there - it needs api and worker stopped.
+
+### Configuration export and import
+
+**Einstellungen -> Import und Export** writes the Plattform-Einstellungen and all Quellen into one JSON file,
+to set up a new instance; the source list exports selected Quellen (bulk action "Exportieren"). A Quelle carries
+the fields of its form only - no fetch status, no articles, and never an access key, which stays in the
+environment (`RELIEFWEB_APPNAME`, `EIA_API_KEY`). The import takes the Einstellungen, the Quellen or both: the
+whole file is checked first and an invalid one changes nothing; a Quelle whose name exists is skipped, never
+overwritten. Articles and events go with the backups.
 
 ### Restore
 

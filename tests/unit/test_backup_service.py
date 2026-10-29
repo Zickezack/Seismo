@@ -1,3 +1,4 @@
+import io
 import threading
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -11,7 +12,8 @@ from app.jobs.errors import JobInterrupted
 from app.repositories import backup_repository
 from app.repositories.backup_repository import ToolFailed, ToolInterrupted
 from app.services import backup_service, platform_settings_service
-from app.services.backup_service import RestoreError
+from app.services.backup_service import InvalidBackup, RestoreError
+from app.services.bulk import BulkResult
 from app.services.platform_settings_service import PlatformSettings
 
 NOW = datetime(2026, 10, 23, 3, 0, 5, tzinfo=UTC)
@@ -194,3 +196,71 @@ def test_backup_job_goes_back_into_the_queue_when_the_worker_stops(monkeypatch, 
 
     with pytest.raises(JobInterrupted):
         handlers.run_backup_job(ENGINE, tmp_path, threading.Event())
+
+
+def test_the_list_shows_backups_made_here_and_uploaded_ones_newest_first_and_nothing_else(tmp_path):
+    touch(tmp_path, "seismo-20261023T030000Z.dump")
+    touch(tmp_path, "seismo-upload-20261024T120000Z.dump")
+    touch(tmp_path, "seismo-20261022T030000Z.dump")
+    for other in ("seismo-upload-20261025T120000Z.dump.uploading", "other-20261025T030000Z.dump", "notes.txt"):
+        touch(tmp_path, other)
+
+    stored = backup_service.stored_backups(tmp_path, "seismo")
+
+    assert [(backup.name, backup.uploaded) for backup in stored] == [
+        ("seismo-upload-20261024T120000Z.dump", True),
+        ("seismo-20261023T030000Z.dump", False),
+        ("seismo-20261022T030000Z.dump", False),
+    ]
+    assert stored[0].created_at == datetime(2026, 10, 24, 12, tzinfo=UTC) and stored[0].size_bytes == 4
+
+
+def test_an_uploaded_backup_is_kept_under_its_own_name_and_never_counts_for_the_schedule(tmp_path):
+    touch(tmp_path, "seismo-20261020T030000Z.dump")
+
+    backup = backup_service.store_upload(tmp_path, "seismo", io.BytesIO(b"PGDMP\x01\x0e rest of the dump"), NOW)
+
+    assert backup.name == "seismo-upload-20261023T030005Z.dump" and backup.uploaded
+    assert (tmp_path / backup.name).read_bytes() == b"PGDMP\x01\x0e rest of the dump"
+    assert [found.path.name for found in backup_service.list_backups(tmp_path, "seismo")] == [
+        "seismo-20261020T030000Z.dump"
+    ]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["seismo-20261020T030000Z.dump", backup.name]
+
+
+@pytest.mark.parametrize("content", [b"", b"SQLite format 3\x00", b"-- PostgreSQL database dump\n"])
+def test_an_upload_that_is_no_pg_dump_file_is_not_stored(tmp_path, content):
+    with pytest.raises(InvalidBackup, match="kein Backup von pg_dump"):
+        backup_service.store_upload(tmp_path, "seismo", io.BytesIO(content), NOW)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_upload_without_the_backup_directory_is_refused(tmp_path):
+    with pytest.raises(InvalidBackup, match="Backup-Verzeichnis"):
+        backup_service.store_upload(tmp_path / "missing", "seismo", io.BytesIO(b"PGDMP"), NOW)
+
+
+def test_only_a_listed_backup_is_served(tmp_path):
+    touch(tmp_path, "seismo-20261023T030000Z.dump")
+    touch(tmp_path, "notes.txt")
+
+    assert backup_service.stored_path(tmp_path, "seismo", "seismo-20261023T030000Z.dump") == (
+        tmp_path / "seismo-20261023T030000Z.dump"
+    )
+    for name in ("notes.txt", "../seismo-20261023T030000Z.dump", "seismo-20261024T030000Z.dump"):
+        assert backup_service.stored_path(tmp_path, "seismo", name) is None
+
+
+def test_deleting_backups_is_all_or_nothing(tmp_path):
+    made = touch(tmp_path, "seismo-20261023T030000Z.dump")
+    uploaded = touch(tmp_path, "seismo-upload-20261024T120000Z.dump")
+    notes = touch(tmp_path, "notes.txt")
+
+    result = backup_service.delete_stored(tmp_path, "seismo", [made.name, "notes.txt"])
+
+    assert result == BulkResult(processed=0, blocked=["notes.txt (nicht gefunden)"])
+    assert made.exists() and notes.exists()
+
+    assert backup_service.delete_stored(tmp_path, "seismo", [made.name, uploaded.name, made.name]) == BulkResult(2, [])
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["notes.txt"]

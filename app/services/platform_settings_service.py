@@ -262,6 +262,20 @@ def current(engine: Engine) -> PlatformSettings:
 
 def save(engine: Engine, form: Mapping[str, str]) -> PlatformSettings:
     """Save the settings a form sent; other settings stay as they are. One invalid value changes nothing."""
+    values = parse(form)
+    with engine.begin() as connection:
+        store(connection, values)
+        return load(connection)
+
+
+def store(connection: Connection, values: Mapping[str, object]) -> None:
+    """Write checked values (from parse) inside the caller's transaction."""
+    if values:
+        platform_settings_repository.save(connection, dict(values))
+
+
+def parse(form: Mapping[str, str]) -> dict[str, object]:
+    """Check the settings among the form's fields, others are ignored; all errors together in one InvalidSetting."""
     values, errors = {}, []
     for name, raw in form.items():
         field = FORM_FIELDS.get(name)
@@ -273,7 +287,4 @@ def save(engine: Engine, form: Mapping[str, str]) -> PlatformSettings:
             errors.append(str(error))
     if errors:
         raise InvalidSetting(" ".join(errors))
-    with engine.begin() as connection:
-        if values:
-            platform_settings_repository.save(connection, values)
-        return load(connection)
+    return values

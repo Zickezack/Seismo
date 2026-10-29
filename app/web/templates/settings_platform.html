@@ -59,9 +59,96 @@
 {# Quick navigation for several sections (requirements.md, "Basic UI Requirements / Styleguide", item 4). #}
 <nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
   {% for id, title, _ in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+  <a href="#backup-dateien" data-testid="section-nav-backup-dateien">Backup-Dateien</a>
+  <a href="#import-export" data-testid="section-nav-import-export">Import und Export</a>
   <a href="#starterdaten" data-testid="section-nav-starterdaten">Starterdaten</a>
 </nav>
 {% for id, title, names in sections %}{{ section(id, title, names) }}{% endfor %}
+
+{# Every database backup, also the uploaded ones; a restore stays the command line, with api and worker stopped
+   (README.md, "Restore"). #}
+<details class="card section" id="backup-dateien" open data-testid="section-backup-dateien">
+  <summary><h2>Backup-Dateien</h2></summary>
+  <div class="stack">
+    {% if not backup_dir_exists %}
+    <p class="hint hint-error" data-testid="backup-dir-missing">Das Backup-Verzeichnis ist für die Weboberfläche nicht erreichbar (BACKUP_DIR, docker-compose.yml): keine Liste, kein Upload.</p>
+    {% endif %}
+    <form class="stack" method="post" action="/settings/platform/backups/delete" data-bulk-form data-testid="backup-list">
+      <div class="toolbar">
+        <div class="actions">
+          <button class="button button-danger" type="submit" data-bulk-action data-confirm="Backup|Backups" data-testid="delete-backups" disabled>Löschen</button>
+        </div>
+        <button class="button" type="submit" formaction="/settings/platform/backups/create" data-testid="create-backup">Backup jetzt erstellen</button>
+      </div>
+      {% if backups %}
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Backups auswählen" data-testid="select-all-backups"></th>
+              <th>Datei</th>
+              <th>Erstellt</th>
+              <th>Grösse</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for backup in backups %}
+            <tr data-testid="backup-{{ loop.index }}">
+              <td class="cell-select"><input type="checkbox" name="backup" value="{{ backup.name }}" data-select-row data-name="{{ backup.name }}" aria-label="{{ backup.name }} auswählen" data-testid="select-backup-{{ loop.index }}"></td>
+              <td class="cell-wrap"><a href="/settings/platform/backups/{{ backup.name }}" download data-testid="download-backup-{{ loop.index }}">{{ backup.name }}</a></td>
+              <td>{{ backup.created_at|local_time }}{% if backup.uploaded %} <span class="hint">hochgeladen</span>{% endif %}</td>
+              <td>{{ "%.1f"|format(backup.size_bytes / 1048576) }} MB</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p data-testid="no-backups">Noch keine Backups.</p>
+      {% endif %}
+    </form>
+    <p class="hint">Der Worker legt Backups nach dem Intervall unter Backups an und löscht die ältesten über der Anzahl hinaus; hochgeladene zählen dabei nicht mit und bleiben, bis sie hier gelöscht werden. Wiederherstellen: api und worker stoppen, dann <code>python -m app.backup restore &lt;Datei&gt;</code> im Worker-Container (README, „Restore“). Die bisherige Datenbank bleibt dabei erhalten.</p>
+    <form class="form-grid" method="post" action="/settings/platform/backups/upload" enctype="multipart/form-data" data-testid="backup-upload-form">
+      <div class="field field-wide">
+        <label for="backup-file">Backup hochladen</label>
+        <input id="backup-file" name="file" type="file" accept=".dump" required aria-describedby="backup-file-hint" data-testid="backup-file">
+        <p class="hint" id="backup-file-hint">Eine Datei von pg_dump, wie Seismo sie anlegt, z. B. von einer anderen Instanz; sie erscheint danach in der Liste.</p>
+      </div>
+      <div class="form-actions">
+        <button class="button button-secondary" type="submit" data-testid="upload-backup">Hochladen</button>
+      </div>
+    </form>
+  </div>
+</details>
+
+{# The configuration as a JSON file: Plattform-Einstellungen and Quellen, no collected data, no secrets
+   (requirements.md, "Settings", item 4). Selected Quellen export from the source list. #}
+<details class="card section" id="import-export" open data-testid="section-import-export">
+  <summary><h2>Import und Export</h2></summary>
+  <form class="form-grid" method="get" action="/settings/platform/export" data-testid="export-form">
+    <div class="field field-wide">
+      <span class="field-label">Exportieren</span>
+      <label class="checkbox-label"><input name="einstellungen" type="checkbox" checked data-testid="export-settings"> Plattform-Einstellungen</label>
+      <label class="checkbox-label"><input name="quellen" type="checkbox" checked data-testid="export-sources"> Alle Quellen</label>
+      <p class="hint">Eine JSON-Datei, um eine neue Instanz einzurichten. Quellen ohne Abrufstatus und Artikel; Zugangsschlüssel stehen in keiner Quelle, sie bleiben in der Umgebung des Servers. Einzelne Quellen exportiert die Quellenliste („Exportieren“), Artikel und Ereignisse sichern die Backups.</p>
+    </div>
+    <div class="form-actions">
+      <button class="button button-secondary" type="submit" data-testid="export">Exportieren</button>
+    </div>
+  </form>
+  <form class="form-grid" method="post" action="/settings/platform/import" enctype="multipart/form-data" data-testid="import-form">
+    <div class="field field-wide">
+      <label for="import-file">Importieren</label>
+      <input id="import-file" name="file" type="file" accept=".json,application/json" required aria-describedby="import-file-hint" data-testid="import-file">
+      <label class="checkbox-label"><input name="einstellungen" type="checkbox" data-testid="import-take-settings"> Plattform-Einstellungen übernehmen (ersetzt die aktuellen)</label>
+      <label class="checkbox-label"><input name="quellen" type="checkbox" checked data-testid="import-take-sources"> Quellen anlegen</label>
+      <p class="hint" id="import-file-hint">Eine Exportdatei von Seismo, höchstens {{ max_import_mb }} MB. Die ganze Datei wird zuerst geprüft; ist etwas ungültig, ändert sich nichts. Eine Quelle, deren Name es hier schon gibt, wird übersprungen, nie überschrieben.</p>
+    </div>
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="import">Importieren</button>
+    </div>
+  </form>
+</details>
 
 {# Seed data comes in only through this button (architecture.md, "Seed Data"). #}
 <details class="card section" id="starterdaten" open data-testid="section-starterdaten">

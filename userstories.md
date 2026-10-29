@@ -23,9 +23,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 
 ## Backlog
 
-### Epic: Admin / Settings UX
-3. As an admin, mass import and export of settings and selected or all data, so I can quickly set up a new instance or back up an existing one.
-
 ### Epic: Ereignisidentität und zeitliche Entwicklung
 2. As an analyst, I want every change to an event's state (start, update, escalation, closure, resumption) stored as a timestamped version with its source evidence, and contradicting reports kept side by side instead of merged into one fact, so the development of an event is traceable.
 3. As an analyst, I want to merge and split wrongly grouped events, with every merge and split recorded in an audit trail, so grouping errors can be corrected.
@@ -112,6 +109,8 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
    - Done (2026-10-29): the Plattform-Einstellungen and the source form had both since the job queue and backfill stories; the article page added (Ereigniskandidaten, Duplikat, Duplikate, Ähnliche Artikel), every section collapsible, the quick navigation from three sections on.
 2. As an admin, I want to remove several list items at once (a checkbox per item plus one bulk action) instead of clicking a separate delete button per item.
    - Done (2026-10-29): already built with the source management (story 1 of Quellenadapter und Ingestion): Quellen are the only list items that can be deleted, and their list deletes the selected ones all or nothing, after the confirmation with countdown; no list has a delete button per row.
+3. As an admin, mass import and export of settings and selected or all data, so I can quickly set up a new instance or back up an existing one.
+   - Decided (2026-10-29): one JSON file with the Plattform-Einstellungen and the Quellen (form fields only, no status, no secrets), its scope named in the file; export of all from the Plattform-Einstellungen, of selected Quellen as a bulk action of the source list; import with a choice of Einstellungen and Quellen, the whole file checked first, a Quelle whose name exists skipped. Database backups listed, downloaded, uploaded (never counted by the schedule or the number kept), deleted and started in the Plattform-Einstellungen; a restore stays the command line, api and worker stopped.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.

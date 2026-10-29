@@ -34,6 +34,8 @@ def create_app(settings: Settings, auth_settings: AuthSettings) -> FastAPI:
     app.state.fetch_contact = settings.fetch_contact
     # Only shown: which LLM server the worker extracts with, and whether it serves the model (routes/settings.py).
     app.state.llm = (settings.ollama_base_url, settings.ollama_model, settings.ollama_num_ctx)
+    # The backups the Plattform-Einstellungen list, download and take uploads into (docker-compose.yml mounts them).
+    app.state.backup_dir = settings.backup_dir
     app.middleware("http")(log_requests)
     app.add_middleware(
         SessionMiddleware,

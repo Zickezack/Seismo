@@ -4,11 +4,13 @@ pg_dump and pg_restore come from scripts/install-postgres-client.sh. They get th
 PG* environment variables, so the password never shows up in a process list.
 """
 import os
+import shutil
 import subprocess
 import tempfile
 import threading
 from collections.abc import Iterable
 from pathlib import Path
+from typing import BinaryIO
 
 from sqlalchemy import URL, Connection, Engine, create_engine, text
 from sqlalchemy.exc import DBAPIError
@@ -57,6 +59,12 @@ def files(directory: Path, suffix: str) -> list[Path]:
     if not directory.is_dir():
         return []
     return [path for path in directory.iterdir() if path.name.endswith(suffix) and path.is_file()]
+
+
+def save(source: BinaryIO, target: Path) -> None:
+    """Copy an open file into `target`, which must not exist yet."""
+    with target.open("xb") as file:
+        shutil.copyfileobj(source, file)
 
 
 def delete(paths: Iterable[Path]) -> None:

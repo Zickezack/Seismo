@@ -7,11 +7,18 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from app.services import article_service, backfill_service, ingestion_service, platform_settings_service, source_service
+from app.services import (
+    article_service,
+    backfill_service,
+    ingestion_service,
+    platform_settings_service,
+    source_service,
+    transfer_service,
+)
 from app.services.backfill_service import InvalidBackfill
 from app.services.bulk import BulkResult
 from app.services.source_service import InvalidSource, Source
-from app.web.forms import form_values, wants_json
+from app.web.forms import download, form_values, wants_json
 from app.web.templating import flash, name_list, templates
 
 router = APIRouter(prefix="/sources", tags=["sources"])
@@ -93,6 +100,19 @@ def set_region(request: Request, source_ids: SourceIds = [], region: Annotated[s
         flash(request, str(error), "error")
         return RedirectResponse("/sources", status_code=303)
     return _after_bulk_action(request, result, f"der Region {source_service.REGIONS[region]} zugeordnet")
+
+
+@router.post("/export")
+def export_sources(request: Request, source_ids: SourceIds = []) -> Response:
+    """The selected Quellen as a file to import elsewhere (routes/settings.py); the page stays as it is."""
+    result = transfer_service.export_sources(request.app.state.engine, source_ids)
+    if result.file is None:
+        if result.blocked:
+            flash(request, f"Nichts exportiert, blockiert: {name_list(result.blocked)}.", "error")
+        else:
+            flash(request, "Keine Quellen ausgewählt.", "error")
+        return RedirectResponse("/sources", status_code=303)
+    return download(result.file)
 
 
 @router.post("/refetch-blocked")
