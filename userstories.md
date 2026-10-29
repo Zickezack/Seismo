@@ -23,6 +23,10 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 
 ## Backlog
 
+### Epic: Admin / Settings UX
+4. As an analyst, I want the lists - Artikel, Ereignisse, Quellen, Jobs and any other list where it helps - sortable by clicking a column header (ascending and descending) and filterable by the values of their columns where that is useful (e.g. Artikel by Quelle, language, Volltext status and period; Ereignisse by type, country, Zustand and period), across all items and not only the ones shown, with the chosen sort and filters kept in the URL, so I find what I am looking for in long lists and can bookmark a view.
+   - Note (2026-10-29): Artikel, Ereignisse and Jobs show only the newest 100 (`LIST_LIMIT`), so sorting and filtering must run in the database query, never only in the browser. The existing filters (Artikel: Quelle, Duplikate ausblenden; Quellen: Region, Sortieren nach; Jobs: Status) move into the same pattern. A header link works without JavaScript and marks the current order (`aria-sort`); without a choice each list keeps today's order (newest first, names by the ICU collation, `requirements.md`, "Lists and Ordering"). Filters that need entities (sector, company), relevance or time horizon belong to story 2 of Dashboard, Recherche und Alerts.
+
 ### Epic: Ereignisidentität und zeitliche Entwicklung
 3. As an analyst, I want to merge and split wrongly grouped events, with every merge and split recorded in an audit trail, so grouping errors can be corrected.
 
