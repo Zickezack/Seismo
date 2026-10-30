@@ -13,10 +13,12 @@ EVENT_LOCK_NAMESPACE = 7303
 # When a report was made: its article's publication, else its fetch.
 _MOMENT = func.coalesce(Article.published_at, Article.fetched_at)
 # The version of an event's state in effect at a moment: the latest from before it, of equal times the one recorded last.
+# A version a correction withdrew is never in effect.
 _IN_EFFECT_ORDER = (EventState.valid_from.desc(), EventState.id.desc())
+_NOT_WITHDRAWN = EventState.withdrawn_by_id.is_(None)
 # An event's state now: its latest version.
 _CURRENT_STATE = (
-    select(EventState.status).where(EventState.event_id == Event.id).order_by(*_IN_EFFECT_ORDER).limit(1)
+    select(EventState.status).where(EventState.event_id == Event.id, _NOT_WITHDRAWN).order_by(*_IN_EFFECT_ORDER).limit(1)
     .scalar_subquery().label("state")
 )
 
@@ -74,6 +76,12 @@ def get_for_assignment(connection: Connection, candidate_id: int) -> Row | None:
 def reports_near(connection: Connection, moment: datetime, window: timedelta) -> Sequence[Row]:
     """The reports of the events reported from `window` before `moment` to `window` after it: what a report of that
     moment is compared with."""
+    return reports_between(connection, moment - window, moment + window)
+
+
+def reports_between(connection: Connection, start: datetime, end: datetime) -> Sequence[Row]:
+    """The reports of the events whose reports reach into the time from `start` to `end`, with what they are compared
+    by."""
     statement = (
         select(
             EventCandidate.event_id,
@@ -84,7 +92,7 @@ def reports_near(connection: Connection, moment: datetime, window: timedelta) ->
             EventCandidate.actors,
         )
         .join(Event, Event.id == EventCandidate.event_id)
-        .where(Event.last_reported_at >= moment - window, Event.first_reported_at <= moment + window)
+        .where(Event.last_reported_at >= start, Event.first_reported_at <= end)
     )
     return connection.execute(statement).all()
 
@@ -135,20 +143,22 @@ def state_at(connection: Connection, event_id: int, moment: datetime) -> str | N
     """The status of the version in effect at `moment`; None before the event's first version."""
     statement = (
         select(EventState.status)
-        .where(EventState.event_id == event_id, EventState.valid_from <= moment)
+        .where(EventState.event_id == event_id, EventState.valid_from <= moment, _NOT_WITHDRAWN)
         .order_by(*_IN_EFFECT_ORDER)
         .limit(1)
     )
     return connection.execute(statement).scalar_one_or_none()
 
 
-def add_state(connection: Connection, event_id: int, status: str, valid_from: datetime, candidate_id: int) -> None:
-    values = {"event_id": event_id, "status": status, "valid_from": valid_from, "candidate_id": candidate_id}
+def add_state(
+    connection: Connection, event_id: int, status: str, valid_from: datetime, candidate_id: int, added_by_id: int | None = None
+) -> None:
+    values = {"event_id": event_id, "status": status, "valid_from": valid_from, "candidate_id": candidate_id, "added_by_id": added_by_id}
     connection.execute(insert(EventState).values(values))
 
 
 def states(connection: Connection, event_id: int) -> Sequence[Row]:
-    """The event's versions, the earliest first, each with the report that stated it."""
+    """The event's versions, the earliest first, each with the report that stated it - the withdrawn ones too."""
     statement = (
         select(
             EventState.id,
@@ -156,6 +166,8 @@ def states(connection: Connection, event_id: int) -> Sequence[Row]:
             EventState.valid_from,
             EventState.recorded_at,
             EventState.candidate_id,
+            EventState.added_by_id,
+            EventState.withdrawn_by_id,
             EventCandidate.title.label("report_title"),
             EventCandidate.time_note,
             Article.id.label("article_id"),
@@ -172,6 +184,17 @@ def states(connection: Connection, event_id: int) -> Sequence[Row]:
 
 def latest(connection: Connection, limit: int) -> Sequence[Row]:
     """The most recently reported events with their number of reports and of sources."""
+    statement = _listed().order_by(Event.last_reported_at.desc(), Event.id.desc()).limit(limit)
+    return connection.execute(statement).all()
+
+
+def listed(connection: Connection, event_ids: Iterable[int]) -> Sequence[Row]:
+    """These events as the list shows them; a merged one is left out."""
+    return connection.execute(_listed().where(Event.id.in_(list(event_ids)))).all()
+
+
+def _listed():
+    """The events with their state now and their number of reports and of sources; a merged event has none."""
     reports = (
         select(
             EventCandidate.event_id,
@@ -184,17 +207,21 @@ def latest(connection: Connection, limit: int) -> Sequence[Row]:
         .group_by(EventCandidate.event_id)
         .subquery()
     )
-    statement = (
+    return (
         select(Event.__table__, _CURRENT_STATE, reports.c.report_count, reports.c.source_count)
         .join(reports, reports.c.event_id == Event.id)
-        .order_by(Event.last_reported_at.desc(), Event.id.desc())
-        .limit(limit)
+        .where(Event.merged_into_id.is_(None))
     )
-    return connection.execute(statement).all()
 
 
 def count(connection: Connection) -> int:
-    return connection.execute(select(func.count()).select_from(Event)).scalar_one()
+    """The events, without the merged ones."""
+    return connection.execute(select(func.count()).select_from(Event).where(Event.merged_into_id.is_(None))).scalar_one()
+
+
+def titles(connection: Connection, event_ids: Iterable[int]) -> dict[int, str]:
+    statement = select(Event.id, Event.title).where(Event.id.in_(list(event_ids)))
+    return {row.id: row.title for row in connection.execute(statement)}
 
 
 def get(connection: Connection, event_id: int) -> Row | None:
@@ -220,5 +247,56 @@ def reports(connection: Connection, event_id: int) -> Sequence[Row]:
         .outerjoin(Source, Source.id == Article.source_id)
         .where(EventCandidate.event_id == event_id)
         .order_by(_MOMENT, EventCandidate.id)
+    )
+    return connection.execute(statement).all()
+
+
+def for_correction(connection: Connection, event_ids: Iterable[int]) -> dict[int, Row]:
+    """What a correction checks of the events: their name, the report they are named after, whether merged."""
+    statement = select(Event.id, Event.title, Event.founding_candidate_id, Event.merged_into_id).where(
+        Event.id.in_(list(event_ids))
+    )
+    return {row.id: row for row in connection.execute(statement)}
+
+
+def assigned_reports(connection: Connection, event_id: int) -> Sequence[Row]:
+    """The event's reports in the order they were assigned, with what they state and when: what a correction weighs
+    again and names a new event by."""
+    statement = (
+        select(
+            EventCandidate.id,
+            EventCandidate.title,
+            EventCandidate.event_type,
+            EventCandidate.country,
+            EventCandidate.status,
+            _MOMENT.label("moment"),
+        )
+        .join(Article, Article.id == EventCandidate.article_id)
+        .where(EventCandidate.event_id == event_id)
+        .order_by(EventCandidate.assigned_at, EventCandidate.id)
+    )
+    return connection.execute(statement).all()
+
+
+def refresh_reach(connection: Connection, event_id: int) -> None:
+    """The event's first and latest report as its reports stand after a correction moved some."""
+    reach = (
+        select(func.min(_MOMENT).label("first"), func.max(_MOMENT).label("last"))
+        .select_from(EventCandidate)
+        .join(Article, Article.id == EventCandidate.article_id)
+        .where(EventCandidate.event_id == event_id)
+    )
+    first, last = connection.execute(reach).one()
+    if first is not None:
+        connection.execute(update(Event).where(Event.id == event_id).values(first_reported_at=first, last_reported_at=last))
+
+
+def states_in_effect(connection: Connection, event_id: int) -> Sequence[Row]:
+    """The event's versions not withdrawn whose report is there: what a correction compares its replay with. One whose
+    report is gone stays as it is."""
+    statement = (
+        select(EventState.id, EventState.status, EventState.valid_from, EventState.candidate_id)
+        .where(EventState.event_id == event_id, _NOT_WITHDRAWN, EventState.candidate_id.is_not(None))
+        .order_by(EventState.id)
     )
     return connection.execute(statement).all()

@@ -322,15 +322,24 @@ a:focus-visible {
   gap: 0.5rem;
 }
 
-/* A choice for one bulk action and its button, kept together when the actions wrap, e.g. the region for
-   "Region setzen" (templates/sources.html). */
+/* A choice or an entry for one bulk action and its button, kept together when the actions wrap, e.g. the region for
+   "Region setzen" (templates/sources.html) or the reason of a merge (templates/event.html). Where both do not fit
+   side by side, the button goes below instead of breaking its label. */
 .action-group {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
 .actions select {
   width: auto;
+}
+
+/* A width, not a flex-basis: the group sizes itself by it, so entry and button share a row where they fit. */
+.action-group input {
+  flex: 1 1 auto;
+  width: 16rem;
+  min-width: 0;
 }
 
 /* Filter links, e.g. job status */

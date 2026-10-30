@@ -16,12 +16,14 @@ The development of an event (story 2): each report is weighed against the state 
 (state_effect), and one that changes it adds a version (Ereigniszustand) in the same transaction. Versions are only
 ever added. A report that contradicts the state changes nothing and stays beside it, as every report keeps its own
 statements: nothing is merged into one fact (datamodel.md, rule 6).
+
+Merges and splits by the analyst (story 3) live in event_correction_service; the event page shows them here.
 """
 import json
 import logging
 import math
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime, timedelta
@@ -29,11 +31,11 @@ from enum import StrEnum
 
 from sqlalchemy import Connection, Engine, Row
 
-from app.db.models import AssignmentMethod, EventStatus
+from app.db.models import AssignmentMethod, CorrectionKind, EventStatus
 from app.jobs.errors import JobDeferred
 from app.llm.limiter import LlmCallLimiter
 from app.llm.ollama import OllamaClient
-from app.repositories import event_repository
+from app.repositories import event_correction_repository, event_repository
 from app.services import job_service
 from app.services.extraction_service import EVENT_TYPE_LABELS, STATUS_LABELS
 
@@ -188,7 +190,7 @@ def _apply(connection: Connection, candidate: Row, decision: Decision) -> int:
         # The founding report names the event; later reports leave its name as it is.
         values = {
             "title": candidate.title, "event_type": candidate.event_type, "country": candidate.country,
-            "first_reported_at": candidate.moment, "last_reported_at": candidate.moment,
+            "first_reported_at": candidate.moment, "last_reported_at": candidate.moment, "founding_candidate_id": candidate.id,
         }
         event_id = event_repository.create_event(connection, values)
     score = None if decision.score is None else round(decision.score, 3)
@@ -205,6 +207,18 @@ def words(report) -> Counter:
     return Counter(word for word in _WORD.findall(text.lower()) if len(word) > 2 and word not in STOPWORDS)
 
 
+def _weighting(documents: list[Counter]) -> Callable[[Counter], dict[str, float]]:
+    """The TF-IDF weights of a document among `documents`: a word counts the more, the fewer of them have it."""
+    frequency = Counter(word for document in documents for word in document)
+    count = len(documents)
+
+    def weights(document: Counter) -> dict[str, float]:
+        # +1: a word all of a few documents have still counts a little.
+        return {word: (1 + math.log(n)) * math.log((count + 1) / frequency[word]) for word, n in document.items()}
+
+    return weights
+
+
 def matches(candidate, reports: Iterable) -> list[Match]:
     """The events of the reports by their similarity to the candidate, the most similar first: TF-IDF cosine, the
     words weighted by how few of the reports and the candidate have them. An event with a report of the candidate's
@@ -212,12 +226,7 @@ def matches(candidate, reports: Iterable) -> list[Match]:
     reports = list(reports)
     documents = [words(report) for report in reports]
     own = words(candidate)
-    frequency = Counter(word for document in [*documents, own] for word in document)
-    count = len(documents) + 1
-
-    def weights(document: Counter) -> dict[str, float]:
-        # +1: a word all of a few documents have still counts a little.
-        return {word: (1 + math.log(n)) * math.log((count + 1) / frequency[word]) for word, n in document.items()}
+    weights = _weighting([*documents, own])
 
     vector = weights(own)
     norm = math.sqrt(sum(value * value for value in vector.values()))
@@ -231,6 +240,33 @@ def matches(candidate, reports: Iterable) -> list[Match]:
         score = sum(value * other.get(word, 0.0) for word, value in vector.items()) / (norm * other_norm) if norm and other_norm else 0.0
         best[report.event_id] = max(score, best.get(report.event_id, 0.0))
     return sorted((Match(event_id, score) for event_id, score in best.items()), key=lambda match: (-match.score, match.event_id))
+
+
+def related(own: list, others: list) -> list[Match]:
+    """The events of the reports `others` by their similarity to an event's reports `own`, the most similar first, as
+    matches weighs a candidate: an event scores its report most similar to any of `own`. One sharing no word is left
+    out. Only shared words count, so each report of `others` meets only the reports of `own` it shares one with."""
+    documents = [words(report) for report in [*own, *others]]
+    weights = _weighting(documents)
+    vectors = [_unit(weights(document)) for document in documents]
+    by_word: dict[str, list[tuple[int, float]]] = defaultdict(list)
+    for position, vector in enumerate(vectors[:len(own)]):
+        for word, value in vector.items():
+            by_word[word].append((position, value))
+    best: dict[int, float] = {}
+    for report, vector in zip(others, vectors[len(own):], strict=True):
+        scores: Counter = Counter()
+        for word, value in vector.items():
+            for position, own_value in by_word.get(word, ()):
+                scores[position] += value * own_value
+        if scores:
+            best[report.event_id] = max(max(scores.values()), best.get(report.event_id, 0.0))
+    return sorted((Match(event_id, score) for event_id, score in best.items()), key=lambda match: (-match.score, match.event_id))
+
+
+def _unit(vector: dict[str, float]) -> dict[str, float]:
+    norm = math.sqrt(sum(value * value for value in vector.values()))
+    return {word: value / norm for word, value in vector.items()} if norm else {}
 
 
 def settled(found: list[Match]) -> Decision | None:
@@ -286,6 +322,7 @@ def chosen_number(content: str, count: int) -> int | None:
 
 
 METHOD_LABELS = {AssignmentMethod.NEW: "Neues Ereignis", AssignmentMethod.SCORE: "Ähnlichkeit", AssignmentMethod.LLM: "LLM"}
+CORRECTION_LABELS = {CorrectionKind.MERGE: "Zusammenführung", CorrectionKind.SPLIT: "Aufteilung"}
 
 
 def score_label(score: float | None) -> str:
@@ -300,7 +337,7 @@ class EventListItem:
     country: str | None
     first_reported_at: datetime
     last_reported_at: datetime
-    state: str | None  # of its latest version; None while no report stated a known one
+    state: str | None  # of its latest version in effect; None while no report stated a known one
     report_count: int
     source_count: int
 
@@ -336,6 +373,8 @@ class ReportView:
     source_display_name: str
     effect: StateEffect = StateEffect.NONE  # on the state in effect at its time, as the versions stand now
     contradicted_state: str | None = None  # the state it contradicts
+    moved_by: str | None = None  # the kind of the correction that brought it to the event, the latest
+    founding: bool = False  # the event is named after it: never split off
 
     @property
     def status_label(self) -> str:
@@ -349,7 +388,12 @@ class ReportView:
 
     @property
     def method_label(self) -> str:
-        """By what it joined: founded the event, its words, or the LLM - with the similarity it had."""
+        """How it came to this event: by a correction, else as the assignment placed it."""
+        return CORRECTION_LABELS[self.moved_by] if self.moved_by else self.assignment_label
+
+    @property
+    def assignment_label(self) -> str:
+        """By what it was assigned: founded the event, its words, or the LLM - with the similarity it had."""
         label = METHOD_LABELS[self.assignment_method]
         if self.assignment_method == AssignmentMethod.LLM and self.assignment_score is not None:
             return f"{label} (Ähnlichkeit {score_label(self.assignment_score)})"
@@ -371,21 +415,61 @@ class StateView:
     time_note: str | None
     article_id: int | None
     source_display_name: str | None
+    added_by_id: int | None = None  # the correction that appended it; None: its report's assignment
+    withdrawn_by_id: int | None = None  # the correction it no longer follows from
 
     @property
     def status_label(self) -> str:
         return STATUS_LABELS[self.status]
+
+    @property
+    def withdrawn(self) -> bool:
+        return self.withdrawn_by_id is not None
+
+
+@dataclass(frozen=True)
+class EventRef:
+    id: int
+    title: str
+
+
+@dataclass(frozen=True)
+class CorrectionView:
+    """A correction as an event it concerns sees it: reports that came to it, or reports that left it."""
+
+    id: int
+    kind: str
+    created_at: datetime
+    reason: str | None
+    incoming: bool  # the reports came to this event
+    others: list[EventRef]  # the events they came from, or the one they went to
+    candidate_ids: list[int]  # the reports that came or left
+
+    @property
+    def kind_label(self) -> str:
+        return CORRECTION_LABELS[self.kind]
+
+    @property
+    def relation_label(self) -> str:
+        if self.kind == CorrectionKind.MERGE:
+            return "Aufgenommen:" if self.incoming else "Aufgegangen in"
+        return "Abgespalten aus" if self.incoming else "Abgespalten als"
 
 
 @dataclass(frozen=True)
 class EventDetail:
     event: EventListItem
     reports: list[ReportView] = field(default_factory=list)  # the earliest first
-    states: list[StateView] = field(default_factory=list)  # the earliest first
+    states: list[StateView] = field(default_factory=list)  # the earliest first, the withdrawn ones too
+    corrections: list[CorrectionView] = field(default_factory=list)  # the earliest first
+    merged_into: EventRef | None = None
 
     @property
     def contradictions(self) -> int:
         return sum(report.effect == StateEffect.CONTRADICTS for report in self.reports)
+
+    def correction(self, correction_id: int | None) -> CorrectionView | None:
+        return next((correction for correction in self.corrections if correction.id == correction_id), None)
 
 
 def overview(engine: Engine) -> EventOverview:
@@ -396,6 +480,12 @@ def overview(engine: Engine) -> EventOverview:
     return EventOverview(events=[_list_item(row) for row in rows], total=total, waiting=waiting)
 
 
+def listed(engine: Engine, event_ids: Iterable[int]) -> list[EventListItem]:
+    """These events as the list shows them, merged ones left out."""
+    with engine.connect() as connection:
+        return [_list_item(row) for row in event_repository.listed(connection, event_ids)]
+
+
 def detail(engine: Engine, event_id: int) -> EventDetail | None:
     with engine.connect() as connection:
         row = event_repository.get(connection, event_id)
@@ -403,8 +493,36 @@ def detail(engine: Engine, event_id: int) -> EventDetail | None:
             return None
         states = [_state(each) for each in event_repository.states(connection, event_id)]
         reports = [_report(each, states) for each in event_repository.reports(connection, event_id)]
+        corrections = _corrections(connection, event_id)
+        merged_into = None
+        if row.merged_into_id is not None:
+            merged_into = EventRef(row.merged_into_id, event_repository.titles(connection, [row.merged_into_id])[row.merged_into_id])
+    # The latest correction that brought a report here tells how it came; the assignment's own record stays.
+    moved_by = {
+        candidate_id: correction.kind
+        for correction in corrections if correction.incoming for candidate_id in correction.candidate_ids
+    }
+    reports = [
+        replace(report, moved_by=moved_by.get(report.id), founding=report.id == row.founding_candidate_id) for report in reports
+    ]
     counts = {"report_count": len(reports), "source_count": len({report.source_display_name for report in reports})}
-    return EventDetail(_list_item(row, **counts), reports, states)
+    return EventDetail(_list_item(row, **counts), reports, states, corrections, merged_into)
+
+
+def _corrections(connection: Connection, event_id: int) -> list[CorrectionView]:
+    rows = event_correction_repository.of_event(connection, event_id)
+    titles = event_repository.titles(connection, {row.event_id for row in rows} | {move["event_id"] for row in rows for move in row.moves})
+    views = []
+    for row in rows:
+        incoming = row.event_id == event_id
+        moves = row.moves if incoming else [move for move in row.moves if move["event_id"] == event_id]
+        refs = [move["event_id"] for move in moves] if incoming else [row.event_id]
+        views.append(CorrectionView(
+            id=row.id, kind=row.kind, created_at=row.created_at, reason=row.reason, incoming=incoming,
+            others=[EventRef(ref, titles.get(ref, "")) for ref in refs],
+            candidate_ids=[candidate_id for move in moves for candidate_id in move["candidate_ids"]],
+        ))
+    return views
 
 
 def _list_item(row: Row, **values) -> EventListItem:
@@ -413,9 +531,11 @@ def _list_item(row: Row, **values) -> EventListItem:
 
 
 def _report(row: Row, states: list[StateView]) -> ReportView:
-    """A report with what it does to the version in effect at its time; the versions are the earliest first."""
+    """A report with what it does to the version in effect at its time; the versions are the earliest first. A
+    withdrawn version is in effect no more."""
     values = {each.name: row._mapping[each.name] for each in fields(ReportView) if each.name in row._mapping}
     report = ReportView(**values)
+    states = [state for state in states if not state.withdrawn]
     if any(state.candidate_id == report.id for state in states):
         return replace(report, effect=StateEffect.VERSION)
     in_effect = [state.status for state in states if state.valid_from <= report.moment]
@@ -429,4 +549,4 @@ def _report(row: Row, states: list[StateView]) -> ReportView:
 
 
 def _state(row: Row) -> StateView:
-    return StateView(**{each.name: row._mapping[each.name] for each in fields(StateView)})
+    return StateView(**{each.name: row._mapping[each.name] for each in fields(StateView) if each.name in row._mapping})

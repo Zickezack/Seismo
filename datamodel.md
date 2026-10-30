@@ -27,6 +27,7 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Ereigniskandidat | `event_candidate` | An event as extracted from a single article, before it is assigned to an event. | none |
 | Ereignis | `event` | The durable main object with a stable ID, collecting all reports about one real-world event. | none |
 | Ereigniszustand | `event_state` | One timestamped version of an event's state (start, update, escalation, closure, resumption). | none |
+| Korrektur | `event_correction` | A merge or split of events by the analyst, with the reports it moved and the events they left: the audit trail of rule 3. | none |
 | Aussage | `statement` | One extracted statement, labelled Tatsache, Behauptung, Quellenprognose or Interpretation. | none |
 | Beleg | `evidence` | The source reference and text quote supporting a statement. | none |
 | Entität | `entity` | A company, subsidiary, person, country, authority, product, commodity or sector. | [privacy] for persons |
@@ -268,13 +269,13 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | inference_confidence | varchar(10) | no | | `high`, `medium`, `low`: how sure type, status and impacts follow from the article, as the model rates it (rule 7); check constraint; empty before schema 2. UI: Schlussfolgerung hoch, mittel, niedrig, unbekannt. |
   | actors | jsonb | yes | `[]` | `[{name, role, quote}]`: who acts or is directly concerned; an actor without a quote found in the text is left out (schema 2). Entities come with their epic. |
   | impacts | jsonb | yes | `[]` | `[{target, target_kind, direction, horizon, description, quote}]`: only effects the article itself names, an impact without a quote found left out (schema 2); `target_kind` company, sector, commodity, country, market, other; `direction` positive, negative, mixed, unclear; `horizon` days, weeks, months, years, unknown. Not a Wirkungsannahme of the platform. |
-  | event_id | bigint | no | | Its Ereignis; empty until assigned. Foreign key to `event`, `ON DELETE SET NULL`. Index. |
-  | assignment_method | varchar(10) | no | | How it came to its event: `new` (it founded it), `score` (similar enough by its words), `llm` (in between, the LLM judged it the same incident); check constraint. UI: Neues Ereignis, Ähnlichkeit, LLM. |
+  | event_id | bigint | no | | Its Ereignis; empty until assigned; changed only by a Korrektur. Foreign key to `event`, `ON DELETE SET NULL`. Index. |
+  | assignment_method | varchar(10) | no | | How it was assigned: `new` (it founded its event), `score` (similar enough by its words), `llm` (in between, the LLM judged it the same incident); check constraint. A Korrektur that moves the report leaves it, with score and time, as it was; the event page then shows the correction (UI: Zusammenführung, Aufteilung) with this one as "zuerst". UI: Neues Ereignis, Ähnlichkeit, LLM. |
   | assignment_score | double precision | no | | Its similarity to the event when assigned: TF-IDF cosine of the English words of title, summary, place and actors with the event's most similar report, 0 to 1, three decimals. Empty for one that founded its event. |
   | assigned_at | timestamptz | no | | |
 
 - Relationships: belongs to one Extraktion and its Artikel; has one or more Aussagen; belongs to one Ereignis once assigned.
-- Rules: stored only with at least one Aussage that has a Beleg. Assigned to an Ereignis by the job "Ereignis zuordnen" (see Ereignis).
+- Rules: stored only with at least one Aussage that has a Beleg. Assigned to an Ereignis by the job "Ereignis zuordnen" (see Ereignis); moved to another only by a Korrektur.
 - Privacy: none (actors may name persons; once entities exist they follow rule 13)
 
 ### Ereignis (`event`)
@@ -290,9 +291,11 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | first_reported_at | timestamptz | yes | | The publication (else fetch) time of its earliest report. |
   | last_reported_at | timestamptz | yes | | The same of its latest report. Index. |
   | created_at | timestamptz | yes | now() | |
+  | founding_candidate_id | bigint | no | | The report it is named after: title, type and country are this report's - the one that founded it, or the earliest of those a split made it of. Never split off. Foreign key to `event_candidate`, `ON DELETE SET NULL`. Index. Filled for the events before by migration `0a882e94c29f`: the report with the event's title. UI: Nach diesem Bericht ist das Ereignis benannt. |
+  | merged_into_id | bigint | no | | Set by a merge, never cleared: the event its reports went to. Foreign key to `event`, `ON DELETE SET NULL`. UI: Zusammengeführt in. |
 
-- Relationships: has one or more Ereigniskandidaten, its reports; has Ereigniszustände, its versions.
-- Rules: one incident with its direct continuation - an attack and its death toll, a quake and its aftershocks - never a topic (the admin's decision of 2026-10-24). The job "Ereignis zuordnen" (`event_service`) assigns every Ereigniskandidat without one, the earliest report first, so the first report founds the event: compared with the events reported from 7 days before to 7 days after it - from 0.5 similarity it joins the most similar, below 0.2 it founds a new one, in between the LLM chooses among the up to 3 most similar or none. Never an event that has a report of the same article. The assignment runs under an advisory lock, after comparing again: two workers never found two events for one incident. The list (UI: Ereignisse, `/events`) shows the 100 most recently reported; the event page (`/events/<id>`) its reports, the earliest first, each with its article and how it came to the event. Its state is its latest Ereigniszustand (UI: Zustand, in the list and on the page); the page shows the versions (UI: Verlauf) and what each report does to the state in effect at its time (UI: Zum Zustand - Zustandswechsel, bestätigt, widerspricht with the state it contradicts). Merging and splitting, with their audit trail (rule 3), come with story 3 of the epic.
+- Relationships: has one or more Ereigniskandidaten, its reports - none once merged; has Ereigniszustände, its versions; is named after one of its reports; takes part in Korrekturen; a merged one points to the event it was merged into.
+- Rules: one incident with its direct continuation - an attack and its death toll, a quake and its aftershocks - never a topic (the admin's decision of 2026-10-24). The job "Ereignis zuordnen" (`event_service`) assigns every Ereigniskandidat without one, the earliest report first, so the first report founds the event: compared with the events reported from 7 days before to 7 days after it - from 0.5 similarity it joins the most similar, below 0.2 it founds a new one, in between the LLM chooses among the up to 3 most similar or none. Never an event that has a report of the same article. The assignment runs under an advisory lock, after comparing again: two workers never found two events for one incident. The list (UI: Ereignisse, `/events`) shows the 100 most recently reported; the event page (`/events/<id>`) its reports, the earliest first, each with its article and how it came to the event. Its state is its latest Ereigniszustand not withdrawn (UI: Zustand, in the list and on the page); the page shows the versions (UI: Verlauf) and what each report does to the state in effect at its time (UI: Zum Zustand - Zustandswechsel, bestätigt, widerspricht with the state it contradicts). The analyst corrects the grouping on the page (`event_correction_service`), each correction recorded as a Korrektur (rule 3, the admin's decision of 2026-10-30): merging the selected of its similar events into it (UI: Ähnliche Ereignisse - those reported from 7 days before its first to 7 days after its last report, by the similarity of the assignment, an event scoring its report most similar to any of this one's, at most 10; UI: In dieses Ereignis zusammenführen), and splitting off selected reports into one new event, named after the earliest of them (UI: Als neues Ereignis abspalten); the report it is named after stays. A merged event keeps its id and page, without reports, its versions as they were; it is no longer listed, counted, compared or corrected. Both all or nothing, with an optional reason, under the assignment's advisory lock.
 - Privacy: none
 
 ### Ereigniszustand (`event_state`)
@@ -307,9 +310,28 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | valid_from | timestamptz | yes | | The time of the report that stated it: its article's publication, else its fetch. UI: Seit. |
   | candidate_id | bigint | no | | The report that stated it - its Beleg is that report's statements and quotes; foreign key to `event_candidate`, `ON DELETE SET NULL`: the version stays. Index. UI: Laut Bericht. |
   | recorded_at | timestamptz | yes | now() | When Seismo learned it (rule 11): a report found later may state an earlier version. UI: Erfasst. |
+  | added_by_id | bigint | no | | The Korrektur that appended it; empty when its report's assignment did. Foreign key to `event_correction`. UI: durch Zusammenführung, durch Aufteilung. |
+  | withdrawn_by_id | bigint | no | | The Korrektur after which it no longer follows from the event's reports; set once, never cleared. Foreign key to `event_correction`. A withdrawn version stays to be seen and is never in effect. UI: struck through, zurückgezogen durch ... |
 
-- Relationships: belongs to one Ereignis; stated by one Ereigniskandidat.
-- Rules: appended in the transaction that assigns its report (`event_service.state_effect`), never changed (rule 3). A report is weighed against the version in effect at its own time - the latest from before it, of equal times the one recorded last: the earliest known status founds the state; while ongoing (start, update, escalation, resumption) an update confirms it, an escalation or a closure is a new version, a start or a resumption contradicts it; while closed a closure confirms it, a resumption is a new version, anything else contradicts it; the same status always confirms; unknown has no effect (the admin's decision of 2026-10-29). A contradicting report adds nothing and keeps its own statements beside the state (rule 6). The reports assigned before were replayed by migration `5d0c7e1a9b42` in the order they were assigned, `recorded_at` their assignment time. A date from an article's time note ("on Friday") is not derived; the version shows it beside its time.
+- Relationships: belongs to one Ereignis; stated by one Ereigniskandidat; may be appended or withdrawn by a Korrektur.
+- Rules: appended in the transaction that assigns its report (`event_service.state_effect`), never changed (rule 3) - but for being withdrawn once. After a Korrektur every event it concerns gets the history its reports make when weighed one by one in the order they were assigned, by the same rule (`event_correction_service.replay`), as if grouped so from the start: a version they no longer make is withdrawn by the correction, one they make anew appended by it, recorded then; a version whose report is gone stays as it is. A merged event's versions stay as they were. Migration `0a882e94c29f` deletes the withdrawn versions on downgrade: the code before would take them for in effect. A report is weighed against the version in effect at its own time - the latest from before it, of equal times the one recorded last: the earliest known status founds the state; while ongoing (start, update, escalation, resumption) an update confirms it, an escalation or a closure is a new version, a start or a resumption contradicts it; while closed a closure confirms it, a resumption is a new version, anything else contradicts it; the same status always confirms; unknown has no effect (the admin's decision of 2026-10-29). A contradicting report adds nothing and keeps its own statements beside the state (rule 6). The reports assigned before were replayed by migration `5d0c7e1a9b42` in the order they were assigned, `recorded_at` their assignment time. A date from an article's time note ("on Friday") is not derived; the version shows it beside its time.
+- Privacy: none
+
+### Korrektur (`event_correction`)
+- Store: SQL table `event_correction`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | kind | varchar(10) | yes | | `merge`, `split`; check constraint. UI: Zusammenführung, Aufteilung. |
+  | event_id | bigint | yes | | The event the reports went to: of a merge the one that remains, of a split the new one. Foreign key to `event`, `ON DELETE CASCADE`. Index. |
+  | moves | jsonb | yes | | `[{event_id, candidate_ids}]`: the events the reports left, each with its reports moved - of a merge every event merged, of a split the event split. Ids only, so the record stays should a report go. |
+  | reason | text | no | | The analyst's reason, at most 1000 characters, trimmed; empty when none was given. Never logged. UI: Begründung. |
+  | created_at | timestamptz | yes | now() | UI: Zeit. |
+
+- Relationships: concerns the event it names and the events in its moves; appends and withdraws Ereigniszustände.
+- Rules: the audit trail of rule 3, written in the transaction of the merge or split it records, never changed or deleted. Shown on the page of every event it concerns, as that event sees it (UI: Korrekturen - Aufgenommen:, Aufgegangen in, Abgespalten als, Abgespalten aus). Logged by ids, kind and number of reports only (rule 13).
 - Privacy: none
 
 ### Aussage (`statement`)

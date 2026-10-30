@@ -134,6 +134,13 @@ class AssignmentMethod(StrEnum):
     LLM = "llm"  # in between: the LLM judged it the same incident
 
 
+class CorrectionKind(StrEnum):
+    """What a correction of the grouping did (event_correction_service)."""
+
+    MERGE = "merge"  # events merged into one
+    SPLIT = "split"  # reports of an event split off into a new one
+
+
 class BackfillStatus(StrEnum):
     RUNNING = "running"
     DONE = "done"
@@ -449,6 +456,13 @@ class Event(Base):
     first_reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The report it is named after - title, type and country are this report's - which a split never takes from it.
+    # use_alter: event and event_candidate refer to each other.
+    founding_candidate_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("event_candidate.id", ondelete="SET NULL", use_alter=True), index=True
+    )
+    # Set by a merge, never cleared: the event its reports went to. Its id stays valid and leads there.
+    merged_into_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="SET NULL"))
 
     __table_args__ = (CheckConstraint(event_type.in_([s.value for s in EventType]), name="event_type"),)
 
@@ -510,11 +524,35 @@ class EventState(Base):
     )
     # When Seismo learned it (datamodel.md, rule 11): a late report may state an earlier version.
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The correction that appended it; empty when its report's assignment did.
+    added_by_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("event_correction.id"))
+    # The correction it no longer follows from; set once, never cleared. A withdrawn version stays to be seen and is
+    # never in effect.
+    withdrawn_by_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("event_correction.id"))
 
     __table_args__ = (
         CheckConstraint(status.in_([s.value for s in EventStatus if s != EventStatus.UNKNOWN]), name="status"),
         Index("ix_event_state_event_id_valid_from", event_id, valid_from),
     )
+
+
+class EventCorrection(Base):
+    """A merge or split of events by the analyst (UI term: Korrektur), the audit trail of datamodel.md, rule 3. Never
+    changed, never deleted."""
+
+    __tablename__ = "event_correction"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10))
+    # The event the reports went to: of a merge the one that remains, of a split the new one.
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    # The events the reports left, each with the reports it gave, ids only: [{"event_id", "candidate_ids"}] - of a
+    # merge every event merged, of a split the event split.
+    moves: Mapped[list] = mapped_column(JSONB)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (CheckConstraint(kind.in_([s.value for s in CorrectionKind]), name="kind"),)
 
 
 class Statement(Base):

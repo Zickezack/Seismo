@@ -2,7 +2,17 @@
 {% block title %}Ereignis{% endblock %}
 {% block content %}
 {% set event = detail.event %}
+{% set merged = detail.merged_into is not none %}
+{# A split needs a report to leave and one to stay. #}
+{% set splittable = not merged and detail.reports|length > 1 %}
+{% set sections = [("states", "Verlauf"), ("reports", "Berichte")]
+  + ([] if merged else [("similar", "Ähnliche Ereignisse")])
+  + ([("corrections", "Korrekturen")] if detail.corrections else []) %}
 <h1 data-testid="event-title">{{ event.title }}</h1>
+
+{% if merged %}
+<p class="message message-warning" data-testid="merged-into">Zusammengeführt in <a href="/events/{{ detail.merged_into.id }}">{{ detail.merged_into.title }}</a> (Ereignis-ID {{ detail.merged_into.id }}). Seine Berichte stehen dort; Verlauf und Korrekturen bis zur Zusammenführung bleiben hier.</p>
+{% endif %}
 
 <section class="card stack">
   <div class="table-container">
@@ -18,70 +28,187 @@
       </tbody>
     </table>
   </div>
-  <p class="hint">Name, Typ und Land stammen vom ersten Bericht. Die Ähnlichkeit vergleicht die englischen Wörter von Titel, Zusammenfassung, Ort und Akteuren (TF-IDF-Kosinus, 0 bis 1).</p>
+  <p class="hint">Name, Typ und Land stammen vom Bericht, der das Ereignis gegründet hat. Die Ähnlichkeit vergleicht die englischen Wörter von Titel, Zusammenfassung, Ort und Akteuren (TF-IDF-Kosinus, 0 bis 1).</p>
 </section>
 
-{# Every version stays: a later one never replaces an earlier one (datamodel.md, rule 3). #}
-<section class="stack" data-testid="states-section">
-  <h2>Verlauf ({{ detail.states|length }})</h2>
-  <p class="hint">Jeder Bericht wird am Zustand zu seiner eigenen Zeit gemessen: Ein neuer Zustand entsteht nur aus einem passenden Übergang (eine Eskalation oder ein Abschluss eines laufenden Ereignisses, die Wiederaufnahme eines abgeschlossenen). Ein Bericht, der dazu nicht passt, ändert nichts und bleibt unten als widersprechend stehen; seine Aussagen behält er.</p>
-  {% if detail.states %}
-  <div class="table-container">
-    <table class="table">
-      <thead>
-        <tr>
-          <th>Seit</th>
-          <th>Zustand</th>
-          <th>Laut Bericht</th>
-          <th>Quelle</th>
-          <th>Erfasst</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for state in detail.states %}
-        <tr data-testid="state-{{ state.id }}">
-          <td>{{ state.valid_from|local_time }}</td>
-          <td data-testid="state-status-{{ state.id }}">{{ state.status_label }}</td>
-          <td class="cell-title">{% if state.article_id %}<a href="/articles/{{ state.article_id }}#events" data-testid="state-report-{{ state.id }}">{{ state.report_title }}</a>{% if state.time_note %}<span class="hint">Zeitangabe im Artikel: {{ state.time_note }}</span>{% endif %}{% else %}<span class="hint">Bericht nicht mehr vorhanden</span>{% endif %}</td>
-          <td class="cell-wrap">{{ state.source_display_name or "–" }}</td>
-          <td>{{ state.recorded_at|local_time }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <p data-testid="no-states">Kein Bericht nennt bisher einen Zustand.</p>
-  {% endif %}
-</section>
+{# Quick navigation once there are several sections, not for two (requirements.md, "Basic UI Requirements /
+   Styleguide", items 4 and 5); every section collapses and is expanded on load. #}
+{% if sections|length > 2 %}
+<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
+  {% for id, title in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+</nav>
+{% endif %}
 
-<section class="stack" data-testid="reports-section">
-  <h2>Berichte ({{ detail.reports|length }})</h2>
-  <div class="table-container">
-    <table class="table">
-      <thead>
-        <tr>
-          <th>Veröffentlicht</th>
-          <th>Bericht</th>
-          <th>Quelle</th>
-          <th>Status</th>
-          <th>Zum Zustand</th>
-          <th>Zugeordnet durch</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for report in detail.reports %}
-        <tr data-testid="report-{{ report.id }}">
-          <td>{{ report.moment|local_time }}</td>
-          <td class="cell-title"><a href="/articles/{{ report.article_id }}#events" data-testid="report-article-{{ report.id }}">{{ report.title }}</a><span class="hint">{{ report.article_title or report.article_url }}</span></td>
-          <td class="cell-wrap">{{ report.source_display_name }}</td>
-          <td>{{ report.status_label }}</td>
-          <td data-testid="report-effect-{{ report.id }}">{% if report.effect == "contradicts" %}<span class="status status-contradicts">{{ report.effect_label }}</span>{% else %}{{ report.effect_label }}{% endif %}</td>
-          <td data-testid="report-method-{{ report.id }}">{{ report.method_label }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+{# Every version stays: a later one never replaces an earlier one, a correction only withdraws one (datamodel.md, rule 3). #}
+<details class="section" id="states" open data-testid="states-section">
+  <summary><h2>Verlauf ({{ detail.states|length }})</h2></summary>
+  <div class="stack">
+    <p class="hint">Jeder Bericht wird am Zustand zu seiner eigenen Zeit gemessen: Ein neuer Zustand entsteht nur aus einem passenden Übergang (eine Eskalation oder ein Abschluss eines laufenden Ereignisses, die Wiederaufnahme eines abgeschlossenen). Ein Bericht, der dazu nicht passt, ändert nichts und bleibt unten als widersprechend stehen; seine Aussagen behält er. Nach einer Korrektur wird der Verlauf aus den Berichten neu hergeleitet: Was nicht mehr folgt, bleibt durchgestrichen stehen.</p>
+    {% if detail.states %}
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Seit</th>
+            <th>Zustand</th>
+            <th>Laut Bericht</th>
+            <th>Quelle</th>
+            <th>Erfasst</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for state in detail.states %}
+          {% set withdrawn_by = detail.correction(state.withdrawn_by_id) %}
+          {% set added_by = detail.correction(state.added_by_id) %}
+          <tr data-testid="state-{{ state.id }}">
+            <td>{{ state.valid_from|local_time }}</td>
+            <td class="cell-wrap" data-testid="state-status-{{ state.id }}">{% if state.withdrawn %}<s>{{ state.status_label }}</s><span class="hint" data-testid="state-withdrawn-{{ state.id }}">zurückgezogen{% if withdrawn_by %} durch {{ withdrawn_by.kind_label }}, {{ withdrawn_by.created_at|local_time }}{% endif %}</span>{% else %}{{ state.status_label }}{% endif %}</td>
+            <td class="cell-title">{% if state.article_id %}<a href="/articles/{{ state.article_id }}#events" data-testid="state-report-{{ state.id }}">{{ state.report_title }}</a>{% if state.time_note %}<span class="hint">Zeitangabe im Artikel: {{ state.time_note }}</span>{% endif %}{% else %}<span class="hint">Bericht nicht mehr vorhanden</span>{% endif %}</td>
+            <td class="cell-wrap">{{ state.source_display_name or "–" }}</td>
+            <td class="cell-wrap" data-testid="state-recorded-{{ state.id }}">{{ state.recorded_at|local_time }}{% if added_by %}<span class="hint">durch {{ added_by.kind_label }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-states">Kein Bericht nennt bisher einen Zustand.</p>
+    {% endif %}
   </div>
-</section>
+</details>
+
+<details class="section" id="reports" open data-testid="reports-section">
+  <summary><h2>Berichte ({{ detail.reports|length }})</h2></summary>
+  <div class="stack">
+    {% if detail.reports %}
+    <form class="stack" method="post" action="/events/{{ event.id }}/split" data-bulk-form data-testid="report-list">
+      {% if splittable %}
+      <div class="toolbar">
+        <div class="actions">
+          <span class="action-group">
+            <input type="text" name="reason" maxlength="1000" placeholder="Begründung (optional)" aria-label="Begründung der Aufteilung" data-testid="split-reason">
+            <button class="button button-secondary" type="submit" data-bulk-action data-confirm="Bericht|Berichte" data-confirm-verb="abspalten" data-testid="split" disabled>Als neues Ereignis abspalten</button>
+          </span>
+        </div>
+      </div>
+      <p class="hint">Die ausgewählten Berichte werden zusammen ein neues Ereignis, benannt nach dem frühesten von ihnen. Der Bericht, nach dem dieses Ereignis benannt ist, bleibt hier.</p>
+      {% endif %}
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              {% if splittable %}<th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Berichte auswählen" data-testid="select-all-reports"></th>{% endif %}
+              <th>Veröffentlicht</th>
+              <th>Bericht</th>
+              <th>Quelle</th>
+              <th>Status</th>
+              <th>Zum Zustand</th>
+              <th>Zugeordnet durch</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for report in detail.reports %}
+            <tr data-testid="report-{{ report.id }}">
+              {% if splittable %}<td class="cell-select"><input type="checkbox" name="candidate_id" value="{{ report.id }}" data-select-row data-name="{{ report.title }}" aria-label="{{ report.title }} auswählen" data-testid="select-report-{{ report.id }}"{% if report.founding %} disabled title="Nach diesem Bericht ist das Ereignis benannt: Er bleibt."{% endif %}></td>{% endif %}
+              <td>{{ report.moment|local_time }}</td>
+              <td class="cell-title"><a href="/articles/{{ report.article_id }}#events" data-testid="report-article-{{ report.id }}">{{ report.title }}</a><span class="hint">{{ report.article_title or report.article_url }}</span>{% if report.founding %}<span class="hint" data-testid="report-founding-{{ report.id }}">Nach diesem Bericht ist das Ereignis benannt.</span>{% endif %}</td>
+              <td class="cell-wrap">{{ report.source_display_name }}</td>
+              <td>{{ report.status_label }}</td>
+              <td data-testid="report-effect-{{ report.id }}">{% if report.effect == "contradicts" %}<span class="status status-contradicts">{{ report.effect_label }}</span>{% else %}{{ report.effect_label }}{% endif %}</td>
+              <td class="cell-wrap" data-testid="report-method-{{ report.id }}">{{ report.method_label }}{% if report.moved_by %}<span class="hint">zuerst: {{ report.assignment_label }}</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% else %}
+    <p data-testid="no-reports">Keine Berichte.</p>
+    {% endif %}
+  </div>
+</details>
+
+{% if not merged %}
+<details class="section" id="similar" open data-testid="similar-section">
+  <summary><h2>Ähnliche Ereignisse ({{ similar|length }})</h2></summary>
+  <div class="stack">
+    <p class="hint">Die Ereignisse, die bis sieben Tage vor dem ersten und nach dem letzten Bericht dieses Ereignisses berichtet wurden, die ähnlichsten zuerst, höchstens zehn; ein Ereignis zählt mit seinem Bericht, der einem Bericht dieses Ereignisses am ähnlichsten ist. Zusammengeführt gehen ihre Berichte in dieses Ereignis über; sie selbst bleiben mit ihrer ID als zusammengeführt stehen.</p>
+    {% if similar %}
+    <form class="stack" method="post" action="/events/{{ event.id }}/merge" data-bulk-form data-testid="similar-list">
+      <div class="toolbar">
+        <div class="actions">
+          <span class="action-group">
+            <input type="text" name="reason" maxlength="1000" placeholder="Begründung (optional)" aria-label="Begründung der Zusammenführung" data-testid="merge-reason">
+            <button class="button button-secondary" type="submit" data-bulk-action data-confirm="Ereignis|Ereignisse" data-confirm-verb="zusammenführen" data-testid="merge" disabled>In dieses Ereignis zusammenführen</button>
+          </span>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle ähnlichen Ereignisse auswählen" data-testid="select-all-similar"></th>
+              <th>Ereignis</th>
+              <th>Ähnlichkeit</th>
+              <th>Zustand</th>
+              <th>Zuerst berichtet</th>
+              <th>Zuletzt berichtet</th>
+              <th>Berichte</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for each in similar %}
+            <tr data-testid="similar-{{ each.event.id }}">
+              <td class="cell-select"><input type="checkbox" name="event_id" value="{{ each.event.id }}" data-select-row data-name="{{ each.event.title }}" aria-label="{{ each.event.title }} auswählen" data-testid="select-similar-{{ each.event.id }}"></td>
+              <td class="cell-title"><a href="/events/{{ each.event.id }}" data-testid="similar-title-{{ each.event.id }}">{{ each.event.title }}</a><span class="hint">{{ each.event.type_label }}{% if each.event.country %}, {{ each.event.country }}{% endif %}</span></td>
+              <td data-testid="similar-score-{{ each.event.id }}">{{ each.score_label }}</td>
+              <td>{{ each.event.state_label }}</td>
+              <td>{{ each.event.first_reported_at|local_time }}</td>
+              <td>{{ each.event.last_reported_at|local_time }}</td>
+              <td>{{ each.event.report_count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% else %}
+    <p data-testid="no-similar">Keine ähnlichen Ereignisse in dieser Zeit.</p>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
+
+{# The audit trail of rule 3 (datamodel.md): every merge and split this event took part in. #}
+{% if detail.corrections %}
+<details class="section" id="corrections" open data-testid="corrections-section">
+  <summary><h2>Korrekturen ({{ detail.corrections|length }})</h2></summary>
+  <div class="stack">
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Zeit</th>
+            <th>Korrektur</th>
+            <th>Ereignisse</th>
+            <th>Berichte</th>
+            <th>Begründung</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for correction in detail.corrections %}
+          <tr data-testid="correction-{{ correction.id }}">
+            <td>{{ correction.created_at|local_time }}</td>
+            <td data-testid="correction-kind-{{ correction.id }}">{{ correction.kind_label }}</td>
+            <td class="cell-title" data-testid="correction-events-{{ correction.id }}">{{ correction.relation_label }} {% for other in correction.others %}<a href="/events/{{ other.id }}">{{ other.title }}</a> (Ereignis-ID {{ other.id }}){% if not loop.last %}, {% endif %}{% endfor %}</td>
+            <td data-testid="correction-reports-{{ correction.id }}">{{ correction.candidate_ids|length }}</td>
+            <td class="cell-wrap" data-testid="correction-reason-{{ correction.id }}">{{ correction.reason or "–" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+{% endif %}
 {% endblock %}
