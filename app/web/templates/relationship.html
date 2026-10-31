@@ -48,7 +48,7 @@
                 {{ record.note or "–" }}
               {% endif %}
             </td>
-            <td class="cell-wrap" data-testid="record-state-{{ record.id }}">{% if step.changed %}{{ step.state.validity_label }}, {{ step.state.review_label }}{% else %}<span class="hint">unverändert</span>{% endif %}</td>
+            <td class="cell-wrap" data-testid="record-state-{{ record.id }}">{% if step.replaced %}<span class="status status-replaced">ersetzt</span><span class="hint">Neu verarbeitet {{ record.replaced_at|local_time }}, zählt nicht mehr</span>{% elif step.changed %}{{ step.state.validity_label }}, {{ step.state.review_label }}{% else %}<span class="hint">unverändert</span>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>

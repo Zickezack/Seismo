@@ -31,6 +31,8 @@ from app.services.job_service import (
     FETCH_SOURCE_JOB_KIND,
     NORMALIZE_JOB_KIND,
     RECOGNISE_ENTITIES_JOB_KIND,
+    REEXTRACT_EVENTS_JOB_KIND,
+    RERECOGNISE_ENTITIES_JOB_KIND,
     TEST_JOB_KIND,
 )
 from app.sources.errors import HostBusy, SourceRejected
@@ -66,6 +68,19 @@ def build_handlers(
         ),
         RECOGNISE_ENTITIES_JOB_KIND: lambda job: run_llm_job(
             llm, lambda client: entity_service.recognise(engine, job.payload["extraction_id"], client, limiter)
+        ),
+        REEXTRACT_EVENTS_JOB_KIND: lambda job: run_llm_job(
+            llm,
+            lambda client: extraction_service.extract(
+                engine, job.payload["article_id"], client, limiter, stop_event, job.payload["extraction_id"],
+                job.payload.get("reprocessing_id"),
+            ),
+        ),
+        RERECOGNISE_ENTITIES_JOB_KIND: lambda job: run_llm_job(
+            llm,
+            lambda client: entity_service.recognise(
+                engine, job.payload["extraction_id"], client, limiter, rerun=True, reprocessing_id=job.payload.get("reprocessing_id")
+            ),
         ),
     }
 

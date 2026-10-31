@@ -6,7 +6,9 @@ aftershocks - not the same topic. A candidate is compared with the events whose 
 its own: by the cosine of the TF-IDF weights of the words of title, summary, place and actors, which the model writes
 in English whatever the article's language. An event scores what its most similar report does. From ASSIGN_FROM the
 candidate joins the best one, below NEW_BELOW it founds a new event; in between the LLM decides among the up to
-CHOICES best. Never an event with a candidate of the same article: the model told those apart on purpose.
+CHOICES best. Never an event with a candidate of the same article: the model told those apart on purpose - unless that
+one is of the article's reading a reprocessing replaced (reprocessing_service): its successor finds its event through
+it, before it leaves.
 
 The worker queues the candidates without an event once a minute, the earliest report first, so the first report
 founds the event and the later ones find it. The job compares and asks outside any transaction and assigns in the one
@@ -17,7 +19,8 @@ The development of an event (story 2): each report is weighed against the state 
 ever added. A report that contradicts the state changes nothing and stays beside it, as every report keeps its own
 statements: nothing is merged into one fact (datamodel.md, rule 6).
 
-Merges and splits by the analyst (story 3) live in event_correction_service; the event page shows them here.
+Merges and splits by the analyst (story 3), and the reports a reprocessing replaced leaving their events, live in
+event_correction_service; the event page shows them here.
 """
 import json
 import logging
@@ -145,7 +148,7 @@ def assign(engine: Engine, candidate_id: int, client: OllamaClient, limiter: Llm
     brought no usable answer: retried with the job."""
     with engine.connect() as connection:
         candidate = event_repository.get_for_assignment(connection, candidate_id)
-        if candidate is None or candidate.event_id is not None:
+        if candidate is None or candidate.event_id is not None or candidate.replaced:
             return None
         found = matches(candidate, _reports(connection, candidate))
         decision = settled(found)
@@ -161,7 +164,7 @@ def assign(engine: Engine, candidate_id: int, client: OllamaClient, limiter: Llm
     def store(connection: Connection) -> None:
         event_repository.lock_assignment(connection)
         current = event_repository.get_for_assignment(connection, candidate_id)
-        if current is None or current.event_id is not None:
+        if current is None or current.event_id is not None or current.replaced:
             return
         now = matches(current, _reports(connection, current))
         final, offered = settled(now), 0
@@ -222,7 +225,7 @@ def _weighting(documents: list[Counter]) -> Callable[[Counter], dict[str, float]
 def matches(candidate, reports: Iterable) -> list[Match]:
     """The events of the reports by their similarity to the candidate, the most similar first: TF-IDF cosine, the
     words weighted by how few of the reports and the candidate have them. An event with a report of the candidate's
-    article is left out."""
+    article is left out, unless that report's reading was replaced (`replaced`): it is the one the candidate replaces."""
     reports = list(reports)
     documents = [words(report) for report in reports]
     own = words(candidate)
@@ -230,7 +233,7 @@ def matches(candidate, reports: Iterable) -> list[Match]:
 
     vector = weights(own)
     norm = math.sqrt(sum(value * value for value in vector.values()))
-    excluded = {report.event_id for report in reports if report.article_id == candidate.article_id}
+    excluded = {report.event_id for report in reports if report.article_id == candidate.article_id and not report.replaced}
     best: dict[int, float] = {}
     for report, document in zip(reports, documents, strict=True):
         if report.event_id in excluded:
@@ -322,7 +325,7 @@ def chosen_number(content: str, count: int) -> int | None:
 
 
 METHOD_LABELS = {AssignmentMethod.NEW: "Neues Ereignis", AssignmentMethod.SCORE: "Ähnlichkeit", AssignmentMethod.LLM: "LLM"}
-CORRECTION_LABELS = {CorrectionKind.MERGE: "Zusammenführung", CorrectionKind.SPLIT: "Aufteilung"}
+CORRECTION_LABELS = {CorrectionKind.MERGE: "Zusammenführung", CorrectionKind.SPLIT: "Aufteilung", CorrectionKind.REPROCESS: "Neuverarbeitung"}
 
 
 def score_label(score: float | None) -> str:
@@ -427,6 +430,7 @@ class StateView:
         return self.withdrawn_by_id is not None
 
 
+
 @dataclass(frozen=True)
 class EventRef:
     id: int
@@ -453,6 +457,8 @@ class CorrectionView:
     def relation_label(self) -> str:
         if self.kind == CorrectionKind.MERGE:
             return "Aufgenommen:" if self.incoming else "Aufgegangen in"
+        if self.kind == CorrectionKind.REPROCESS:
+            return "Ersetzt durch die neue Extraktion ihres Artikels"
         return "Abgespalten aus" if self.incoming else "Abgespalten als"
 
 
@@ -516,7 +522,8 @@ def _corrections(connection: Connection, event_id: int) -> list[CorrectionView]:
     for row in rows:
         incoming = row.event_id == event_id
         moves = row.moves if incoming else [move for move in row.moves if move["event_id"] == event_id]
-        refs = [move["event_id"] for move in moves] if incoming else [row.event_id]
+        # A reprocessing's reports left the event for none.
+        refs = [] if row.kind == CorrectionKind.REPROCESS else [move["event_id"] for move in moves] if incoming else [row.event_id]
         views.append(CorrectionView(
             id=row.id, kind=row.kind, created_at=row.created_at, reason=row.reason, incoming=incoming,
             others=[EventRef(ref, titles.get(ref, "")) for ref in refs],

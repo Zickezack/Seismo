@@ -51,6 +51,8 @@ class PlatformSettings:
     extraction_min_text_chars: int = 500
     extraction_max_age_days: int = 3
     extractions_per_hour: int = 30
+    # The reprocessing's budget (reprocessing_service), apart from the extraction's.
+    reprocessings_per_hour: int = 30
     # "domain level" per line, level hoch, mittel or niedrig; a domain covers its subdomains (extraction_service).
     source_quality_domains: str = _quality_lines(STARTER_SOURCE_QUALITY)
 
@@ -217,6 +219,14 @@ FORM_FIELDS = {
             "extractions_per_hour",
             "Extraktionen pro Stunde (höchstens)",
             "Die neuesten zuerst; was nicht drankommt, wartet, bis es zu alt ist. 0 hält die Extraktion an.",
+            0,
+            1000,
+        ),
+        NumberField(
+            "reprocessings_per_hour",
+            "Neuverarbeitungen pro Stunde (höchstens)",
+            "Extraktionen und Entitätenerkennungen einer Neuverarbeitung (Datenbestand), immer nach der laufenden Arbeit. "
+            "0 hält die Neuverarbeitung an.",
             0,
             1000,
         ),

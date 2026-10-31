@@ -119,3 +119,6 @@ def test_list_item_labels_and_requeue_only_for_failed_jobs():
     # A backfill's full text is the same kind, marked; the backfill job itself says so by its label.
     assert JobListItem(**{**item.__dict__, "kind": "fetch_article", "priority": 1}).kind_label == "Volltext abrufen (Backfill)"
     assert JobListItem(**{**item.__dict__, "kind": "backfill", "priority": 1}).kind_label == "Backfill abrufen"
+    # A reprocessing's jobs are behind live work by their nature.
+    assert JobListItem(**{**item.__dict__, "kind": "reextract_events", "priority": 1}).kind_label == "Ereignisse neu extrahieren"
+    assert JobListItem(**{**item.__dict__, "kind": "rerecognise_entities", "priority": 0}).kind_label == "Entitäten neu erkennen"

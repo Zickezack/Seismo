@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import AuthSettings, Settings
-from app.services import article_service, extraction_service, similarity_service
+from app.services import article_service, extraction_service, reprocessing_service, similarity_service
 from app.services.article_service import ArticleListItem, ArticleOverview, SourceChoice
 from app.services.bulk import BulkResult
 from app.web.main import create_app
@@ -208,6 +208,10 @@ def page(monkeypatch):
     monkeypatch.setattr(article_service, "detail", lambda _engine, article_id: calls.get("detail"))
     monkeypatch.setattr(extraction_service, "latest_for_article", lambda _engine, article_id: calls.get("extraction"))
     monkeypatch.setattr(extraction_service, "unusable_runs_for_article", lambda _engine, article_id: calls.get("runs", []))
+    monkeypatch.setattr(
+        reprocessing_service, "article_state",
+        lambda _engine, article_id, model: calls.get("reprocessing", reprocessing_service.ArticleState(None)),
+    )
     return calls
 
 
@@ -396,3 +400,59 @@ def test_a_detail_the_article_does_not_state_shows_as_unknown_and_unusable_runs_
     runs = re.search(r'data-testid="unusable-runs">(.*?)</details>', html, re.DOTALL).group(1)
     assert "1 unbrauchbare Antwort des Modells" in runs and "Ausserhalb des Schemas" in runs
     assert '<pre class="run-errors">events.0.event_type: Input should be ...</pre>' in runs
+
+
+def test_an_extraction_made_otherwise_than_now_is_offered_for_reprocessing(client, page):
+    page["detail"] = detail(article(4))
+    page["extraction"] = extraction_service.ExtractionView(
+        model="qwen3.5:9b", schema_version="1", extracted_at=NOW, duration_ms=900, input_chars=600, truncated=False,
+        statements_dropped=0, candidates=[],
+    )
+    assert 'data-testid="reprocess-article"' not in client.get("/articles/4").text
+
+    page["reprocessing"] = reprocessing_service.ArticleState(5, {
+        "extraction": "Ereignisextraktion mit Schema 1 und qwen3.5:9b",
+        "recognition": "Entitätenerkennung mit Schema 1 und qwen3.5:9b",
+    })
+    html = client.get("/articles/4").text
+
+    form = re.search(r'<form[^>]*data-testid="reprocess-article">(.*?)</form>', html, re.DOTALL).group(1)
+    assert re.findall(r'name="step" value="(\w+)"', form) == ["extraction", "recognition"]
+    # The confirmation names the steps; the button waits for a choice (static/app.js).
+    assert 'data-name="Ereignisextraktion mit Schema 1 und qwen3.5:9b"' in form
+    assert re.search(r'<button[^>]*data-confirm="Schritt\|Schritte"[^>]*data-confirm-verb="neu verarbeiten"[^>]*disabled>', form)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "message"),
+    [
+        (["extraction"], "Neu eingereiht: Ereignisextraktion. Die Entitätenerkennung folgt der neuen Extraktion. Status unter Jobs."),
+        (["recognition"], "Neu eingereiht: Entitätenerkennung. Status unter Jobs."),
+        (reprocessing_service.InvalidReprocessing("nicht neu zu verarbeiten: Entitätenerkennung."),
+         "Nichts eingereiht, nicht neu zu verarbeiten: Entitätenerkennung."),
+    ],
+)
+def test_reprocessing_an_article_passes_the_steps_and_reports_the_result(client, monkeypatch, overview, outcome, message):
+    calls = []
+
+    def reprocess(_engine, article_id, steps, model):
+        calls.append((article_id, steps, model))
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(reprocessing_service, "reprocess_article", reprocess)
+
+    response = client.post("/articles/4/reprocess", data={"step": ["extraction", "recognition"]})
+
+    assert calls == [(4, ["extraction", "recognition"], SETTINGS.ollama_model)]
+    assert response.headers["location"] == "/articles/4#events"
+    assert text_of(client.get("/articles").text, "flash") == message
+
+
+def test_reprocessing_an_article_without_a_step_says_so(client, monkeypatch, overview):
+    monkeypatch.setattr(reprocessing_service, "reprocess_article", lambda *_: pytest.fail("nothing to reprocess"))
+
+    client.post("/articles/4/reprocess", data={})
+
+    assert text_of(client.get("/articles").text, "flash") == "Keine Schritte ausgewählt."

@@ -190,7 +190,7 @@ def test_settings_page_shows_every_setting_in_its_section(client, services):
     assert "bbc.co.uk" in domains and "theguardian.com" in domains
     sections = re.findall(r'data-testid="form-(\w+)"(.*?)</form>', html, re.DOTALL)
     assert [(name, re.findall(r'name="(\w+)"', form)) for name, form in sections] == [
-        ("verarbeitung", ["llm_max_parallel_calls"]),
+        ("verarbeitung", ["llm_max_parallel_calls", "reprocessings_per_hour"]),
         ("abruf", ["article_max_age_days", "domain_min_interval_seconds", "tdm_blocked_domains"]),
         ("extraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour", "source_quality_domains"]),
         ("aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),

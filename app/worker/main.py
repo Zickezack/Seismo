@@ -7,8 +7,11 @@ backup job if a backup is due (app/services/backup_service.py), a fetch job for 
 next fetch is due (app/services/ingestion_service.py), a normalization for every article whose full
 text is settled (app/services/normalization_service.py) and, with an Ollama configured, an extraction for the
 articles that pass its pre-filter, within the hour's budget (app/services/extraction_service.py), an assignment
-to its event for every event candidate without one (app/services/event_service.py) and a recognition of the entities
-for every extraction without one (app/services/entity_service.py).
+to its event for every event candidate without one (app/services/event_service.py), a recognition of the entities
+for every extraction without one (app/services/entity_service.py) and the next jobs of a running reprocessing,
+within its own budget (app/services/reprocessing_service.py). Once a minute, too, the reports of replaced readings
+leave their events once the new ones have theirs; once an hour it measures the storage, if not yet that day
+(app/services/storage_service.py).
 """
 import logging
 import os
@@ -39,6 +42,8 @@ from app.services import (
     extraction_service,
     ingestion_service,
     normalization_service,
+    reprocessing_service,
+    storage_service,
 )
 from app.services.health_service import HealthReport, check_readiness
 from app.db.models import JobStatus
@@ -59,6 +64,10 @@ NORMALIZE_CHECK_INTERVAL_SECONDS = 60
 # An article reaches the extraction at most this late after its normalization, a candidate its event and an extraction
 # its entities this late after the extraction; the extraction's budget counts per hour.
 LLM_CHECK_INTERVAL_SECONDS = 60
+# A replaced reading's reports leave their events at most this late after the new reading has its own.
+RETIRE_CHECK_INTERVAL_SECONDS = 60
+# Measured once a UTC day; checking hourly measures soon after midnight.
+STORAGE_CHECK_INTERVAL_SECONDS = 60 * 60
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:
@@ -91,6 +100,7 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
         logger.warning("No Ollama configured (OLLAMA_BASE_URL): no event extraction is queued")
     was_ready = llm_served = None
     next_purge = next_backup_check = next_fetch_check = next_normalize_check = next_llm_check = time.monotonic()
+    next_retire_check = next_storage_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -113,6 +123,12 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and llm and time.monotonic() >= next_llm_check:
                 next_llm_check = time.monotonic() + LLM_CHECK_INTERVAL_SECONDS
                 llm_served = _enqueue_due_llm_jobs(engine, llm, llm_served)
+            if report.ready and time.monotonic() >= next_retire_check:
+                next_retire_check = time.monotonic() + RETIRE_CHECK_INTERVAL_SECONDS
+                _retire_replaced(engine)
+            if report.ready and time.monotonic() >= next_storage_check:
+                next_storage_check = time.monotonic() + STORAGE_CHECK_INTERVAL_SECONDS
+                _measure_storage(engine, settings.backup_dir)
             # After a job, take the next one at once; wait only while the queue is empty.
             claimable = _claimable(handlers, llm_served)
             if report.ready and _run_next_job(engine, claimable, owner, renew_interval, heartbeat_file):
@@ -190,6 +206,25 @@ def _enqueue_due_normalizations(engine: Engine) -> None:
         logger.info("Normalization jobs queued", extra={"jobs": len(job_ids)})
 
 
+def _retire_replaced(engine: Engine) -> None:
+    try:
+        retired = reprocessing_service.retire_replaced(engine)
+    except SQLAlchemyError as error:
+        # Checked again at the next interval; the old and the new reading share their events meanwhile.
+        logger.warning("Retiring replaced reports failed: %s", getattr(error, "orig", None) or error)
+        return
+    if retired:
+        logger.info("Replaced readings retired", extra={"readings": retired})
+
+
+def _measure_storage(engine: Engine, backup_dir: Path) -> None:
+    try:
+        storage_service.measure_if_due(engine, backup_dir)
+    except SQLAlchemyError as error:
+        # Checked again at the next interval; the day's measurement comes later.
+        logger.warning("Storage measurement failed: %s", getattr(error, "orig", None) or error)
+
+
 def _enqueue_due_llm_jobs(engine: Engine, llm: Callable[[], OllamaClient], was_served: bool | None) -> bool:
     """Queue extractions, assignments and recognitions while Ollama serves the model: queued before it is pulled, they
     would only fail. Returns whether it does; a change is logged, the state itself not every minute."""
@@ -207,12 +242,13 @@ def _enqueue_due_llm_jobs(engine: Engine, llm: Callable[[], OllamaClient], was_s
         (extraction_service.enqueue_due, "Extraction"),
         (event_service.enqueue_due, "Assignment"),
         (entity_service.enqueue_due, "Entity recognition"),
+        (reprocessing_service.enqueue_due, "Reprocessing"),
     )
     for enqueue_due, name in sweeps:
         try:
             job_ids = enqueue_due(engine)
         except SQLAlchemyError as error:
-            # Checked again at the next interval; the articles, candidates or extractions wait meanwhile.
+            # Checked again at the next interval; the articles, candidates, extractions or reprocessing wait meanwhile.
             logger.warning("%s check failed: %s", name, getattr(error, "orig", None) or error)
             continue
         if job_ids:

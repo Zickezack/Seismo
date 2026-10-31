@@ -1,5 +1,5 @@
-"""Data access for the corrections of the grouping (Korrekturen): merges and splits of events, the reports they move
-and the versions of the state they withdraw."""
+"""Data access for the corrections of the grouping (Korrekturen): merges and splits of events and the reports a
+reprocessing replaced, the reports they move and the versions of the state they withdraw."""
 from collections.abc import Iterable, Sequence
 
 from sqlalchemy import Connection, Row, insert, or_, select, update
@@ -30,6 +30,17 @@ def move_reports(connection: Connection, from_event_id: int, to_event_id: int, c
         statement = statement.where(EventCandidate.id.in_(list(candidate_ids)))
     moved = connection.execute(statement.values(event_id=to_event_id).returning(EventCandidate.id)).scalars()
     return sorted(moved)
+
+
+def remove_reports(connection: Connection, event_id: int, candidate_ids: Iterable[int]) -> list[int]:
+    """These reports leave the event for none - their reading was replaced; their ids. How each was assigned stays."""
+    statement = (
+        update(EventCandidate)
+        .where(EventCandidate.event_id == event_id, EventCandidate.id.in_(list(candidate_ids)))
+        .values(event_id=None)
+        .returning(EventCandidate.id)
+    )
+    return sorted(connection.execute(statement).scalars())
 
 
 def mark_merged(connection: Connection, event_ids: Iterable[int], into_id: int) -> None:

@@ -140,6 +140,7 @@ class CorrectionKind(StrEnum):
 
     MERGE = "merge"  # events merged into one
     SPLIT = "split"  # reports of an event split off into a new one
+    REPROCESS = "reprocess"  # reports of an event replaced by their article's new extraction (reprocessing_service)
 
 
 class EntityKind(StrEnum):
@@ -215,6 +216,19 @@ class BackfillStatus(StrEnum):
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"  # by the admin, or the source was deactivated
+
+
+class ReprocessingStep(StrEnum):
+    """What a reprocessing runs again (reprocessing_service)."""
+
+    EXTRACTION = "extraction"  # the event extraction; its reports' assignment and recognition follow
+    RECOGNITION = "recognition"  # the entity recognition of an extraction
+
+
+class ReprocessingStatus(StrEnum):
+    RUNNING = "running"
+    DONE = "done"  # every run it selected was queued once
+    CANCELLED = "cancelled"  # by the admin; jobs queued before still run
 
 
 class TdmrepStatus(StrEnum):
@@ -299,6 +313,8 @@ class PlatformSettingsRecord(Base):
     extraction_min_text_chars: Mapped[int] = mapped_column(server_default="500")
     extraction_max_age_days: Mapped[int] = mapped_column(server_default="3")
     extractions_per_hour: Mapped[int] = mapped_column(server_default="30")
+    # The reprocessing's budget (reprocessing_service), apart from the extraction's.
+    reprocessings_per_hour: Mapped[int] = mapped_column(server_default="30")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -314,6 +330,8 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(extraction_max_age_days >= 1, name="extraction_max_age_days"),
         # 0 holds the extraction.
         CheckConstraint(extractions_per_hour >= 0, name="extractions_per_hour"),
+        # 0 holds the reprocessing.
+        CheckConstraint(reprocessings_per_hour >= 0, name="reprocessings_per_hour"),
     )
 
 
@@ -387,6 +405,55 @@ class Backfill(Base):
         CheckConstraint(status.in_([s.value for s in BackfillStatus]), name="status"),
         CheckConstraint(period_start < period_end, name="period"),
     )
+
+
+class Reprocessing(Base):
+    """The runs of one step made with an older schema version or another model, run again for the articles chosen
+    (UI term: Neuverarbeitung): behind live work, within its hourly budget (reprocessing_service)."""
+
+    __tablename__ = "reprocessing"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    step: Mapped[str] = mapped_column(String(20))
+    # The runs it replaces: made with this schema version and this model.
+    schema_version: Mapped[str] = mapped_column(String(20))
+    model: Mapped[str] = mapped_column(String(200))
+    # Only the articles of this Quelle, and a copy of its name. A Quelle deleted since leaves the id empty, and its
+    # articles, without theirs, match no more.
+    source_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("source.id", ondelete="SET NULL"))
+    source_name: Mapped[str | None] = mapped_column(String(200))
+    # Only the articles of these days (publication, else fetch, UTC); empty: no limit.
+    period_start: Mapped[date | None] = mapped_column(Date)
+    period_end: Mapped[date | None] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(20), server_default=ReprocessingStatus.RUNNING.value)
+    total: Mapped[int]  # the runs it selected when it started
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(step.in_([s.value for s in ReprocessingStep]), name="step"),
+        CheckConstraint(status.in_([s.value for s in ReprocessingStatus]), name="status"),
+        CheckConstraint(period_start <= period_end, name="period"),
+    )
+
+
+class StorageMeasurement(Base):
+    """What the data took on one day (UI term: Speichermessung), measured by the worker once a day (storage_service)."""
+
+    __tablename__ = "storage_measurement"
+
+    measured_on: Mapped[date] = mapped_column(Date, primary_key=True)  # the UTC day
+    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    database_bytes: Mapped[int] = mapped_column(BigInteger)
+    # Every table's size with its indexes and TOAST: {"name": bytes}.
+    table_bytes: Mapped[dict] = mapped_column(JSONB)
+    article_count: Mapped[int] = mapped_column(BigInteger)
+    raw_text_count: Mapped[int] = mapped_column(BigInteger)
+    raw_text_bytes: Mapped[int] = mapped_column(BigInteger)  # as stored, compressed: the answers and their plain texts
+    backup_count: Mapped[int]
+    backup_bytes: Mapped[int] = mapped_column(BigInteger)
+    # Free on the backup store's file system; empty when it could not be read.
+    backup_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class SeedLogEntry(Base):
@@ -503,6 +570,11 @@ class Extraction(Base):
     raw_answer: Mapped[str | None] = mapped_column(Text)
     # Valid only after the model was asked again with the errors of its first answer.
     repaired: Mapped[bool] = mapped_column(server_default=false())
+    # The extraction of its article that replaced it (reprocessing_service): its reports leave their events once the
+    # new ones have theirs. Empty for the article's current reading.
+    replaced_by_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("extraction.id", ondelete="SET NULL"), index=True)
+    # The Neuverarbeitung that made it; empty for the live extraction and an article's own reprocessing.
+    reprocessing_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("reprocessing.id", ondelete="SET NULL"), index=True)
 
     __table_args__ = (
         CheckConstraint(validation_result.in_([s.value for s in ValidationResult]), name="validation_result"),
@@ -606,17 +678,18 @@ class EventState(Base):
 
 
 class EventCorrection(Base):
-    """A merge or split of events by the analyst (UI term: Korrektur), the audit trail of datamodel.md, rule 3. Never
-    changed, never deleted."""
+    """A merge or split of events by the analyst, or the reports a reprocessing replaced leaving their event (UI term:
+    Korrektur), the audit trail of datamodel.md, rule 3. Never changed, never deleted."""
 
     __tablename__ = "event_correction"
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     kind: Mapped[str] = mapped_column(String(10))
-    # The event the reports went to: of a merge the one that remains, of a split the new one.
+    # The event the reports went to: of a merge the one that remains, of a split the new one; of a reprocessing the
+    # one they left, for none.
     event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), index=True)
     # The events the reports left, each with the reports it gave, ids only: [{"event_id", "candidate_ids"}] - of a
-    # merge every event merged, of a split the event split.
+    # merge every event merged, of a split the event split, of a reprocessing the event itself.
     moves: Mapped[list] = mapped_column(JSONB)
     reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -744,6 +817,8 @@ class EntityRecognition(Base):
     linked: Mapped[int] = mapped_column(Integer, server_default=text("0"))  # of them, those linked to an entity
     # Angaben of relationships it recorded (schema 2).
     relationships: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    # The Neuverarbeitung of this run. A run again replaces the row, the mentions and the Angaben of the one before.
+    reprocessing_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("reprocessing.id", ondelete="SET NULL"), index=True)
 
 
 class EntityRelationship(Base):
@@ -790,6 +865,9 @@ class RelationshipRecord(Base):
     review: Mapped[str | None] = mapped_column(String(20))
     note: Mapped[str | None] = mapped_column(Text)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Of a report's: when the reading it came from was replaced - its article extracted again, or its extraction's
+    # entities recognised again (reprocessing_service). From then on it no longer counts; it stays in the history.
+    replaced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         CheckConstraint(origin.in_([s.value for s in RecordOrigin]), name="origin"),

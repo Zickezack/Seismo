@@ -141,11 +141,12 @@ def apply(state: State | None, record) -> State:
     return state
 
 
-def replay(records: Iterable) -> list[tuple[object, State, bool]]:
-    """Each Angabe, in the order given, with the state after it and whether it changed the state."""
+def replay(records: Iterable) -> list[tuple[object, State | None, bool]]:
+    """Each Angabe, in the order given, with the state after it and whether it changed the state. One whose reading
+    was replaced (`replaced_at`) counts no more: it leaves the state as it is. None before any Angabe counts."""
     steps, state = [], None
     for record in records:
-        after = apply(state, record)
+        after = state if record.replaced_at is not None else apply(state, record)
         steps.append((record, after, after != state))
         state = after
     return steps
@@ -270,7 +271,7 @@ def _states(connection: Connection, relationship_ids: list[int]) -> dict[int, St
     by_relationship: dict[int, list] = {relationship_id: [] for relationship_id in relationship_ids}
     for record in relationship_repository.records(connection, relationship_ids):
         by_relationship[record.relationship_id].append(record)
-    return {relationship_id: (replay(rows)[-1][1] if rows else State()) for relationship_id, rows in by_relationship.items()}
+    return {relationship_id: (replay(rows)[-1][1] if rows else None) or State() for relationship_id, rows in by_relationship.items()}
 
 
 def _live(connection: Connection, entity_id: int | None):
@@ -340,8 +341,13 @@ class RecordView:
     """An Angabe with the state after it."""
 
     record: object
-    state: State
+    state: State | None  # None while no Angabe counts
     changed: bool
+
+    @property
+    def replaced(self) -> bool:
+        """Its reading was replaced: it counts no more."""
+        return self.record.replaced_at is not None
 
     @property
     def origin_label(self) -> str:
@@ -385,7 +391,7 @@ def of_entity(engine: Engine, entity_id: int) -> list[RelationshipView]:
     views = []
     for row in rows:
         own = by_relationship.get(row.id, [])
-        reports = [record for record in own if record.origin == RecordOrigin.REPORT]
+        reports = [record for record in own if record.origin == RecordOrigin.REPORT and record.replaced_at is None]
         views.append(RelationshipView(
             id=row.id, kind=row.kind, is_subject=row.subject_id == entity_id,
             other=entity_service.EntityRef(row.other_id, row.other_name, row.other_kind), state=replay(own)[-1][1],
@@ -403,7 +409,8 @@ def detail(engine: Engine, relationship_id: int) -> RelationshipDetail | None:
     steps = [RecordView(record, state, changed) for record, state, changed in replay(records)]
     return RelationshipDetail(
         row.id, row.kind, entity_service.EntityRef(row.subject_id, row.subject_name, row.subject_kind),
-        entity_service.EntityRef(row.object_id, row.object_name, row.object_kind), steps[-1].state if steps else State(), steps,
+        entity_service.EntityRef(row.object_id, row.object_name, row.object_kind),
+        steps[-1].state if steps and steps[-1].state else State(), steps,
     )
 
 

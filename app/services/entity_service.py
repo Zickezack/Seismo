@@ -336,12 +336,22 @@ def enqueue_due(engine: Engine) -> list[int]:
     return [job_id for job_id in job_ids if job_id is not None]
 
 
-def recognise(engine: Engine, extraction_id: int, client: OllamaClient, limiter: LlmCallLimiter) -> Callable[[Connection], None] | None:
+def recognise(
+    engine: Engine,
+    extraction_id: int,
+    client: OllamaClient,
+    limiter: LlmCallLimiter,
+    rerun: bool = False,
+    reprocessing_id: int | None = None,
+) -> Callable[[Connection], None] | None:
     """First phase of a recognition job: ask the LLM what the names of the extraction's reports stand for. Returns the
-    effect that resolves them, or None when the extraction is gone or recognised already. LlmError
-    (app/llm/ollama.py) or UnusableAnswer when the LLM brought no usable answer: retried with the job."""
+    effect that resolves them, or None when the extraction is gone, replaced or recognised already. `rerun` (job
+    "Entitäten neu erkennen", reprocessing_service): in place of its recognition - None without one; the effect
+    replaces the mentions, and the Angaben of the run before no longer count. LlmError (app/llm/ollama.py) or
+    UnusableAnswer when the LLM brought no usable answer: retried with the job."""
     with engine.connect() as connection:
-        if entity_repository.recognised(connection, extraction_id):
+        before = entity_repository.reading(connection, extraction_id)
+        if before is None or (before.recognised_at is not None) != rerun:
             return None
         candidates = extraction_repository.candidates_of(connection, extraction_id)
         if not candidates:
@@ -351,7 +361,10 @@ def recognise(engine: Engine, extraction_id: int, client: OllamaClient, limiter:
         known = _known(connection, offered)
         categories = _categories(entity_repository.catalogue(connection))
         statements = list(relationship_repository.statements_of(connection, extraction_id))
-    run = {"extraction_id": extraction_id, "schema_version": entity_schema.SCHEMA_VERSION, "names": len(names)}
+    run = {
+        "extraction_id": extraction_id, "schema_version": entity_schema.SCHEMA_VERSION, "names": len(names), "model": None,
+        "duration_ms": None, "reprocessing_id": reprocessing_id,
+    }
     items, stated, started = [], [], time.perf_counter()
     if names:
         schema = entity_schema.json_schema(len(names), len(known), [category.key for category in categories], len(statements))
@@ -369,8 +382,13 @@ def recognise(engine: Engine, extraction_id: int, client: OllamaClient, limiter:
 
     def store(connection: Connection) -> None:
         entity_repository.lock_entities(connection)
-        if entity_repository.recognised(connection, extraction_id):
+        now = entity_repository.reading(connection, extraction_id)
+        if now is None or now.recognised_at != before.recognised_at:
+            # Replaced, or recognised (again) meanwhile.
             return
+        if rerun:
+            entity_repository.delete_mentions(connection, extraction_id)
+            relationship_repository.mark_replaced(connection, extraction_id)
         created: set[int] = set()
         resolved: dict[str, _Alias] = {}
         mentions, uncertain = [], 0
@@ -386,11 +404,15 @@ def recognise(engine: Engine, extraction_id: int, client: OllamaClient, limiter:
             ]
         entity_repository.insert_mentions(connection, mentions)
         relationships = _record_relationships(connection, stated, resolved)
-        entity_repository.insert_recognition(connection, run | {"linked": len(resolved), "relationships": relationships})
+        values = run | {"linked": len(resolved), "relationships": relationships}
+        if rerun:
+            entity_repository.replace_recognition(connection, values)
+        else:
+            entity_repository.insert_recognition(connection, values)
         # IDs and counts only, never a name (datamodel.md, rule 13). Not "created": a LogRecord has that already.
         fields = {
             "extraction_id": extraction_id, "names": len(names), "linked": len(resolved), "founded": len(created),
-            "uncertain": uncertain, "relationships": relationships,
+            "uncertain": uncertain, "relationships": relationships, "rerun": rerun, "reprocessing_id": reprocessing_id,
         }
         logger.info("Entities recognised", extra=fields | {"duration_ms": run.get("duration_ms")})
 

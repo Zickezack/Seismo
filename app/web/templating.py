@@ -46,5 +46,20 @@ def _local_time(value: datetime | None) -> Markup | str:
     )
 
 
+_SIZE_UNITS = ("B", "kB", "MB", "GB", "TB")
+
+
+def _size(value: float | None) -> str:
+    """A size in bytes as the pages show it, in steps of 1024: "512 B", "3,2 MB", "284 MB"; a growth may be negative."""
+    if value is None:
+        return "–"
+    size, unit = abs(value), 0
+    while size >= 1024 and unit < len(_SIZE_UNITS) - 1:
+        size, unit = size / 1024, unit + 1
+    number = f"{size:.1f}".replace(".", ",") if unit and size < 10 else f"{size:.0f}"
+    return f"{'-' if value < 0 and number.strip('0,') else ''}{number} {_SIZE_UNITS[unit]}"
+
+
 templates = Jinja2Templates(directory=WEB_DIR / "templates", context_processors=[_admin, _flash])
 templates.env.filters["local_time"] = _local_time
+templates.env.filters["size"] = _size

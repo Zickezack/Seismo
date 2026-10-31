@@ -72,12 +72,16 @@ def get(connection: Connection, relationship_id: int) -> Row | None:
 
 
 def of_entity(connection: Connection, entity_id: int) -> Sequence[Row]:
-    """The entity's relationships that have Angaben, with the other entity, by its name."""
+    """The entity's relationships that have Angaben not replaced, with the other entity, by its name."""
     other = aliased(Entity)
     other_id = func.coalesce(
         func.nullif(EntityRelationship.object_id, entity_id), EntityRelationship.subject_id
     )
-    has_records = select(RelationshipRecord.id).where(RelationshipRecord.relationship_id == EntityRelationship.id).exists()
+    has_records = (
+        select(RelationshipRecord.id)
+        .where(RelationshipRecord.relationship_id == EntityRelationship.id, RelationshipRecord.replaced_at.is_(None))
+        .exists()
+    )
     statement = (
         select(EntityRelationship.__table__, other.id.label("other_id"), other.name.label("other_name"), other.kind.label("other_kind"))
         .join(other, other.id == other_id)
@@ -152,6 +156,21 @@ def move_records(connection: Connection, record_ids: Iterable[int], relationship
     if swap_sides:
         values |= {"subject_alias_id": RelationshipRecord.object_alias_id, "object_alias_id": RelationshipRecord.subject_alias_id}
     connection.execute(update(RelationshipRecord).where(RelationshipRecord.id.in_(list(record_ids))).values(values))
+
+
+def mark_replaced(connection: Connection, extraction_id: int) -> None:
+    """The reports' Angaben of the extraction no longer count: their reading was replaced - the article extracted
+    again, or the extraction's entities recognised again. They stay, marked with the time."""
+    candidate_ids = select(EventCandidate.id).where(EventCandidate.extraction_id == extraction_id)
+    connection.execute(
+        update(RelationshipRecord)
+        .where(
+            RelationshipRecord.origin == RecordOrigin.REPORT,
+            RelationshipRecord.candidate_id.in_(candidate_ids),
+            RelationshipRecord.replaced_at.is_(None),
+        )
+        .values(replaced_at=func.now())
+    )
 
 
 def record_ids(connection: Connection, relationship_id: int) -> list[int]:

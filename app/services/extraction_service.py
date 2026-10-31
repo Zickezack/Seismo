@@ -25,7 +25,7 @@ from app.llm import event_schema
 from app.llm.event_schema import Direction, Horizon, TargetKind
 from app.llm.limiter import LlmCallLimiter
 from app.llm.ollama import MAX_ANSWER_TOKENS, LlmAnswer, OllamaClient
-from app.repositories import extraction_repository
+from app.repositories import entity_repository, extraction_repository, relationship_repository
 from app.services import job_service, platform_settings_service, similarity_service
 
 logger = logging.getLogger(__name__)
@@ -175,10 +175,18 @@ def enqueue_due(engine: Engine) -> list[int]:
 
 
 def extract(
-    engine: Engine, article_id: int, client: OllamaClient, limiter: LlmCallLimiter, stop_event: threading.Event | None = None
+    engine: Engine,
+    article_id: int,
+    client: OllamaClient,
+    limiter: LlmCallLimiter,
+    stop_event: threading.Event | None = None,
+    replaces: int | None = None,
+    reprocessing_id: int | None = None,
 ) -> Callable[[Connection], None] | None:
     """First phase of an extraction job: ask the model. Returns the effect that stores the candidates, or None when
-    the article has an extraction already, became a duplicate or lost its text meanwhile.
+    the article has an extraction already, became a duplicate or lost its text meanwhile. With `replaces` (job
+    "Ereignisse neu extrahieren", reprocessing_service): the article's new reading, in place of that extraction - None
+    unless it is still the current one.
 
     An answer outside the schema or cut is stored as a run of its own at once, and the model asked again in the same
     slot, told what was wrong; a second such answer raises InvalidAnswer. LlmError (app/llm/ollama.py) when the
@@ -186,10 +194,16 @@ def extract(
     would outlast its stop_grace_period (docker-compose.yml): JobInterrupted puts the job back into the queue."""
     with engine.connect() as connection:
         article = extraction_repository.get_for_extraction(connection, article_id)
-    if article is None or article.extracted or article.duplicate_of_id is not None or not article.plain_text:
+    if article is None or article.duplicate_of_id is not None or not article.plain_text:
+        return None
+    # Extracted already; or, to replace an extraction, that one is no longer the current reading.
+    if article.extracted if replaces is None else article.current_id != replaces:
         return None
     text, truncated = fit_text(article.plain_text, client.num_ctx)
-    run = {"article_id": article_id, "schema_version": event_schema.SCHEMA_VERSION, "input_chars": len(text), "truncated": truncated}
+    run = {
+        "article_id": article_id, "schema_version": event_schema.SCHEMA_VERSION, "input_chars": len(text), "truncated": truncated,
+        "reprocessing_id": reprocessing_id,
+    }
     started = time.perf_counter()
     with limiter.slot():
         answer, parsed, failure = _ask(client, messages(article, text))
@@ -208,14 +222,24 @@ def extract(
     values = run | {"model": answer.model, "duration_ms": duration_ms, "statements_dropped": dropped, "repaired": repaired}
 
     def store(connection: Connection) -> None:
-        if extraction_repository.insert_extraction(connection, values, candidates) is not None:
-            # IDs and counts only (datamodel.md, rule 13).
-            fields = {
-                "article_id": article_id, "candidates": len(candidates), "statements_dropped": dropped,
-                "details_dropped": details_dropped, "repaired": repaired, "duration_ms": duration_ms,
-                "prompt_tokens": answer.prompt_tokens, "answer_tokens": answer.answer_tokens,
-            }
-            logger.info("Events extracted", extra=fields)
+        if replaces is not None:
+            # The old reading's Angaben of relationships are replaced with it: a write of relationships, under their lock.
+            entity_repository.lock_entities(connection)
+        extraction_id = extraction_repository.insert_extraction(connection, values, candidates, replaces)
+        if extraction_id is None:
+            return
+        if replaces is not None:
+            # Its reports leave their events once the new ones have theirs (reprocessing_service.retire_replaced).
+            relationship_repository.mark_replaced(connection, replaces)
+        # IDs and counts only (datamodel.md, rule 13).
+        fields = {
+            "article_id": article_id, "candidates": len(candidates), "statements_dropped": dropped,
+            "details_dropped": details_dropped, "repaired": repaired, "duration_ms": duration_ms,
+            "prompt_tokens": answer.prompt_tokens, "answer_tokens": answer.answer_tokens,
+        }
+        if replaces is not None:
+            fields |= {"extraction_id": extraction_id, "replaces": replaces, "reprocessing_id": reprocessing_id}
+        logger.info("Events extracted", extra=fields)
 
     return store
 

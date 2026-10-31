@@ -46,6 +46,8 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Job | `job` | A unit of work in the PostgreSQL job queue, with status, lease and retry count. | none |
 | Plattform-Einstellungen | `platform_settings` | Settings that apply to the whole instance, edited by the admin (`requirements.md`, "Settings"). | none |
 | Backfill | `backfill` | A past period of a Quelle fetched after the fact, page by page, always behind live work. | none |
+| Neuverarbeitung | `reprocessing` | The runs of one step - event extraction or entity recognition - made with an older schema version or another model, run again for the articles the admin chooses, always behind live work. | none |
+| Speichermessung | `storage_measurement` | What the data took on one day: the database and its tables, the raw texts, the backups and the free space. | none |
 | Domain | `fetch_host` | The fetch state of one host: its robots.txt, its request slots and a pause it asked for. Not shown in the UI. | none |
 | Seed-Protokoll | `seed_log` | Which items of a seed source (e.g. the starter catalogue of Quellen) were imported once (`architecture.md`, "Seed Data"). Not shown in the UI. | none |
 
@@ -119,6 +121,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | extraction_min_text_chars | integer | yes | 500 | Shorter cleaned texts are not extracted; check constraint >= 0. UI: Mindestlänge des Texts (Zeichen). |
   | extraction_max_age_days | integer | yes | 3 | Older articles (publication, else fetch time) are not extracted; check constraint >= 1. UI: Höchstalter (Tage). |
   | extractions_per_hour | integer | yes | 30 | At most this many extraction jobs are queued per hour, newest articles first; 0 holds the extraction; check constraint >= 0. UI: Extraktionen pro Stunde (höchstens). |
+  | reprocessings_per_hour | integer | yes | 30 | At most this many jobs of a Neuverarbeitung are queued per hour - extractions and recognitions alike, an article's own counted as well -, apart from the extraction's budget; 0 holds the reprocessing; check constraint >= 0. UI: Verarbeitung - Neuverarbeitungen pro Stunde (höchstens). |
   | source_quality_domains | text | no | the catalogue's suggestions | "domain level" per line, level hoch, mittel or niedrig, sorted by domain; a domain covers its subdomains, the most specific one wins. NULL: the suggestions the code starts with (`platform_settings_service.STARTER_SOURCE_QUALITY`: official bodies hoch, established media mittel, press release portals niedrig - the admin's decision of 2026-10-24). UI: Ereignisextraktion - Quellenqualität nach Domain. |
   | updated_at | timestamptz | yes | now() | |
 
@@ -207,7 +210,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | plain_text | text | no | | The main text, cleaned: without navigation, ads and comments (trafilatura for HTML, pypdf for PDF); empty when none was found. Full text as well: it goes with the raw text (rule 8). |
 
 - Relationships: belongs to one Artikel.
-- Rules: the temporary raw-data layer: deleted after its source's retention period once processing has succeeded (rule 8, epic Verdichtung und Daten-Lifecycle); nothing deletes it yet. The normalisation turns it into plain text.
+- Rules: the temporary raw-data layer: deleted after its source's retention period once processing has succeeded (rule 8, epic Verdichtung und Daten-Lifecycle); nothing deletes it yet. The normalisation turns it into plain text. A Neuverarbeitung's new extraction reads its plain text: an article without one cannot be extracted again. The Datenbestand page shows what the raw texts take, per Quelle too.
 - Privacy: none
 
 ### Verknüpfung (`article_link`)
@@ -245,9 +248,11 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | validation_errors | text | no | | Of an unusable run: what was wrong, one line per error - where and what, never the value (`event_schema.error_summary`). Shown to the admin; logged is only their number. |
   | raw_answer | text | no | | Of an unusable run: the model's answer, at most 20000 characters, for diagnosis. May quote the article: shown to the admin, never logged. |
   | repaired | boolean | yes | false | The answer to the follow-up question, asked with the errors of the first answer (not the answer itself, which would not fit the context). A valid one lowers every statement's extraction level by one. UI: gültig erst auf Nachfrage. |
+  | replaced_by_id | bigint | no | | The extraction of its article that replaced it (Neuverarbeitung): empty for the article's current reading. Foreign key to `extraction`, `ON DELETE SET NULL`. Index. |
+  | reprocessing_id | bigint | no | | The Neuverarbeitung that made it; empty for the live extraction and an article's own reprocessing. Foreign key to `reprocessing`, `ON DELETE SET NULL`. Index. |
 
 - Relationships: belongs to one Artikel; has any number of Ereigniskandidaten.
-- Rules: made by the job "Ereignisse extrahieren" (`extraction_service`) for an article that passes the pre-filter: an original (never a duplicate, never a later copy of a linked article) of a source that extracts, in a listed language, with enough text, not too old - at most a number per hour, newest first (Plattform-Einstellungen). One valid run per article; a run with an unusable answer is stored as well, and the job asks the model once more right away, told what was wrong; a second unusable answer leaves the job to its retry. An article whose extraction job failed comes back only when the admin requeues the job. Every text the model writes is English, every quote verbatim. Kept with the metadata.
+- Rules: made by the job "Ereignisse extrahieren" (`extraction_service`) for an article that passes the pre-filter: an original (never a duplicate, never a later copy of a linked article) of a source that extracts, in a listed language, with enough text, not too old - at most a number per hour, newest first (Plattform-Einstellungen). One current reading per article: its valid run no reprocessing replaced - a Neuverarbeitung's new extraction replaces it (`replaced_by_id`), the old one is kept with its reports, statements and quotes; a run with an unusable answer is stored as well, and the job asks the model once more right away, told what was wrong; a second unusable answer leaves the job to its retry. An article whose extraction job failed comes back only when the admin requeues the job. Every text the model writes is English, every quote verbatim. Kept with the metadata.
 - Privacy: none
 
 ### Ereigniskandidat (`event_candidate`)
@@ -278,7 +283,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | assigned_at | timestamptz | no | | |
 
 - Relationships: belongs to one Extraktion and its Artikel; has one or more Aussagen; belongs to one Ereignis once assigned.
-- Rules: stored only with at least one Aussage that has a Beleg. Assigned to an Ereignis by the job "Ereignis zuordnen" (see Ereignis); moved to another only by a Korrektur.
+- Rules: stored only with at least one Aussage that has a Beleg. Assigned to an Ereignis by the job "Ereignis zuordnen" (see Ereignis); moved to another only by a Korrektur. A report of a replaced reading (its extraction's `replaced_by_id`) is never assigned; once every report of its article's current reading has its event, it leaves its own (`reprocessing_service.retire_replaced`, a Korrektur Neuverarbeitung of each event it leaves) - until then its successor finds that event through it. It keeps how it was assigned, its statements and its mentions; it is no longer listed with an entity.
 - Privacy: none (actors may name persons, private individuals too: shown to the admin only, never logged - rule 13)
 
 ### Ereignis (`event`)
@@ -288,17 +293,17 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | Field | Type | Required | Default | Notes |
   |-------|------|----------|---------|-------|
   | id | bigint identity | yes | | The stable event ID (rule 1). UI: Ereignis-ID. |
-  | title | text | yes | | Of the report that founded it, English; kept as later reports come in. |
+  | title | text | yes | | Of the report that founded it, English; kept as later reports come in - renamed only when a Neuverarbeitung replaces the report it is named after. |
   | event_type | varchar(40) | yes | | Of the founding report; the values of Ereigniskandidat, check constraint. |
   | country | varchar(2) | no | | Of the founding report; empty where it states none (rule 5). |
   | first_reported_at | timestamptz | yes | | The publication (else fetch) time of its earliest report. |
   | last_reported_at | timestamptz | yes | | The same of its latest report. Index. |
   | created_at | timestamptz | yes | now() | |
-  | founding_candidate_id | bigint | no | | The report it is named after: title, type and country are this report's - the one that founded it, or the earliest of those a split made it of. Never split off. Foreign key to `event_candidate`, `ON DELETE SET NULL`. Index. Filled for the events before by migration `0a882e94c29f`: the report with the event's title. UI: Nach diesem Bericht ist das Ereignis benannt. |
-  | merged_into_id | bigint | no | | Set by a merge, never cleared: the event its reports went to. Foreign key to `event`, `ON DELETE SET NULL`. UI: Zusammengeführt in. |
+  | founding_candidate_id | bigint | no | | The report it is named after: title, type and country are this report's - the one that founded it, or the earliest of those a split made it of. Never split off. Replaced by a Neuverarbeitung: then its article's new report in the event, else the event's earliest report, gives it title, type and country. Foreign key to `event_candidate`, `ON DELETE SET NULL`. Index. Filled for the events before by migration `0a882e94c29f`: the report with the event's title. UI: Nach diesem Bericht ist das Ereignis benannt. |
+  | merged_into_id | bigint | no | | Set by a merge, never cleared: the event its reports went to; or by a Neuverarbeitung that left it without reports: the event its article's new reading's first report went to. Foreign key to `event`, `ON DELETE SET NULL`. UI: Zusammengeführt in. |
 
 - Relationships: has one or more Ereigniskandidaten, its reports - none once merged; has Ereigniszustände, its versions; is named after one of its reports; takes part in Korrekturen; a merged one points to the event it was merged into.
-- Rules: one incident with its direct continuation - an attack and its death toll, a quake and its aftershocks - never a topic (the admin's decision of 2026-10-24). The job "Ereignis zuordnen" (`event_service`) assigns every Ereigniskandidat without one, the earliest report first, so the first report founds the event: compared with the events reported from 7 days before to 7 days after it - from 0.5 similarity it joins the most similar, below 0.2 it founds a new one, in between the LLM chooses among the up to 3 most similar or none. Never an event that has a report of the same article. The assignment runs under an advisory lock, after comparing again: two workers never found two events for one incident. The list (UI: Ereignisse, `/events`) shows the 100 most recently reported; the event page (`/events/<id>`) its reports, the earliest first, each with its article and how it came to the event. Its state is its latest Ereigniszustand not withdrawn (UI: Zustand, in the list and on the page); the page shows the versions (UI: Verlauf) and what each report does to the state in effect at its time (UI: Zum Zustand - Zustandswechsel, bestätigt, widerspricht with the state it contradicts). The analyst corrects the grouping on the page (`event_correction_service`), each correction recorded as a Korrektur (rule 3, the admin's decision of 2026-10-30): merging the selected of its similar events into it (UI: Ähnliche Ereignisse - those reported from 7 days before its first to 7 days after its last report, by the similarity of the assignment, an event scoring its report most similar to any of this one's, at most 10; UI: In dieses Ereignis zusammenführen), and splitting off selected reports into one new event, named after the earliest of them (UI: Als neues Ereignis abspalten); the report it is named after stays. A merged event keeps its id and page, without reports, its versions as they were; it is no longer listed, counted, compared or corrected. Both all or nothing, with an optional reason, under the assignment's advisory lock.
+- Rules: one incident with its direct continuation - an attack and its death toll, a quake and its aftershocks - never a topic (the admin's decision of 2026-10-24). The job "Ereignis zuordnen" (`event_service`) assigns every Ereigniskandidat without one, the earliest report first, so the first report founds the event: compared with the events reported from 7 days before to 7 days after it - from 0.5 similarity it joins the most similar, below 0.2 it founds a new one, in between the LLM chooses among the up to 3 most similar or none. Never an event that has a report of the same article - but for its replaced reading's (see Ereigniskandidat). The assignment runs under an advisory lock, after comparing again: two workers never found two events for one incident. The list (UI: Ereignisse, `/events`) shows the 100 most recently reported; the event page (`/events/<id>`) its reports, the earliest first, each with its article and how it came to the event. Its state is its latest Ereigniszustand not withdrawn (UI: Zustand, in the list and on the page); the page shows the versions (UI: Verlauf) and what each report does to the state in effect at its time (UI: Zum Zustand - Zustandswechsel, bestätigt, widerspricht with the state it contradicts). The analyst corrects the grouping on the page (`event_correction_service`), each correction recorded as a Korrektur (rule 3, the admin's decision of 2026-10-30): merging the selected of its similar events into it (UI: Ähnliche Ereignisse - those reported from 7 days before its first to 7 days after its last report, by the similarity of the assignment, an event scoring its report most similar to any of this one's, at most 10; UI: In dieses Ereignis zusammenführen), and splitting off selected reports into one new event, named after the earliest of them (UI: Als neues Ereignis abspalten); the report it is named after stays. A merged event keeps its id and page, without reports, its versions as they were; it is no longer listed, counted, compared or corrected. Both all or nothing, with an optional reason, under the assignment's advisory lock.
 - Privacy: none
 
 ### Ereigniszustand (`event_state`)
@@ -313,7 +318,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | valid_from | timestamptz | yes | | The time of the report that stated it: its article's publication, else its fetch. UI: Seit. |
   | candidate_id | bigint | no | | The report that stated it - its Beleg is that report's statements and quotes; foreign key to `event_candidate`, `ON DELETE SET NULL`: the version stays. Index. UI: Laut Bericht. |
   | recorded_at | timestamptz | yes | now() | When Seismo learned it (rule 11): a report found later may state an earlier version. UI: Erfasst. |
-  | added_by_id | bigint | no | | The Korrektur that appended it; empty when its report's assignment did. Foreign key to `event_correction`. UI: durch Zusammenführung, durch Aufteilung. |
+  | added_by_id | bigint | no | | The Korrektur that appended it; empty when its report's assignment did. Foreign key to `event_correction`. UI: durch Zusammenführung, durch Aufteilung, durch Neuverarbeitung. |
   | withdrawn_by_id | bigint | no | | The Korrektur after which it no longer follows from the event's reports; set once, never cleared. Foreign key to `event_correction`. A withdrawn version stays to be seen and is never in effect. UI: struck through, zurückgezogen durch ... |
 
 - Relationships: belongs to one Ereignis; stated by one Ereigniskandidat; may be appended or withdrawn by a Korrektur.
@@ -327,14 +332,14 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | Field | Type | Required | Default | Notes |
   |-------|------|----------|---------|-------|
   | id | bigint identity | yes | | |
-  | kind | varchar(10) | yes | | `merge`, `split`; check constraint. UI: Zusammenführung, Aufteilung. |
-  | event_id | bigint | yes | | The event the reports went to: of a merge the one that remains, of a split the new one. Foreign key to `event`, `ON DELETE CASCADE`. Index. |
-  | moves | jsonb | yes | | `[{event_id, candidate_ids}]`: the events the reports left, each with its reports moved - of a merge every event merged, of a split the event split. Ids only, so the record stays should a report go. |
+  | kind | varchar(10) | yes | | `merge`, `split`, `reprocess` (the reports of a replaced reading leaving the event); check constraint. UI: Zusammenführung, Aufteilung, Neuverarbeitung. |
+  | event_id | bigint | yes | | The event the reports went to: of a merge the one that remains, of a split the new one; of a reprocessing the one they left, for none. Foreign key to `event`, `ON DELETE CASCADE`. Index. |
+  | moves | jsonb | yes | | `[{event_id, candidate_ids}]`: the events the reports left, each with its reports moved - of a merge every event merged, of a split the event split, of a reprocessing the event itself. Ids only, so the record stays should a report go. |
   | reason | text | no | | The analyst's reason, at most 1000 characters, trimmed; empty when none was given. Never logged. UI: Begründung. |
   | created_at | timestamptz | yes | now() | UI: Zeit. |
 
 - Relationships: concerns the event it names and the events in its moves; appends and withdraws Ereigniszustände.
-- Rules: the audit trail of rule 3, written in the transaction of the merge or split it records, never changed or deleted. Shown on the page of every event it concerns, as that event sees it (UI: Korrekturen - Aufgenommen:, Aufgegangen in, Abgespalten als, Abgespalten aus). Logged by ids, kind and number of reports only (rule 13).
+- Rules: the audit trail of rule 3, written in the transaction of the merge, split or reprocessing it records, never changed or deleted. Shown on the page of every event it concerns, as that event sees it (UI: Korrekturen - Aufgenommen:, Aufgegangen in, Abgespalten als, Abgespalten aus, Ersetzt durch die neue Extraktion ihres Artikels). Logged by ids, kind and number of reports only (rule 13). Migration `fb4c52ab16d6` deletes the reprocessing's on downgrade, with the versions they withdrew and the replaced readings: as if the articles had only ever been read the new way.
 - Privacy: none
 
 ### Aussage (`statement`)
@@ -420,7 +425,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | position | smallint | yes | | Its place in the report's `actors` or `impacts`: role, impact and quote are read from there. |
 
 - Relationships: belongs to one Ereigniskandidat and one Namensform.
-- Rules: written with its recognition. A name the reports of one extraction give more than once - by the same key - is one entity at every place. The event page (UI: Entitäten) lists the entities its reports name, the most often named first, with the name forms used and whether one is uncertain; the entity page its reports, the latest 100.
+- Rules: written with its recognition; a recognition run again (Neuverarbeitung) replaces the extraction's. Of a replaced reading's reports they stay, no longer listed or counted with the entity. A name the reports of one extraction give more than once - by the same key - is one entity at every place. The event page (UI: Entitäten) lists the entities its reports name, the most often named first, with the name forms used and whether one is uncertain; the entity page its reports, the latest 100.
 - Privacy: none (it names a person by reference only)
 
 ### Entitätenerkennung (`entity_recognition`)
@@ -437,9 +442,10 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | names | integer | yes | 0 | The distinct names (by key) of the reports' actors and impact targets the model was asked about, at most 50. |
   | linked | integer | yes | 0 | Of them, those that became a Nennung; the others the model judged no entity, or a sector or commodity not on the list. |
   | relationships | integer | yes | 0 | The Angaben of relationships it recorded (schema 2); 0 for the runs before. |
+  | reprocessing_id | bigint | no | | The Neuverarbeitung of this run; empty for the live recognition and an article's own reprocessing. Foreign key to `reprocessing`, `ON DELETE SET NULL`. Index. |
 
 - Relationships: belongs to one Extraktion.
-- Rules: the job "Entitäten erkennen" (`entity_service`, one of the LLM jobs) runs for every valid extraction with reports and without a recognition, the earliest article first, queued in the worker's LLM sweep. The model is shown the reports, each name with its role or impact and quote, the known entities with a similar name form (pg_trgm similarity from 0.3, at most 3 per name, 40 in all) and the imported sectors and commodities; it answers each name's kind or none, a named individual's public or business position first (a person without one, or answered as a private individual, is no entity - rule 13), its usual English name, a short form the report uses, the known entity it is when it is sure, a subsidiary's parent or a product's maker, a country's code, a listed item's key and identifiers. An identifier counts only valid (ISIN, LEI by their check digits; a country code assigned, UK as GB) and stated in the name's quote (rule 5). Resolved in the effect's transaction under the advisory lock: an identifier or a name form of an entity of the kind (a company's subsidiary alike) - certain; else the known entity the LLM judged it - uncertain; else a new entity. An entity with a similar name that came since the LLM was asked defers the job (`JobDeferred`): it asks anew. Schema 2 shows the model the reports' statements, numbered with their quotes, and asks for the relationships they state between two names, each citing its statement; one between two names that became entities of kinds that can stand in it is an Angabe (see Beziehung). The runs before have none; nothing runs them again. An answer cut or outside the schema is retried with the job. Logged by ids and counts only (rule 13).
+- Rules: the job "Entitäten erkennen" (`entity_service`, one of the LLM jobs) runs for every current reading (an extraction no reprocessing replaced) with reports and without a recognition, a replaced one's never, the earliest article first, queued in the worker's LLM sweep. The model is shown the reports, each name with its role or impact and quote, the known entities with a similar name form (pg_trgm similarity from 0.3, at most 3 per name, 40 in all) and the imported sectors and commodities; it answers each name's kind or none, a named individual's public or business position first (a person without one, or answered as a private individual, is no entity - rule 13), its usual English name, a short form the report uses, the known entity it is when it is sure, a subsidiary's parent or a product's maker, a country's code, a listed item's key and identifiers. An identifier counts only valid (ISIN, LEI by their check digits; a country code assigned, UK as GB) and stated in the name's quote (rule 5). Resolved in the effect's transaction under the advisory lock: an identifier or a name form of an entity of the kind (a company's subsidiary alike) - certain; else the known entity the LLM judged it - uncertain; else a new entity. An entity with a similar name that came since the LLM was asked defers the job (`JobDeferred`): it asks anew. Schema 2 shows the model the reports' statements, numbered with their quotes, and asks for the relationships they state between two names, each citing its statement; one between two names that became entities of kinds that can stand in it is an Angabe (see Beziehung). The runs before have none until a Neuverarbeitung runs them again (job "Entitäten neu erkennen"): a run again takes the row's place - one row per extraction, the latest run's -, replaces the extraction's mentions and marks the Angaben of the run before replaced, in one transaction under the entities' lock. An answer cut or outside the schema is retried with the job. Logged by ids and counts only (rule 13).
 - Privacy: none
 
 ### Beziehung (`entity_relationship`)
@@ -455,7 +461,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | created_at | timestamptz | yes | now() | |
 
 - Relationships: between two Entitäten; has Angaben.
-- Rules: unique by kind, subject and object (`uq_entity_relationship_kind`): a supplier and its customer are one relationship, seen from either side. Its sides by kind (`relationship_service.SIDES`): supplies - a company, subsidiary or country to a company, subsidiary, country, authority, organisation or sector; competes - companies, subsidiaries or products; regulates - an authority or organisation of a company, subsidiary, product or sector; depends_on - a company, subsidiary, country or sector on a commodity. Its state is not stored: it follows from its Angaben in the order they were recorded (`relationship_service.replay`), so every earlier state and the state at any past moment stay to be rebuilt (rules 3, 10, 11). The analyst's review is its quality flag (UI: Prüfung - Ungeprüft, Bestätigt, Bestritten; the admin's decision of 2026-10-31); it is in effect while it holds and is not disputed. The entity page lists an entity's relationships with Angaben, those in effect first (UI: Beziehungen - Rolle, Entität, Gültig, Prüfung, Berichte), confirms or disputes the selected ones all or nothing, their dates as they are, and takes the analyst's own (UI: Beziehung erfassen - the other's role, the other entity by name, number or the list, validity, a required source; confirmed). The relationship page (`/relationships/<id>`) shows its Angaben with the state after each (UI: Verlauf) and takes the analyst's Angabe of its validity and review (UI: Stand ändern). A merge of entities moves the Angaben of the merged one's relationships to the same relationships of the entity it went into; one between the two stays where it was. Never deleted.
+- Rules: unique by kind, subject and object (`uq_entity_relationship_kind`): a supplier and its customer are one relationship, seen from either side. Its sides by kind (`relationship_service.SIDES`): supplies - a company, subsidiary or country to a company, subsidiary, country, authority, organisation or sector; competes - companies, subsidiaries or products; regulates - an authority or organisation of a company, subsidiary, product or sector; depends_on - a company, subsidiary, country or sector on a commodity. Its state is not stored: it follows from its Angaben in the order they were recorded (`relationship_service.replay`), so every earlier state and the state at any past moment stay to be rebuilt (rules 3, 10, 11). The analyst's review is its quality flag (UI: Prüfung - Ungeprüft, Bestätigt, Bestritten; the admin's decision of 2026-10-31); it is in effect while it holds and is not disputed. An Angabe whose reading was replaced no longer counts. The entity page lists an entity's relationships with an Angabe that counts, those in effect first (UI: Beziehungen - Rolle, Entität, Gültig, Prüfung, Berichte), confirms or disputes the selected ones all or nothing, their dates as they are, and takes the analyst's own (UI: Beziehung erfassen - the other's role, the other entity by name, number or the list, validity, a required source; confirmed). The relationship page (`/relationships/<id>`) shows its Angaben with the state after each (UI: Verlauf) and takes the analyst's Angabe of its validity and review (UI: Stand ändern). A merge of entities moves the Angaben of the merged one's relationships to the same relationships of the entity it went into; one between the two stays where it was. Never deleted.
 - Privacy: none
 
 ### Angabe (`relationship_record`)
@@ -476,9 +482,10 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | review | varchar(20) | no | | Of the analyst's: `unreviewed`, `confirmed`, `disputed`; check constraint. UI: Ungeprüft, Bestätigt, Bestritten. |
   | note | text | no | | Of the analyst's: the source or reason, at most 1000 characters; required when the analyst enters a relationship. Never logged. UI: Quelle. |
   | recorded_at | timestamptz | yes | now() | When Seismo learned it (rule 11): the order of the replay. UI: Erfasst. |
+  | replaced_at | timestamptz | no | | Of a report's: when the reading it came from was replaced - its article extracted again, or its extraction's entities recognised again (Neuverarbeitung). From then on it no longer counts; it stays in the history, so the state at an earlier moment can still be rebuilt (rule 11). UI: ersetzt. |
 
 - Relationships: belongs to one Beziehung; a report's to one Ereigniskandidat, one Aussage and two Namensformen.
-- Rules: appended, never changed (rule 3) - only moved by a correction of entities: a merge (see Beziehung), and a split of name forms, which moves the reports' Angaben that name an entity by a name form split off to the same relationship of the entity they now make; the analyst's stay with the entity they were made for. The replay (the admin's decision of 2026-10-31): the first Angabe founds the state - a report's that it holds from its day, that it ended until its day; later a report's that it holds opens it again after an end before its day, or moves its start earlier; that it ended closes it while it is open and from its start on; anything else changes nothing and confirms. The analyst's sets dates and review as given; a report never changes the review. Written by the recognition in its transaction, by the analyst under the entities' advisory lock.
+- Rules: appended, never changed (rule 3) - but for being marked replaced once (`replaced_at`, skipped by the replay), and moved by a correction of entities: a merge (see Beziehung), and a split of name forms, which moves the reports' Angaben that name an entity by a name form split off to the same relationship of the entity they now make; the analyst's stay with the entity they were made for. The replay (the admin's decision of 2026-10-31): the first Angabe founds the state - a report's that it holds from its day, that it ended until its day; later a report's that it holds opens it again after an end before its day, or moves its start earlier; that it ended closes it while it is open and from its start on; anything else changes nothing and confirms. The analyst's sets dates and review as given; a report never changes the review. Written by the recognition in its transaction, by the analyst under the entities' advisory lock.
 - Privacy: none
 
 ### Backfill (`backfill`)
@@ -501,6 +508,49 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
 - Relationships: belongs to a Quelle; has many Artikel (`article.backfill_id`).
 - Rules: started by the admin for an active source, over whole days up to today. One job per page (`Backfill abrufen`, priority 1): the newest page of what is left; a full page continues one second past its oldest item, a page that is not full ends it (a feed: one request). Its jobs and the full texts of its new articles wait behind every live job and take only free request slots. Cancelling (all or nothing, running ones only) stops further pages; queued full texts still come. A deactivated source cancels it, a source error fails it.
+- Privacy: none
+
+### Neuverarbeitung (`reprocessing`)
+- Store: SQL table `reprocessing`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | step | varchar(20) | yes | | `extraction` (Ereignisextraktion: the article extracted again; its reports' assignment and recognition follow) or `recognition` (Entitätenerkennung of an extraction); check constraint. UI: Schritt. |
+  | schema_version | varchar(20) | yes | | The schema version the runs it replaces were made with. UI: Schema. |
+  | model | varchar(200) | yes | | The model they were made with. UI: Modell. |
+  | source_id | bigint | no | | Only the articles of this Quelle. Foreign key to `source`, `ON DELETE SET NULL`: a Quelle deleted since leaves it empty, and its articles, without theirs, match no more. |
+  | source_name | varchar(200) | no | | A copy of its name; set exactly when it is limited to a Quelle. UI: Quelle. |
+  | period_start, period_end | date | no | | Only the articles of these days - publication, else fetch, UTC; empty: no limit. Check constraint `period_start <= period_end`. UI: Von, Bis. |
+  | status | varchar(20) | yes | `running` | `running`, `done` (each run it selects was queued once and none of its jobs waits or runs), `cancelled` (by the admin; jobs queued before still run); check constraint. UI: Läuft, Abgeschlossen, Abgebrochen. |
+  | total | integer | yes | | The runs it selected when it started. UI: Fortschritt - "n von total neu". |
+  | created_at | timestamptz | yes | now() | UI: Gestartet. |
+  | finished_at | timestamptz | no | | UI: Beendet. |
+
+- Relationships: may be limited to a Quelle; has the Extraktionen and Entitätenerkennungen it made (`reprocessing_id`).
+- Rules: started by the admin on the Datenbestand page (`/data`, UI: Neu verarbeiten), one at a time, from a Stand: the current runs of a step - of the extraction the articles' current readings, of the recognition those that asked the model - grouped by schema version and model, each with its number; a Stand made as a run would be made now (the code's schema version, the model in `OLLAMA_MODEL`) is current and offers nothing. "Anzahl prüfen" shows what the choice takes and, of an extraction, how many articles lack the text it needs. The worker queues its jobs ("Ereignisse neu extrahieren", "Entitäten neu erkennen", one per run, a dedupe key per reprocessing and run) behind every live job (priority 1), the newest article first, at most `reprocessings_per_hour`, while Ollama serves the model; a run whose job failed is not queued again by it. Its progress counts the runs it made; failed jobs while they are kept. Cancelling is all or nothing, running ones only. An article's page reprocesses its own outdated steps at once (priority 0, all or nothing; with the extraction, the recognition follows it). Logged by ids and counts only (rule 13).
+- Privacy: none
+
+### Speichermessung (`storage_measurement`)
+- Store: SQL table `storage_measurement`, one row per day
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | measured_on | date | yes | | Primary key: the UTC day. UI: Tag. |
+  | measured_at | timestamptz | yes | now() | |
+  | database_bytes | bigint | yes | | `pg_database_size`. UI: Datenbank. |
+  | table_bytes | jsonb | yes | | `{table: bytes}`: every table of the schema with its indexes and TOAST (`pg_total_relation_size`). |
+  | article_count | bigint | yes | | UI: Artikel. |
+  | raw_text_count | bigint | yes | | |
+  | raw_text_bytes | bigint | yes | | The raw texts as stored, compressed: the answers and their plain texts (`pg_column_size`). UI: Rohtexte. |
+  | backup_count | integer | yes | | The backup files of this database, uploaded ones too. |
+  | backup_bytes | bigint | yes | | UI: Backups. |
+  | backup_free_bytes | bigint | no | | Free on the backup store's file system; empty when it could not be read. The database volume's own is not visible to the application. UI: Frei. |
+
+- Relationships: none.
+- Rules: the worker measures once a UTC day, checking hourly (`storage_service.measure_if_due`); never changed. The Datenbestand page (`/data`) shows the state now - database, largest tables, raw texts and per Quelle, backups, free space - measured as it loads, the latest 60 days, and the growth per day over 7 and 30 days, from the measurement that far back, else the earliest (`requirements.md`, Verdichtung und Daten-Lifecycle, criterion 4).
 - Privacy: none
 
 ### Domain (`fetch_host`)

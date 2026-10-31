@@ -5,13 +5,15 @@ from typing import Annotated
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app.services import article_service, extraction_service, similarity_service
+from app.services import article_service, extraction_service, reprocessing_service, similarity_service
+from app.services.reprocessing_service import InvalidReprocessing
 from app.web.templating import flash, name_list, templates
 
 router = APIRouter(prefix="/articles", tags=["articles"])
 
 NOT_FOUND = "Artikel nicht gefunden."
 ArticleIds = Annotated[list[int], Form(alias="article_id")]
+Steps = Annotated[list[str], Form(alias="step")]
 
 
 @router.get("")
@@ -32,8 +34,26 @@ def article_page(request: Request, article_id: int) -> Response:
         "detail": detail,
         "extraction": extraction_service.latest_for_article(engine, article_id),
         "runs": extraction_service.unusable_runs_for_article(engine, article_id),
+        "reprocessing": reprocessing_service.article_state(engine, article_id, request.app.state.llm[1]),
     }
     return templates.TemplateResponse(request, "article.html", context)
+
+
+@router.post("/{article_id}/reprocess")
+def reprocess(request: Request, article_id: int, steps: Steps = []) -> Response:
+    """Neu verarbeiten: the selected steps of the article, at once - all or none."""
+    if not steps:
+        flash(request, "Keine Schritte ausgewählt.", "error")
+        return RedirectResponse(f"/articles/{article_id}#events", status_code=303)
+    try:
+        queued = reprocessing_service.reprocess_article(request.app.state.engine, article_id, steps, request.app.state.llm[1])
+    except InvalidReprocessing as error:
+        flash(request, f"Nichts eingereiht, {error}", "error")
+    else:
+        labels = name_list([reprocessing_service.STEP_LABELS[step] for step in queued])
+        follows = " Die Entitätenerkennung folgt der neuen Extraktion." if "extraction" in queued else ""
+        flash(request, f"Neu eingereiht: {labels}.{follows} Status unter Jobs.")
+    return RedirectResponse(f"/articles/{article_id}#events", status_code=303)
 
 
 @router.post("/{article_id}/separate")

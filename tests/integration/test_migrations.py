@@ -430,3 +430,57 @@ def test_the_relationships_go_with_a_downgrade_and_the_entities_stay(engine):
 
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_a_downgrade_keeps_the_new_readings_and_drops_the_replaced_ones_with_their_corrections(engine):
+    upgrade(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO article (source_name, source_url, item_key, url) VALUES ('EZB', 'https://e.org', 'a', 'https://e.org/a')"))
+        old, new = connection.execute(text(
+            "INSERT INTO extraction (article_id, model, schema_version, duration_ms, input_chars, truncated) "
+            "SELECT id, 'm', version, 1, 1, false FROM article, (VALUES ('1'), ('2')) AS versions(version) RETURNING id"
+        )).scalars().all()
+        connection.execute(text("UPDATE extraction SET replaced_by_id = :new WHERE id = :old"), {"new": new, "old": old})
+        old_report, new_report = connection.execute(text(
+            "INSERT INTO event_candidate (extraction_id, article_id, position, event_type, status, title, summary) "
+            "SELECT id, article_id, 0, 'other', 'update', 'Report', 'Summary.' FROM extraction ORDER BY id RETURNING id"
+        )).scalars().all()
+        event_id = connection.execute(text(
+            "INSERT INTO event (title, event_type, first_reported_at, last_reported_at, founding_candidate_id) "
+            "VALUES ('Report', 'other', now(), now(), :report) RETURNING id"
+        ), {"report": new_report}).scalar_one()
+        connection.execute(text("UPDATE event_candidate SET event_id = :event WHERE id = :report"), {"event": event_id, "report": new_report})
+        correction_id = connection.execute(text(
+            "INSERT INTO event_correction (kind, event_id, moves) VALUES ('reprocess', :event, '[]') RETURNING id"
+        ), {"event": event_id}).scalar_one()
+        connection.execute(text(
+            "INSERT INTO event_state (event_id, status, valid_from, candidate_id, withdrawn_by_id) VALUES "
+            "(:event, 'update', now(), :old_report, :correction), (:event, 'update', now(), :new_report, NULL)"
+        ), {"event": event_id, "old_report": old_report, "new_report": new_report, "correction": correction_id})
+        connection.execute(text("INSERT INTO entity (kind, name) VALUES ('company', 'TSMC'), ('company', 'Apple')"))
+        connection.execute(text("INSERT INTO entity_relationship (kind, subject_id, object_id) SELECT 'supplies', min(id), max(id) FROM entity"))
+        connection.execute(text(
+            "INSERT INTO relationship_record (relationship_id, origin, candidate_id, reported_on, replaced_at) "
+            "SELECT r.id, 'report', c.id, '2026-10-31', CASE WHEN c.id = :old_report THEN now() END "
+            "FROM entity_relationship r, event_candidate c"
+        ), {"old_report": old_report})
+        connection.execute(text("INSERT INTO reprocessing (step, schema_version, model, total) VALUES ('extraction', '1', 'm', 1)"))
+        connection.execute(text(
+            "INSERT INTO storage_measurement (measured_on, database_bytes, table_bytes, article_count, raw_text_count, "
+            "raw_text_bytes, backup_count, backup_bytes) VALUES ('2026-10-31', 1, '{}', 1, 0, 0, 0, 0)"
+        ))
+
+    downgrade(engine, "2182ff71ab31")
+
+    with engine.connect() as connection:
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+        extractions = connection.execute(text("SELECT id FROM extraction")).scalars().all()
+        states = connection.execute(text("SELECT candidate_id FROM event_state")).scalars().all()
+        corrections = connection.execute(text("SELECT count(*) FROM event_correction")).scalar_one()
+        records = connection.execute(text("SELECT candidate_id FROM relationship_record")).scalars().all()
+    assert not tables & {"reprocessing", "storage_measurement"}
+    # As if the article had only ever been read the new way.
+    assert (extractions, states, corrections, records) == ([new], [new_report], 0, [new_report])
+
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

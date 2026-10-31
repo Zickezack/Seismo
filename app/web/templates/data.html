@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Datenbestand{% endblock %}
+{% set sections = [
+  ("speicher", "Speicher"),
+  ("rohtexte", "Rohtexte nach Quelle"),
+  ("verlauf", "Verlauf"),
+  ("neu-verarbeiten", "Neu verarbeiten"),
+  ("neuverarbeitungen", "Neuverarbeitungen"),
+] %}
+{% block content %}
+<h1>Datenbestand</h1>
+{# Quick navigation for several sections (requirements.md, "Basic UI Requirements / Styleguide", item 4). #}
+<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
+  {% for id, title in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+</nav>
+
+<details class="card section" id="speicher" open data-testid="section-speicher">
+  <summary><h2>Speicher</h2></summary>
+  <div class="stack">
+    <div class="table-container">
+      <table class="table table-details" data-testid="storage-now">
+        <tbody>
+          <tr><th scope="row">Datenbank</th><td data-testid="storage-database">{{ storage.database_bytes|size }}</td></tr>
+          <tr><th scope="row">Rohtexte</th><td data-testid="storage-raw-texts">{{ storage.raw_text_bytes|size }} <span class="hint">{{ storage.raw_text_count }} von {{ storage.article_count }} Artikeln, komprimiert gespeichert</span></td></tr>
+          <tr><th scope="row">Backups</th><td data-testid="storage-backups">{{ storage.backup_bytes|size }} <span class="hint">{{ storage.backup_count }} {{ "Datei" if storage.backup_count == 1 else "Dateien" }}</span></td></tr>
+          <tr><th scope="row">Frei</th><td data-testid="storage-free">{{ storage.backup_free_bytes|size }} <span class="hint">auf dem Datenträger der Backups; den der Datenbank sieht Seismo nicht</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>Grösste Tabellen</h3>
+    <div class="table-container">
+      <table class="table" data-testid="storage-tables">
+        <thead><tr><th>Tabelle</th><th>Grösse</th><th>Anteil</th></tr></thead>
+        <tbody>
+          {% for table in storage.tables[:10] %}
+          <tr data-testid="table-{{ table.name }}">
+            <td>{{ table.name }}</td>
+            <td>{{ table.size_bytes|size }}</td>
+            <td>{{ "%.0f"|format(table.share * 100) }} %</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Mit Indizes und ausgelagerten grossen Werten (TOAST), wie PostgreSQL sie zählt.</p>
+  </div>
+</details>
+
+<details class="card section" id="rohtexte" open data-testid="section-rohtexte">
+  <summary><h2>Rohtexte nach Quelle</h2></summary>
+  <div class="stack">
+    {% if storage.by_source %}
+    <div class="table-container">
+      <table class="table" data-testid="raw-texts-by-source">
+        <thead><tr><th>Quelle</th><th>Rohtexte</th><th>Grösse</th><th>Pro Rohtext</th></tr></thead>
+        <tbody>
+          {% for source in storage.by_source %}
+          <tr data-testid="raw-texts-{{ loop.index }}">
+            <td class="cell-title">{% if source.source_id %}<a href="/sources/{{ source.source_id }}">{{ source.name }}</a>{% else %}{{ source.name }} <span class="hint">gelöscht</span>{% endif %}</td>
+            <td>{{ source.count }}</td>
+            <td>{{ source.size_bytes|size }}</td>
+            <td>{{ (source.size_bytes / source.count)|size }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint" data-testid="no-raw-texts">Keine Rohtexte gespeichert.</p>
+    {% endif %}
+    <p class="hint">Wie lange eine Quelle ihre Rohtexte aufbewahrt, steht in ihren Einstellungen.</p>
+  </div>
+</details>
+
+<details class="card section" id="verlauf" open data-testid="section-verlauf">
+  <summary><h2>Verlauf</h2></summary>
+  <div class="stack">
+    {% if growths %}
+    <div class="table-container">
+      <table class="table" data-testid="storage-growth">
+        <thead><tr><th>Wachstum pro Tag</th><th>Datenbank</th><th>Rohtexte</th><th>Artikel</th></tr></thead>
+        <tbody>
+          {% for growth in growths %}
+          <tr data-testid="growth-{{ growth.period }}">
+            <td>Letzte {{ growth.period }} Tage{% if growth.days < growth.period %} <span class="hint">gemessen über {{ growth.days }} {{ "Tag" if growth.days == 1 else "Tage" }}</span>{% endif %}</td>
+            <td>{{ growth.database_bytes|size }}</td>
+            <td>{{ growth.raw_text_bytes|size }}</td>
+            <td>{{ "%.0f"|format(growth.articles) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% if measurements %}
+    <div class="table-container">
+      <table class="table" data-testid="measurements">
+        <thead><tr><th>Tag</th><th>Datenbank</th><th>Rohtexte</th><th>Artikel</th><th>Backups</th><th>Frei</th></tr></thead>
+        <tbody>
+          {% for measurement in measurements %}
+          <tr data-testid="measurement-{{ measurement.measured_on.isoformat() }}">
+            <td>{{ measurement.measured_on.strftime("%d.%m.%Y") }}</td>
+            <td>{{ measurement.database_bytes|size }}</td>
+            <td>{{ measurement.raw_text_bytes|size }}</td>
+            <td>{{ measurement.article_count }}</td>
+            <td>{{ measurement.backup_bytes|size }}</td>
+            <td>{{ measurement.backup_free_bytes|size }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint" data-testid="no-measurements">Noch keine Messung. Der Worker misst einmal am Tag (UTC).</p>
+    {% endif %}
+    {% if measurements and not growths %}<p class="hint" data-testid="growth-pending">Das Wachstum zeigt sich ab der zweiten Messung.</p>{% endif %}
+  </div>
+</details>
+
+{% set running = overview.running %}
+<details class="card section" id="neu-verarbeiten" open data-testid="section-neu-verarbeiten">
+  <summary><h2>Neu verarbeiten</h2></summary>
+  <div class="stack">
+    <p class="hint">Läufe mit einer älteren Schema-Version oder einem anderen Modell als jetzt ({{ overview.model }}) werden neu gemacht, nach der laufenden Arbeit und höchstens {{ overview.budget }} pro Stunde (Plattform-Einstellungen, Verarbeitung). Eine neue Extraktion ersetzt die Berichte ihres Artikels in ihren Ereignissen, als Korrektur „Neuverarbeitung“ vermerkt; die Entitätenerkennung folgt von selbst. Beziehungsangaben einer ersetzten Lesart zählen nicht mehr.</p>
+    {# A GET form: "Anzahl prüfen" shows what the choice takes, and the URL keeps it; Starten posts the same fields. #}
+    <form class="stack" method="get" action="/data#neu-verarbeiten" data-bulk-form data-testid="reprocess-form">
+      <div class="table-container">
+        <table class="table" data-testid="groups">
+          <thead><tr><th class="cell-select">Wahl</th><th>Schritt</th><th>Schema</th><th>Modell</th><th>Läufe</th><th>Stand</th></tr></thead>
+          <tbody>
+            {% for step, groups in overview.groups.items() %}{% for group in groups %}
+            <tr data-testid="group-{{ group.key }}">
+              <td class="cell-select"><input type="radio" name="group" value="{{ group.key }}" data-select-row data-name="{{ group.step_label }}, Schema {{ group.schema_version }}, {{ group.model or 'ohne Modell' }}" aria-label="{{ group.step_label }}, Schema {{ group.schema_version }}, {{ group.model or 'ohne Modell' }} wählen" data-testid="choose-{{ group.key }}"{% if group.current %} disabled title="Aktuell: nichts neu zu verarbeiten"{% endif %}{% if choice.group == group.key %} checked{% endif %}></td>
+              <td>{{ group.step_label }}</td>
+              <td>{{ group.schema_version }}</td>
+              <td>{{ group.model or "–" }}</td>
+              <td>{{ group.count }}</td>
+              <td>{% if group.current %}<span class="status status-done">aktuell</span>{% else %}<span class="status status-queued">älter</span>{% endif %}</td>
+            </tr>
+            {% endfor %}{% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="form-grid">
+        <div class="field field-wide">
+          <label for="source_id">Quelle</label>
+          <select id="source_id" name="source_id" data-testid="reprocess-source">
+            <option value="">Alle Quellen</option>
+            {% for source in overview.sources %}
+            <option value="{{ source.id }}"{% if choice.source_id == source.id|string %} selected{% endif %}>{{ source.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="period_start">Von</label>
+          <input id="period_start" name="period_start" type="date" value="{{ choice.period_start }}" aria-describedby="reprocess-period-hint" data-testid="reprocess-period-start">
+        </div>
+        <div class="field">
+          <label for="period_end">Bis</label>
+          <input id="period_end" name="period_end" type="date" value="{{ choice.period_end }}" aria-describedby="reprocess-period-hint" data-testid="reprocess-period-end">
+        </div>
+        <p class="hint field-wide" id="reprocess-period-hint">Ganze Tage in UTC, nach Veröffentlichung, sonst Abruf des Artikels; leer: ohne Grenze.</p>
+      </div>
+      {% if choice_error %}
+      <p class="message message-error" role="alert" data-testid="reprocess-error">{{ choice_error }}</p>
+      {% elif overview.preview %}
+      {% set preview = overview.preview %}
+      <p class="message message-warning" role="status" data-testid="reprocess-preview">{{ preview.group.step_label }}, Schema {{ preview.group.schema_version }}, {{ preview.group.model }}{% if preview.source_name %}, {{ preview.source_name }}{% endif %}{% if preview.period_start or preview.period_end %}, {{ preview.period_start.strftime("%d.%m.%Y") if preview.period_start else "…" }} bis {{ preview.period_end.strftime("%d.%m.%Y") if preview.period_end else "…" }}{% endif %}: {{ preview.count }} {{ "Lauf" if preview.count == 1 else "Läufe" }} neu zu verarbeiten.{% if preview.without_text %} {{ preview.without_text }} weitere ohne Text, nicht möglich.{% endif %}</p>
+      {% endif %}
+      <div class="form-actions">
+        <button class="button button-secondary" type="submit" data-testid="reprocess-preview-button">Anzahl prüfen</button>
+        {# Enabled once a Stand is chosen (static/app.js, data-bulk-action), while none runs. #}
+        <button class="button" type="submit" formmethod="post" formaction="/data/reprocessings" data-confirm="Stand|Stände" data-confirm-verb="neu verarbeiten" data-testid="start-reprocessing"{% if running %} disabled title="Es läuft bereits eine Neuverarbeitung"{% elif not overview.outdated %} disabled title="Alles ist auf dem aktuellen Stand"{% else %} data-bulk-action{% endif %}>Neu verarbeiten</button>
+      </div>
+    </form>
+  </div>
+</details>
+
+<details class="card section" id="neuverarbeitungen" open data-testid="section-neuverarbeitungen">
+  <summary><h2>Neuverarbeitungen</h2></summary>
+  <div class="stack">
+    {% if overview.reprocessings %}
+    <form class="stack" method="post" action="/data/reprocessings/cancel" data-bulk-form data-testid="reprocessing-list">
+      <div class="toolbar">
+        <div class="actions">
+          <button class="button button-secondary" type="submit" data-bulk-action data-testid="cancel-reprocessings" disabled>Abbrechen</button>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle laufenden Neuverarbeitungen auswählen" data-testid="select-all-reprocessings"></th>
+              <th>Gestartet</th>
+              <th>Auswahl</th>
+              <th>Status</th>
+              <th>Fortschritt</th>
+              <th>Beendet</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for reprocessing in overview.reprocessings %}
+            <tr data-testid="reprocessing-{{ reprocessing.id }}">
+              <td class="cell-select"><input type="checkbox" name="reprocessing_id" value="{{ reprocessing.id }}" data-select-row aria-label="Neuverarbeitung #{{ reprocessing.id }} auswählen" data-testid="select-reprocessing-{{ reprocessing.id }}"{% if not reprocessing.is_running %} disabled title="Nur laufende Neuverarbeitungen lassen sich abbrechen"{% endif %}></td>
+              <td>{{ reprocessing.created_at|local_time }}</td>
+              <td class="cell-wrap" data-testid="reprocessing-choice-{{ reprocessing.id }}">{{ reprocessing.step_label }}, Schema {{ reprocessing.schema_version }}, {{ reprocessing.model }}{% if reprocessing.source_name %}<span class="hint">{{ reprocessing.source_name }}</span>{% endif %}{% if reprocessing.period_label %}<span class="hint">{{ reprocessing.period_label }}</span>{% endif %}</td>
+              <td data-testid="reprocessing-status-{{ reprocessing.id }}"><span class="status status-{{ reprocessing.status }}">{{ reprocessing.status_label }}</span></td>
+              <td class="cell-wrap" data-testid="reprocessing-progress-{{ reprocessing.id }}">{{ reprocessing.made }} von {{ reprocessing.total }} neu{% if reprocessing.open_jobs %}<span class="hint">{{ reprocessing.open_jobs }} in der Warteschlange</span>{% endif %}{% if reprocessing.failed_jobs %}<span class="hint hint-error">{{ reprocessing.failed_jobs }} fehlgeschlagen (Jobs)</span>{% endif %}</td>
+              <td>{{ reprocessing.finished_at|local_time }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% else %}
+    <p class="hint" data-testid="no-reprocessings">Noch keine Neuverarbeitung.</p>
+    {% endif %}
+  </div>
+</details>
+{% endblock %}

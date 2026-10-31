@@ -13,6 +13,10 @@ effect again. One they make anew is appended. Nothing is changed or deleted (the
 
 A correction runs under the assignment's lock, so a report is never assigned to an event while it is merged away: an
 assignment decided before compares again under the lock (event_service.assign).
+
+A reprocessing (reprocessing_service, userstories.md, Verdichtung und Daten-Lifecycle, story 2) corrects by the same
+rule: once an article's new reading has its events, the reports of the one it replaced leave theirs (replace_reports),
+recorded as a Korrektur of its own.
 """
 import logging
 from collections.abc import Iterable
@@ -139,6 +143,34 @@ def split(engine: Engine, event_id: int, candidate_ids: Iterable[int], reason: s
         _reconcile(connection, new_id, correction_id)
     logger.info("Event split", extra={"event_id": event_id, "new_event_id": new_id, "reports": len(candidate_ids), "correction_id": correction_id})
     return SplitResult(processed=len(candidate_ids), blocked=[], event_id=new_id)
+
+
+def replace_reports(
+    connection: Connection, event_id: int, candidate_ids: list[int], article_id: int, successor_event_id: int | None
+) -> None:
+    """Neuverarbeitung: the reports leave the event, their article's new reading having its events by now - in the
+    caller's transaction, under the assignment's lock. The event gets the history its remaining reports make. Named
+    after one of them, it is named after the new reading's report in it, else after its earliest; one left without
+    reports is marked merged into `successor_event_id`, where the new reading's first report went."""
+    event = event_repository.for_correction(connection, [event_id]).get(event_id)
+    if event is None:
+        return
+    removed = event_correction_repository.remove_reports(connection, event_id, candidate_ids)
+    if not removed:
+        return
+    correction_id = event_correction_repository.insert_correction(
+        connection, CorrectionKind.REPROCESS, event_id, [{"event_id": event_id, "candidate_ids": removed}], None
+    )
+    remaining = list(event_repository.assigned_reports(connection, event_id))
+    if not remaining:
+        if successor_event_id is not None and successor_event_id != event_id:
+            event_correction_repository.mark_merged(connection, [event_id], successor_event_id)
+    elif event.founding_candidate_id is None or event.founding_candidate_id in removed:
+        successors = [report for report in remaining if report.article_id == article_id]
+        founding = successors[0] if successors else min(remaining, key=lambda report: (report.moment, report.id))
+        event_repository.name_after(connection, event_id, founding)
+    event_repository.refresh_reach(connection, event_id)
+    _reconcile(connection, event_id, correction_id)
 
 
 def replay(reports: Iterable) -> list[Version]:

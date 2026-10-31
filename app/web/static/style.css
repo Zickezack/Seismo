@@ -499,6 +499,11 @@ a:focus-visible {
   color: var(--color-muted);
 }
 
+/* An Angabe whose reading a reprocessing replaced (templates/relationship.html): kept, no longer counted. */
+.status-replaced {
+  color: var(--color-muted);
+}
+
 .status-claim,
 .status-source_forecast,
 .status-contradicts,
@@ -590,7 +595,8 @@ a:focus-visible {
   color: var(--color-muted);
 }
 
-/* Status of a backfill (templates/source_form.html); "running" and "failed" as for jobs */
+/* Status of a backfill (templates/source_form.html) and a reprocessing (templates/data.html); "running" and
+   "failed" as for jobs */
 .status-done {
   color: var(--color-success-text);
   background: var(--color-success-background);

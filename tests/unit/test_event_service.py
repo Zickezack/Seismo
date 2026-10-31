@@ -11,9 +11,9 @@ from app.services import event_service
 from app.services.event_service import ASSIGN_FROM, NEW_BELOW, Decision, Match, UnusableChoice, chosen_number, matches, settled
 
 
-def report(title, summary, event_id=None, article_id=None, place=None, actors=(), **fields):
+def report(title, summary, event_id=None, article_id=None, place=None, actors=(), replaced=False, **fields):
     return SimpleNamespace(title=title, summary=summary, place=place, actors=[{"name": name} for name in actors],
-                           event_id=event_id, article_id=article_id, **fields)
+                           event_id=event_id, article_id=article_id, replaced=replaced, **fields)
 
 
 QUAKE = report("Earthquake of magnitude 6.8 strikes Xizang", "A strong earthquake hit Dingri county in Xizang, killing 126.",
@@ -52,6 +52,16 @@ def test_an_event_with_a_report_of_the_same_article_is_left_out():
     same_article = SimpleNamespace(**vars(QUAKE) | {"article_id": 10})
 
     assert [match.event_id for match in matches(same_article, [AFTERSHOCK, RATES])] == [2]
+
+
+def test_a_report_of_the_articles_replaced_reading_leads_its_successor_to_its_event():
+    new_reading = SimpleNamespace(**vars(QUAKE) | {"article_id": 10})
+    old_reading = SimpleNamespace(**vars(QUAKE) | {"event_id": 1, "article_id": 10, "replaced": True})
+
+    found = matches(new_reading, [old_reading, RATES])
+
+    # Its own article's words: the same event, decided by the score alone.
+    assert found[0].event_id == 1 and found[0].score >= ASSIGN_FROM
 
 
 def test_with_few_reports_a_word_they_all_share_still_counts():

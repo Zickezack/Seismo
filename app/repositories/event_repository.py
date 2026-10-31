@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import Connection, Row, exists, func, insert, literal, select, text, update
 from sqlalchemy.orm import aliased
 
-from app.db.models import Article, Event, EventCandidate, EventState, Job, Source
+from app.db.models import Article, Event, EventCandidate, EventState, Extraction, Job, Source
 
 # Of the two-key advisory lock that serialises the assignments (7301 LLM slots, 7302 duplicate checks).
 EVENT_LOCK_NAMESPACE = 7303
@@ -16,6 +16,9 @@ _MOMENT = func.coalesce(Article.published_at, Article.fetched_at)
 # A version a correction withdrew is never in effect.
 _IN_EFFECT_ORDER = (EventState.valid_from.desc(), EventState.id.desc())
 _NOT_WITHDRAWN = EventState.withdrawn_by_id.is_(None)
+# A report of its article's reading a reprocessing replaced (reprocessing_service): never assigned; until it leaves its
+# event, the one its successor finds it by.
+_REPLACED = exists().where(Extraction.id == EventCandidate.extraction_id, Extraction.replaced_by_id.is_not(None))
 # An event's state now: its latest version.
 _CURRENT_STATE = (
     select(EventState.status).where(EventState.event_id == Event.id, _NOT_WITHDRAWN).order_by(*_IN_EFFECT_ORDER).limit(1)
@@ -30,12 +33,13 @@ def lock_assignment(connection: Connection) -> None:
 
 
 def due(connection: Connection, job_kind: str, limit: int) -> list[int]:
-    """Candidates without an event and never queued, the earliest report first."""
+    """Candidates without an event and never queued, the earliest report first; none of a replaced reading."""
     statement = (
         select(EventCandidate.id)
         .join(Article, Article.id == EventCandidate.article_id)
         .where(
             EventCandidate.event_id.is_(None),
+            ~_REPLACED,
             # Any job of it, failed ones too: a failed one comes back only when the admin requeues it.
             ~exists().where(Job.dedupe_key == func.concat(literal(f"{job_kind}:"), EventCandidate.id)),
         )
@@ -46,15 +50,17 @@ def due(connection: Connection, job_kind: str, limit: int) -> list[int]:
 
 
 def count_unassigned(connection: Connection) -> int:
-    statement = select(func.count()).select_from(EventCandidate).where(EventCandidate.event_id.is_(None))
+    statement = select(func.count()).select_from(EventCandidate).where(EventCandidate.event_id.is_(None), ~_REPLACED)
     return connection.execute(statement).scalar_one()
 
 
 def get_for_assignment(connection: Connection, candidate_id: int) -> Row | None:
-    """What a candidate is compared by, its event if it has one, when it was reported, and the state it reports."""
+    """What a candidate is compared by, its event if it has one, when it was reported, the state it reports, and
+    whether its reading was replaced."""
     statement = (
         select(
             EventCandidate.id,
+            EventCandidate.extraction_id,
             EventCandidate.article_id,
             EventCandidate.event_id,
             EventCandidate.event_type,
@@ -66,6 +72,7 @@ def get_for_assignment(connection: Connection, candidate_id: int) -> Row | None:
             EventCandidate.time_note,
             EventCandidate.actors,
             _MOMENT.label("moment"),
+            _REPLACED.label("replaced"),
         )
         .join(Article, Article.id == EventCandidate.article_id)
         .where(EventCandidate.id == candidate_id)
@@ -81,7 +88,7 @@ def reports_near(connection: Connection, moment: datetime, window: timedelta) ->
 
 def reports_between(connection: Connection, start: datetime, end: datetime) -> Sequence[Row]:
     """The reports of the events whose reports reach into the time from `start` to `end`, with what they are compared
-    by."""
+    by, and whether their reading was replaced."""
     statement = (
         select(
             EventCandidate.event_id,
@@ -90,6 +97,7 @@ def reports_between(connection: Connection, start: datetime, end: datetime) -> S
             EventCandidate.summary,
             EventCandidate.place,
             EventCandidate.actors,
+            _REPLACED.label("replaced"),
         )
         .join(Event, Event.id == EventCandidate.event_id)
         .where(Event.last_reported_at >= start, Event.first_reported_at <= end)
@@ -265,6 +273,7 @@ def assigned_reports(connection: Connection, event_id: int) -> Sequence[Row]:
     statement = (
         select(
             EventCandidate.id,
+            EventCandidate.article_id,
             EventCandidate.title,
             EventCandidate.event_type,
             EventCandidate.country,
@@ -276,6 +285,12 @@ def assigned_reports(connection: Connection, event_id: int) -> Sequence[Row]:
         .order_by(EventCandidate.assigned_at, EventCandidate.id)
     )
     return connection.execute(statement).all()
+
+
+def name_after(connection: Connection, event_id: int, report: Row) -> None:
+    """The event is named after the report from now on: its title, type and country."""
+    values = {"title": report.title, "event_type": report.event_type, "country": report.country, "founding_candidate_id": report.id}
+    connection.execute(update(Event).where(Event.id == event_id).values(values))
 
 
 def refresh_reach(connection: Connection, event_id: int) -> None:

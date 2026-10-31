@@ -47,7 +47,7 @@
 {% endmacro %}
 
 {% set sections = [
-  ("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls"]),
+  ("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls", "reprocessings_per_hour"]),
   ("abruf", "Abruf", ["article_max_age_days", "domain_min_interval_seconds", "tdm_blocked_domains"]),
   ("extraktion", "Ereignisextraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour", "source_quality_domains"]),
   ("aufbewahrung", "Aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),

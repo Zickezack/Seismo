@@ -29,7 +29,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 
 ### Epic: Verdichtung und Daten-Lifecycle
 1. As an admin, I want raw article texts deleted according to their source's retention period, but only after processing and validation have succeeded, so storage stays bounded while events, evidence quotes and source references remain understandable and verifiable.
-2. As an admin, I want storage usage monitored and selected articles reprocessed after a schema or model change, so the knowledge base can evolve without re-running the whole history.
 
 ### Epic: Live-Kurse und Kursdatenspeicher
 1. As an analyst, I want prices of stocks, ETFs and indices (Wertpapiere) as close to real time as the licensed source allows, each shown with its timestamp, source, exchange, currency and a real-time or delayed label, so I can follow the market reaction to an event while it unfolds.
@@ -117,6 +116,10 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
    - Done (2026-10-29): already built with the source management (story 1 of Quellenadapter und Ingestion): Quellen are the only list items that can be deleted, and their list deletes the selected ones all or nothing, after the confirmation with countdown; no list has a delete button per row.
 3. As an admin, mass import and export of settings and selected or all data, so I can quickly set up a new instance or back up an existing one.
    - Decided (2026-10-29): one JSON file with the Plattform-Einstellungen and the Quellen (form fields only, no status, no secrets), its scope named in the file; export of all from the Plattform-Einstellungen, of selected Quellen as a bulk action of the source list; import with a choice of Einstellungen and Quellen, the whole file checked first, a Quelle whose name exists skipped. Database backups listed, downloaded, uploaded (never counted by the schedule or the number kept), deleted and started in the Plattform-Einstellungen; a restore stays the command line, api and worker stopped.
+
+### Epic: Verdichtung und Daten-Lifecycle
+2. As an admin, I want storage usage monitored and selected articles reprocessed after a schema or model change, so the knowledge base can evolve without re-running the whole history.
+   - Decided (2026-10-31): both steps - the event extraction and the entity recognition - run again, chosen by their Stand (the step's current runs by schema version and model), optionally of one Quelle and a period, as a Neuverarbeitung on the new page Datenbestand: one at a time, behind live work, at most a number per hour of its own (Plattform-Einstellung); an article's page reprocesses its own at once. A new extraction replaces the article's reading: its reports are assigned as usual and find their events through the old reports, which then leave them as a Korrektur "Neuverarbeitung"; the old reading, its versions and its Angaben stay, marked, no longer counting. A recognition run again replaces its mentions. Storage: the state now (database, largest tables, raw texts per Quelle, backups, free space) and a measurement once a day with the growth per day over 7 and 30 days.
 
 ### Epic: Data Integrity
 1. As an admin, I want any starter/seed content to be imported only when I explicitly ask for it, and never duplicated or resurrected just because I renamed or deleted it afterwards.

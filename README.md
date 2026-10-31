@@ -59,7 +59,8 @@ never into the log. After setting it, recreate the worker. An EIA Quelle's URL i
 browser (https://www.eia.gov/opendata/browser) shows for a data set, e.g.
 `https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value`.
 
-The event extraction and the entity recognition ask an Ollama server (worker only; empty `OLLAMA_BASE_URL`: neither):
+The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
+show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):
 
 | Variable | Rule |
 |----------|------|
@@ -69,7 +70,9 @@ The event extraction and the entity recognition ask an Ollama server (worker onl
 
 Which articles reach the model, and how many per hour, is set in the Plattform-Einstellungen (Ereignisextraktion)
 and per source (Ereignisse extrahieren). Sectors and commodities are recognised only after the admin imported their
-starter list (Plattform-Einstellungen, Starterdaten).
+starter list (Plattform-Einstellungen, Starterdaten). After a change of model (`OLLAMA_MODEL`) or schema, the page
+Datenbestand reprocesses the runs made the old way, chosen by Quelle and period, behind live work and at most a number
+per hour (Plattform-Einstellungen, Verarbeitung); it also shows what the data takes and how it grows.
 
 ## Run the stack
 

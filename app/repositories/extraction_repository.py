@@ -3,7 +3,7 @@ article page shows of it."""
 from collections.abc import Sequence
 from datetime import timedelta
 
-from sqlalchemy import Connection, Row, and_, case, exists, func, insert, literal, select, tuple_
+from sqlalchemy import Connection, Row, and_, case, exists, func, insert, literal, select, tuple_, update
 from sqlalchemy.orm import aliased
 
 from app.db.models import (
@@ -27,6 +27,10 @@ _INFINITY = literal("infinity").cast(Article.published_at.type)
 def _valid(article_id):
     """An extraction of the article with a valid answer: a run with an unusable one is no extraction."""
     return exists().where(Extraction.article_id == article_id, Extraction.validation_result == ValidationResult.VALID)
+
+
+# The article's current reading: its valid extraction no reprocessing replaced (reprocessing_service).
+CURRENT = and_(Extraction.validation_result == ValidationResult.VALID, Extraction.replaced_by_id.is_(None))
 
 
 def due(
@@ -83,8 +87,8 @@ def jobs_since(connection: Connection, job_kind: str, period: timedelta) -> int:
 
 
 def get_for_extraction(connection: Connection, article_id: int) -> Row | None:
-    """What the model reads of an article, and whether it is still an original without an extraction; its link and its
-    source's quality, for the quality of its quotes."""
+    """What the model reads of an article, whether it is still an original without an extraction, and its current one;
+    its link and its source's quality, for the quality of its quotes."""
     statement = (
         select(
             Article.id,
@@ -96,6 +100,7 @@ def get_for_extraction(connection: Connection, article_id: int) -> Row | None:
             Source.quality.label("source_quality"),
             RawText.plain_text,
             _valid(Article.id).label("extracted"),
+            select(Extraction.id).where(Extraction.article_id == Article.id, CURRENT).scalar_subquery().label("current_id"),
         )
         .outerjoin(Source, Source.id == Article.source_id)
         .outerjoin(RawText, RawText.article_id == Article.id)
@@ -109,11 +114,20 @@ def insert_run(connection: Connection, values: dict) -> int:
     return connection.execute(insert(Extraction).values(values).returning(Extraction.id)).scalar_one()
 
 
-def insert_extraction(connection: Connection, values: dict, candidates: list[dict]) -> int | None:
-    """The extraction with its candidates, their statements and quotes; None when the article has one already."""
-    if connection.execute(select(_valid(values["article_id"]))).scalar_one():
-        return None
+def insert_extraction(connection: Connection, values: dict, candidates: list[dict], replaces: int | None = None) -> int | None:
+    """The extraction with its candidates, their statements and quotes; None when the article has one already. With
+    `replaces`: the article's new reading, which that extraction gives way to - None unless it is still the current one.
+    Its row is locked first, so of two that replace it one does."""
+    if replaces is None:
+        if connection.execute(select(_valid(values["article_id"]))).scalar_one():
+            return None
+    else:
+        current = select(Extraction.id).where(Extraction.id == replaces, Extraction.article_id == values["article_id"], CURRENT)
+        if connection.execute(current.with_for_update()).scalar_one_or_none() is None:
+            return None
     extraction_id = connection.execute(insert(Extraction).values(values).returning(Extraction.id)).scalar_one()
+    if replaces is not None:
+        connection.execute(update(Extraction).where(Extraction.id == replaces).values(replaced_by_id=extraction_id))
     for position, candidate in enumerate(candidates):
         statements = candidate.pop("statements")
         row = candidate | {"extraction_id": extraction_id, "article_id": values["article_id"], "position": position}
@@ -133,14 +147,19 @@ def insert_extraction(connection: Connection, values: dict, candidates: list[dic
 
 
 def latest(connection: Connection, article_id: int) -> Row | None:
-    """The article's latest extraction with a valid answer."""
+    """The article's current extraction: its latest with a valid answer, which no reprocessing replaced."""
     statement = (
         select(Extraction.__table__)
-        .where(Extraction.article_id == article_id, Extraction.validation_result == ValidationResult.VALID)
+        .where(Extraction.article_id == article_id, CURRENT)
         .order_by(Extraction.extracted_at.desc(), Extraction.id.desc())
         .limit(1)
     )
     return connection.execute(statement).one_or_none()
+
+
+def replaced_by(connection: Connection, extraction_id: int) -> Row | None:
+    """The extraction this one replaced, if any."""
+    return connection.execute(select(Extraction.__table__).where(Extraction.replaced_by_id == extraction_id)).one_or_none()
 
 
 def unusable_runs(connection: Connection, article_id: int) -> Sequence[Row]:

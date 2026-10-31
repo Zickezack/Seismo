@@ -2,7 +2,7 @@
 (Nennungen) and the recognition runs (Entitätenerkennung)."""
 from collections.abc import Iterable, Sequence
 
-from sqlalchemy import Connection, Row, and_, case, exists, func, insert, literal, select, text, update
+from sqlalchemy import Connection, Row, and_, case, delete, exists, func, insert, literal, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
@@ -31,6 +31,8 @@ ENTITY_LOCK_NAMESPACE = 7304
 _MOMENT = func.coalesce(Article.published_at, Article.fetched_at)
 _LIVE = Entity.merged_into_id.is_(None)
 _IS_NAME = EntityAlias.scheme == AliasScheme.NAME
+# A report of its article's current reading: not of an extraction a reprocessing replaced (reprocessing_service).
+_CURRENT_READING = ~exists().where(Extraction.id == EventCandidate.extraction_id, Extraction.replaced_by_id.is_not(None))
 
 
 def lock_entities(connection: Connection) -> None:
@@ -41,12 +43,14 @@ def lock_entities(connection: Connection) -> None:
 
 
 def due(connection: Connection, job_kind: str, limit: int) -> list[int]:
-    """Extractions with reports, without a recognition and never queued, the earliest article first."""
+    """Extractions with reports, without a recognition and never queued, the earliest article first; none a
+    reprocessing replaced."""
     statement = (
         select(Extraction.id)
         .join(Article, Article.id == Extraction.article_id)
         .where(
             Extraction.validation_result == ValidationResult.VALID,
+            Extraction.replaced_by_id.is_(None),
             exists().where(EventCandidate.extraction_id == Extraction.id),
             ~exists().where(EntityRecognition.extraction_id == Extraction.id),
             # Any job of it, failed ones too: a failed one comes back only when the admin requeues it.
@@ -61,20 +65,52 @@ def due(connection: Connection, job_kind: str, limit: int) -> list[int]:
 def count_unrecognised(connection: Connection) -> int:
     statement = select(func.count()).select_from(Extraction).where(
         Extraction.validation_result == ValidationResult.VALID,
+        Extraction.replaced_by_id.is_(None),
         exists().where(EventCandidate.extraction_id == Extraction.id),
         ~exists().where(EntityRecognition.extraction_id == Extraction.id),
     )
     return connection.execute(statement).scalar_one()
 
 
-def recognised(connection: Connection, extraction_id: int) -> bool:
-    return connection.execute(select(exists().where(EntityRecognition.extraction_id == extraction_id))).scalar_one()
+def reading(connection: Connection, extraction_id: int) -> Row | None:
+    """The extraction while it is its article's current reading, with when its entities were recognised (None: not
+    yet); None for one gone or replaced."""
+    statement = (
+        select(Extraction.id, EntityRecognition.recognised_at)
+        .outerjoin(EntityRecognition, EntityRecognition.extraction_id == Extraction.id)
+        .where(
+            Extraction.id == extraction_id,
+            Extraction.validation_result == ValidationResult.VALID,
+            Extraction.replaced_by_id.is_(None),
+        )
+    )
+    return connection.execute(statement).one_or_none()
+
+
+def recognition_of(connection: Connection, extraction_id: int) -> Row | None:
+    return connection.execute(select(EntityRecognition.__table__).where(EntityRecognition.extraction_id == extraction_id)).one_or_none()
 
 
 def insert_recognition(connection: Connection, values: dict) -> bool:
     """The run; False when the extraction has one already."""
     statement = pg_insert(EntityRecognition).values(values).on_conflict_do_nothing().returning(EntityRecognition.extraction_id)
     return connection.execute(statement).first() is not None
+
+
+def replace_recognition(connection: Connection, values: dict) -> None:
+    """A run again: it takes the place of the extraction's run before, recognised now."""
+    run = {key: value for key, value in values.items() if key != "extraction_id"}
+    connection.execute(
+        update(EntityRecognition)
+        .where(EntityRecognition.extraction_id == values["extraction_id"])
+        .values(run | {"recognised_at": func.now()})
+    )
+
+
+def delete_mentions(connection: Connection, extraction_id: int) -> None:
+    """The mentions of the extraction's reports, for a run again to write its own."""
+    candidate_ids = select(EventCandidate.id).where(EventCandidate.extraction_id == extraction_id)
+    connection.execute(delete(EntityMention).where(EntityMention.candidate_id.in_(candidate_ids)))
 
 
 def similar(connection: Connection, key: str, limit: int) -> list[tuple[int, float]]:
@@ -219,6 +255,7 @@ def _named():
         )
         .join(EntityMention, EntityMention.alias_id == EntityAlias.id)
         .join(EventCandidate, EventCandidate.id == EntityMention.candidate_id)
+        .where(_CURRENT_READING)
         .group_by(EntityAlias.entity_id)
         .subquery()
     )
@@ -269,7 +306,13 @@ def listed(connection: Connection, entity_ids: Iterable[int]) -> Sequence[Row]:
 
 def aliases(connection: Connection, entity_id: int) -> Sequence[Row]:
     """The entity's name forms and identifiers, names first, each with the reports that name it by it."""
-    mentions = select(func.count()).where(EntityMention.alias_id == EntityAlias.id).scalar_subquery()
+    mentions = (
+        select(func.count())
+        .select_from(EntityMention)
+        .join(EventCandidate, EventCandidate.id == EntityMention.candidate_id)
+        .where(EntityMention.alias_id == EntityAlias.id, _CURRENT_READING)
+        .scalar_subquery()
+    )
     statement = (
         select(EntityAlias.__table__, mentions.label("mention_count"))
         .where(EntityAlias.entity_id == entity_id)
@@ -312,7 +355,7 @@ def mentions(connection: Connection, entity_id: int, limit: int) -> Sequence[Row
         .join(Article, Article.id == EventCandidate.article_id)
         .outerjoin(Source, Source.id == Article.source_id)
         .outerjoin(Event, Event.id == EventCandidate.event_id)
-        .where(EntityAlias.entity_id == entity_id)
+        .where(EntityAlias.entity_id == entity_id, _CURRENT_READING)
         .order_by(_MOMENT.desc(), EntityMention.id.desc())
         .limit(limit)
     )
@@ -324,7 +367,8 @@ def count_mentions(connection: Connection, entity_id: int) -> int:
         select(func.count())
         .select_from(EntityMention)
         .join(EntityAlias, EntityAlias.id == EntityMention.alias_id)
-        .where(EntityAlias.entity_id == entity_id)
+        .join(EventCandidate, EventCandidate.id == EntityMention.candidate_id)
+        .where(EntityAlias.entity_id == entity_id, _CURRENT_READING)
     )
     return connection.execute(statement).scalar_one()
 

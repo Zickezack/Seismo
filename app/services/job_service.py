@@ -43,8 +43,14 @@ NORMALIZE_JOB_KIND = "normalize_article"
 EXTRACT_EVENTS_JOB_KIND = "extract_events"
 ASSIGN_EVENT_JOB_KIND = "assign_event"
 RECOGNISE_ENTITIES_JOB_KIND = "recognise_entities"
+# A reprocessing's (reprocessing_service): behind live work, labelled without "(Backfill)".
+REEXTRACT_EVENTS_JOB_KIND = "reextract_events"
+RERECOGNISE_ENTITIES_JOB_KIND = "rerecognise_entities"
 # The kinds that need Ollama: the worker claims them only while it serves the model (app/worker/main.py).
-LLM_JOB_KINDS = frozenset({EXTRACT_EVENTS_JOB_KIND, ASSIGN_EVENT_JOB_KIND, RECOGNISE_ENTITIES_JOB_KIND})
+LLM_JOB_KINDS = frozenset({
+    EXTRACT_EVENTS_JOB_KIND, ASSIGN_EVENT_JOB_KIND, RECOGNISE_ENTITIES_JOB_KIND, REEXTRACT_EVENTS_JOB_KIND,
+    RERECOGNISE_ENTITIES_JOB_KIND,
+})
 KIND_LABELS = {
     TEST_JOB_KIND: "Testjob",
     BACKUP_JOB_KIND: "Datenbank-Backup",
@@ -55,7 +61,11 @@ KIND_LABELS = {
     EXTRACT_EVENTS_JOB_KIND: "Ereignisse extrahieren",
     ASSIGN_EVENT_JOB_KIND: "Ereignis zuordnen",
     RECOGNISE_ENTITIES_JOB_KIND: "Entitäten erkennen",
+    REEXTRACT_EVENTS_JOB_KIND: "Ereignisse neu extrahieren",
+    RERECOGNISE_ENTITIES_JOB_KIND: "Entitäten neu erkennen",
 }
+# Kinds that are behind live work by their nature: their label needs no "(Backfill)".
+_OWN_PRIORITY_KINDS = frozenset({BACKFILL_JOB_KIND, REEXTRACT_EVENTS_JOB_KIND, RERECOGNISE_ENTITIES_JOB_KIND})
 
 
 @dataclass(frozen=True)
@@ -77,7 +87,7 @@ class JobListItem:
     def kind_label(self) -> str:
         label = KIND_LABELS.get(self.kind, self.kind)
         # A full text found by a backfill is the same kind of job, behind live work.
-        return f"{label} (Backfill)" if self.priority == BACKFILL_PRIORITY and self.kind != BACKFILL_JOB_KIND else label
+        return f"{label} (Backfill)" if self.priority == BACKFILL_PRIORITY and self.kind not in _OWN_PRIORITY_KINDS else label
 
     @property
     def status_label(self) -> str:

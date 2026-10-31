@@ -49,6 +49,20 @@
     <p data-testid="no-extraction">Noch nicht extrahiert.</p>
     {% else %}
     <p class="hint" data-testid="extraction-meta">Extrahiert {{ extraction.extracted_at|local_time }} mit {{ extraction.model }}, Schema {{ extraction.schema_version }}, in {{ (extraction.duration_ms / 1000)|round(1) }}&nbsp;s aus {{ extraction.input_chars }} Zeichen{% if extraction.truncated %} (Text gekürzt){% endif %}{% if extraction.repaired %} (gültig erst auf Nachfrage){% endif %}.{% if extraction.statements_dropped %} {{ extraction.statements_dropped }} {{ "Aussage" if extraction.statements_dropped == 1 else "Aussagen" }} ohne auffindbares Zitat verworfen.{% endif %} Texte des Modells auf Englisch, Zitate wörtlich; ein Detail ohne gefundenes Zitat bleibt unbekannt.</p>
+    {% if reprocessing.outdated %}
+    {# Runs made with an older schema version or another model than now; the Datenbestand page does many at once. #}
+    <form class="stack" method="post" action="/articles/{{ article.id }}/reprocess" data-bulk-form data-testid="reprocess-article">
+      <p class="hint">Nicht auf dem aktuellen Stand. Neu verarbeitet ersetzt eine Extraktion die Berichte dieses Artikels in ihren Ereignissen.</p>
+      <ul class="plain-list">
+        {% for step, label in reprocessing.outdated.items() %}
+        <li><label class="checkbox-label"><input type="checkbox" name="step" value="{{ step }}" data-select-row data-name="{{ label }}" data-testid="reprocess-step-{{ step }}"> {{ label }}</label></li>
+        {% endfor %}
+      </ul>
+      <div class="toolbar">
+        <button class="button button-secondary" type="submit" data-bulk-action data-confirm="Schritt|Schritte" data-confirm-verb="neu verarbeiten" data-testid="reprocess-article-button" disabled>Neu verarbeiten</button>
+      </div>
+    </form>
+    {% endif %}
     {% for candidate in extraction.candidates %}
     <article class="card stack" data-testid="candidate-{{ candidate.id }}">
       <h3 data-testid="candidate-title-{{ candidate.id }}">{{ candidate.title }}</h3>

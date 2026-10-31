@@ -1,6 +1,6 @@
 """The rules of relationships without a database: which entities can stand in them, how they are stored, and how the
 Angaben make their state (app/services/relationship_service.py)."""
-from datetime import date
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -9,16 +9,20 @@ from app.services import relationship_service
 from app.services.relationship_service import State
 
 
-def report(day, ended=False):
-    return SimpleNamespace(origin="report", reported_on=day, ended=ended)
+def report(day, ended=False, replaced_at=None):
+    return SimpleNamespace(origin="report", reported_on=day, ended=ended, replaced_at=replaced_at)
 
 
 def analyst(valid_from=None, valid_to=None, review="confirmed"):
-    return SimpleNamespace(origin="analyst", valid_from=valid_from, valid_to=valid_to, review=review)
+    return SimpleNamespace(origin="analyst", valid_from=valid_from, valid_to=valid_to, review=review, replaced_at=None)
 
 
 def states(*records):
-    return [(state.valid_from, state.valid_to, state.review, changed) for _, state, changed in relationship_service.replay(records)]
+    """Each step's state and whether it changed; (None, changed) while no Angabe counts."""
+    return [
+        (state.valid_from, state.valid_to, state.review, changed) if state else (None, changed)
+        for _, state, changed in relationship_service.replay(records)
+    ]
 
 
 OCT_1, OCT_10, OCT_20, OCT_30 = date(2026, 10, 1), date(2026, 10, 10), date(2026, 10, 20), date(2026, 10, 30)
@@ -74,6 +78,13 @@ def test_the_analyst_sets_dates_and_review_and_reports_never_change_the_review()
     assert states(report(OCT_10), analyst(OCT_1, None, "disputed"), report(OCT_20)) == [
         (OCT_10, None, "unreviewed", True), (OCT_1, None, "disputed", True), (OCT_1, None, "disputed", False),
     ]
+
+
+def test_an_angabe_whose_reading_was_replaced_counts_no_more():
+    replaced = datetime(2026, 10, 31, tzinfo=UTC)
+
+    assert states(report(OCT_10, replaced_at=replaced), report(OCT_20)) == [(None, False), (OCT_20, None, "unreviewed", True)]
+    assert states(report(OCT_10), report(OCT_20, ended=True, replaced_at=replaced))[-1] == (OCT_10, None, "unreviewed", False)
 
 
 def test_a_disputed_or_ended_relationship_is_not_in_effect_and_says_its_validity():

@@ -61,6 +61,14 @@ def files(directory: Path, suffix: str) -> list[Path]:
     return [path for path in directory.iterdir() if path.name.endswith(suffix) and path.is_file()]
 
 
+def free_bytes(directory: Path) -> int | None:
+    """Free space on the file system of `directory`; None while it cannot be read."""
+    try:
+        return shutil.disk_usage(directory).free
+    except OSError:
+        return None
+
+
 def save(source: BinaryIO, target: Path) -> None:
     """Copy an open file into `target`, which must not exist yet."""
     with target.open("xb") as file:
