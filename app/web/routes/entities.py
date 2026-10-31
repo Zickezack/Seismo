@@ -5,7 +5,9 @@ from typing import Annotated
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app.services import entity_correction_service, entity_service
+from app.db.models import ReviewStatus
+from app.services import entity_correction_service, entity_service, relationship_service
+from app.services.relationship_service import InvalidRelationship
 from app.web.templating import flash, name_list, templates
 
 router = APIRouter(prefix="/entities", tags=["entities"])
@@ -13,6 +15,8 @@ router = APIRouter(prefix="/entities", tags=["entities"])
 NOT_FOUND = "Entität nicht gefunden."
 AliasIds = Annotated[list[int], Form(alias="alias_id")]
 EntityIds = Annotated[list[int], Form(alias="entity_id")]
+RelationshipIds = Annotated[list[int], Form(alias="relationship_id")]
+Text = Annotated[str, Form()]
 
 
 @router.get("")
@@ -30,7 +34,13 @@ def entity_page(request: Request, entity_id: int) -> Response:
     if detail is None:
         flash(request, NOT_FOUND, "error")
         return RedirectResponse("/entities", status_code=303)
-    context = {"detail": detail, "similar": entity_correction_service.similar_entities(engine, entity_id)}
+    context = {
+        "detail": detail,
+        "similar": entity_correction_service.similar_entities(engine, entity_id),
+        "relationships": relationship_service.of_entity(engine, entity_id),
+        "roles": relationship_service.role_choices(),
+        "choices": entity_service.choices(engine),
+    }
     return templates.TemplateResponse(request, "entity.html", context)
 
 
@@ -74,3 +84,42 @@ def merge(request: Request, entity_id: int, other_ids: EntityIds = []) -> Respon
     else:
         flash(request, "Keine Entitäten ausgewählt.", "error")
     return RedirectResponse(f"/entities/{entity_id}#similar", status_code=303)
+
+
+@router.post("/{entity_id}/relationships")
+def add_relationship(
+    request: Request, entity_id: int, role: Text = "", other: Text = "", valid_from: Text = "", valid_to: Text = "", note: Text = ""
+) -> Response:
+    """Beziehung hinzufügen: the analyst's own, confirmed, with its source."""
+    try:
+        relationship_id = relationship_service.add(request.app.state.engine, entity_id, role, other, valid_from, valid_to, note)
+    except InvalidRelationship as error:
+        flash(request, f"Keine Beziehung erfasst. {error}", "error")
+    else:
+        flash(request, f"Beziehung {relationship_id} erfasst.")
+    return RedirectResponse(f"/entities/{entity_id}#relationships", status_code=303)
+
+
+@router.post("/{entity_id}/relationships/confirm")
+def confirm_relationships(request: Request, entity_id: int, relationship_ids: RelationshipIds = [], note: Text = "") -> Response:
+    return _review(request, entity_id, relationship_ids, ReviewStatus.CONFIRMED, note, "bestätigt")
+
+
+@router.post("/{entity_id}/relationships/dispute")
+def dispute_relationships(request: Request, entity_id: int, relationship_ids: RelationshipIds = [], note: Text = "") -> Response:
+    return _review(request, entity_id, relationship_ids, ReviewStatus.DISPUTED, note, "bestritten")
+
+
+def _review(request: Request, entity_id: int, relationship_ids: list[int], status: str, note: str, verb: str) -> Response:
+    try:
+        result = relationship_service.review(request.app.state.engine, entity_id, relationship_ids, status, note)
+    except InvalidRelationship as error:
+        flash(request, f"Nichts {verb}. {error}", "error")
+    else:
+        if result.blocked:
+            flash(request, f"Nichts {verb}, blockiert: {name_list(result.blocked)}.", "error")
+        elif result.processed:
+            flash(request, f"{result.processed} {'Beziehung' if result.processed == 1 else 'Beziehungen'} {verb}.")
+        else:
+            flash(request, "Keine Beziehungen ausgewählt.", "error")
+    return RedirectResponse(f"/entities/{entity_id}#relationships", status_code=303)

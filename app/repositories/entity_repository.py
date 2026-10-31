@@ -392,3 +392,22 @@ def take_parent(connection: Connection, entity_id: int, entity_ids: list[int]) -
     )
     connection.execute(update(Entity).where(Entity.id == entity_id, Entity.parent_id.is_(None)).values(parent_id=parent))
 
+
+
+def live_by_name(connection: Connection, name: str) -> list[int]:
+    """The entities, not merged ones, whose name or a name form is this one, regardless of case."""
+    lowered = name.lower()
+    statement = (
+        select(Entity.id)
+        .where(_LIVE, (func.lower(Entity.name) == lowered) | exists().where(
+            EntityAlias.entity_id == Entity.id, _IS_NAME, func.lower(EntityAlias.value) == lowered
+        ))
+        .order_by(Entity.id)
+    )
+    return list(connection.execute(statement).scalars())
+
+
+def choices(connection: Connection, limit: int) -> Sequence[Row]:
+    """Names and numbers of the entities, not merged ones, by name: what a form offers to choose from."""
+    statement = select(Entity.id, Entity.name).where(_LIVE).order_by(Entity.name.collate(NAME_COLLATION), Entity.id).limit(limit)
+    return connection.execute(statement).all()

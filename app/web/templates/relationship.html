@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Beziehung{% endblock %}
+{% block content %}
+{% set state = detail.state %}
+<h1 data-testid="relationship-title"><a href="/entities/{{ detail.subject.id }}" data-testid="relationship-subject">{{ detail.subject.name }}</a> {{ detail.kind_title }} <a href="/entities/{{ detail.object.id }}" data-testid="relationship-object">{{ detail.object.name }}</a></h1>
+
+<section class="card stack">
+  <div class="table-container">
+    <table class="table table-details" data-testid="relationship-meta">
+      <tbody>
+        <tr><th scope="row">Beziehung</th><td data-testid="meta-id">{{ detail.id }}</td></tr>
+        <tr><th scope="row">Gültig</th><td data-testid="meta-validity">{{ state.validity_label }}</td></tr>
+        <tr><th scope="row">Prüfung</th><td data-testid="meta-review"><span class="status status-review-{{ state.review }}">{{ state.review_label }}</span></td></tr>
+        <tr><th scope="row">Angaben</th><td data-testid="meta-records">{{ detail.records|length }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">Der Stand folgt aus den Angaben in der Reihenfolge, in der Seismo sie erfahren hat: Ein Bericht, dass die Beziehung besteht, öffnet sie ab seinem Tag oder verlegt ihren Beginn nach vorn; einer, dass sie endete, schliesst sie. Die Angabe des Analysten setzt Gültigkeit und Prüfung wie angegeben. Keine Angabe wird geändert.</p>
+</section>
+
+{# The history of rule 10 (datamodel.md): every Angabe with the state after it, none ever changed. #}
+<details class="section" id="records" open data-testid="records-section">
+  <summary><h2>Verlauf ({{ detail.records|length }})</h2></summary>
+  <div class="stack">
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Erfasst</th>
+            <th>Angabe</th>
+            <th>Beleg</th>
+            <th>Stand danach</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for step in detail.records %}
+          {% set record = step.record %}
+          <tr data-testid="record-{{ record.id }}">
+            <td>{{ record.recorded_at|local_time }}</td>
+            <td class="cell-wrap" data-testid="record-says-{{ record.id }}">{{ step.origin_label }}: {{ step.says_label }}{% if record.reported_on %}<span class="hint">am {{ record.reported_on.strftime("%d.%m.%Y") }}</span>{% endif %}</td>
+            <td class="cell-title" data-testid="record-evidence-{{ record.id }}">
+              {% if record.origin == "report" %}
+                {% if record.article_id %}<a href="/articles/{{ record.article_id }}#events">{{ record.report_title }}</a>{% else %}<span class="hint">Bericht nicht mehr vorhanden</span>{% endif %}
+                {% if record.statement_text %}<span class="hint">{{ record.statement_text }}</span>{% endif %}
+                {% if record.quote %}<span class="hint">„{{ record.quote }}“ · {{ record.source_display_name }} · {{ step.source_quality_label }}</span>{% endif %}
+                {% if record.subject_uncertain or record.object_uncertain %}<span class="status status-uncertain">unsichere Namensform</span>{% endif %}
+              {% else %}
+                {{ record.note or "–" }}
+              {% endif %}
+            </td>
+            <td class="cell-wrap" data-testid="record-state-{{ record.id }}">{% if step.changed %}{{ step.state.validity_label }}, {{ step.state.review_label }}{% else %}<span class="hint">unverändert</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<details class="section" id="state" open data-testid="state-section">
+  <summary><h2>Stand ändern</h2></summary>
+  <form class="form-grid" method="post" action="/relationships/{{ detail.id }}/state" data-testid="state-form">
+    <div class="field">
+      <label for="valid_from">Gültig ab</label>
+      <input id="valid_from" name="valid_from" type="date" value="{{ state.valid_from.isoformat() if state.valid_from else '' }}" data-testid="state-from">
+    </div>
+    <div class="field">
+      <label for="valid_to">Gültig bis</label>
+      <input id="valid_to" name="valid_to" type="date" value="{{ state.valid_to.isoformat() if state.valid_to else '' }}" aria-describedby="state-to-hint" data-testid="state-to">
+      <p class="hint" id="state-to-hint">Leer: besteht noch.</p>
+    </div>
+    <div class="field">
+      <label for="review">Prüfung</label>
+      <select id="review" name="review" data-testid="state-review">
+        {% for code, label in reviews.items() %}<option value="{{ code }}"{% if state.review == code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field field-wide">
+      <label for="note">Quelle oder Begründung</label>
+      <input id="note" name="note" type="text" maxlength="1000" data-testid="state-note">
+    </div>
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="save-state">Stand erfassen</button>
+    </div>
+  </form>
+</details>
+{% endblock %}

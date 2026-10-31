@@ -4,7 +4,7 @@
 {% set entity = detail.entity %}
 {% set merged = detail.merged_into is not none %}
 {% set sections = [("aliases", "Namensformen"), ("mentions", "Berichte")]
-  + ([] if merged else [("similar", "Ähnliche Entitäten")]) %}
+  + ([] if merged else [("relationships", "Beziehungen"), ("similar", "Ähnliche Entitäten")]) %}
 <h1 data-testid="entity-title">{{ entity.name }}</h1>
 
 {% if merged %}
@@ -121,6 +121,89 @@
 </details>
 
 {% if not merged %}
+{# Every relationship with its source, validity and review, the analyst's quality flag (datamodel.md, rule 10). #}
+<details class="section" id="relationships" open data-testid="relationships-section">
+  <summary><h2>Beziehungen ({{ relationships|length }})</h2></summary>
+  <div class="stack">
+    <p class="hint">Aus Berichten, deren Aussagen eine Beziehung nennen, und vom Analysten erfasst. Gültig: aus Berichten ab dem Tag des ersten, der sie nennt, bis zu dem, der ihr Ende meldet; vom Analysten wie angegeben. Bestritten gilt sie nicht mehr, bleibt aber mit ihrem Verlauf stehen.</p>
+    {% if relationships %}
+    <form class="stack" method="post" action="/entities/{{ entity.id }}/relationships/confirm" data-bulk-form data-testid="relationship-list">
+      <div class="toolbar">
+        <div class="actions">
+          <span class="action-group">
+            <input type="text" name="note" maxlength="1000" placeholder="Begründung (optional)" aria-label="Begründung der Prüfung" data-testid="review-note">
+            <button class="button button-secondary" type="submit" data-bulk-action data-testid="confirm-relationships" disabled>Bestätigen</button>
+            <button class="button button-secondary" type="submit" formaction="/entities/{{ entity.id }}/relationships/dispute" data-bulk-action data-confirm="Beziehung|Beziehungen" data-confirm-verb="bestreiten" data-testid="dispute-relationships" disabled>Bestreiten</button>
+          </span>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Beziehungen auswählen" data-testid="select-all-relationships"></th>
+              <th>Rolle</th>
+              <th>Entität</th>
+              <th>Gültig</th>
+              <th>Prüfung</th>
+              <th>Berichte</th>
+              <th>Verlauf</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for relationship in relationships %}
+            <tr data-testid="relationship-{{ relationship.id }}">
+              <td class="cell-select"><input type="checkbox" name="relationship_id" value="{{ relationship.id }}" data-select-row data-name="{{ relationship.role_label }}: {{ relationship.other.name }}" aria-label="{{ relationship.role_label }} {{ relationship.other.name }} auswählen" data-testid="select-relationship-{{ relationship.id }}"></td>
+              <td data-testid="relationship-role-{{ relationship.id }}">{{ relationship.role_label }}</td>
+              <td class="cell-title"><a href="/entities/{{ relationship.other.id }}" data-testid="relationship-other-{{ relationship.id }}">{{ relationship.other.name }}</a><span class="hint">{{ relationship.other.kind_label }}</span></td>
+              <td class="cell-wrap" data-testid="relationship-validity-{{ relationship.id }}">{% if relationship.state.in_effect %}{{ relationship.state.validity_label }}{% else %}<s>{{ relationship.state.validity_label }}</s>{% endif %}</td>
+              <td data-testid="relationship-review-{{ relationship.id }}"><span class="status status-review-{{ relationship.state.review }}">{{ relationship.state.review_label }}</span>{% if relationship.uncertain %} <span class="status status-uncertain" data-testid="relationship-uncertain-{{ relationship.id }}">unsichere Namensform</span>{% endif %}</td>
+              <td>{{ relationship.report_count }}</td>
+              <td><a href="/relationships/{{ relationship.id }}" data-testid="relationship-link-{{ relationship.id }}">Verlauf</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% else %}
+    <p data-testid="no-relationships">Noch keine Beziehungen.</p>
+    {% endif %}
+    <form class="form-grid" method="post" action="/entities/{{ entity.id }}/relationships" data-testid="relationship-form">
+      <div class="field">
+        <label for="role">Die andere Entität ist</label>
+        <select id="role" name="role" required data-testid="relationship-role">
+          <option value="">Rolle wählen</option>
+          {% for code, label in roles %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="other">Entität</label>
+        <input id="other" name="other" type="text" required maxlength="300" list="entity-choices" autocomplete="off" aria-describedby="other-hint" data-testid="relationship-other">
+        <datalist id="entity-choices">{% for choice in choices %}<option value="{{ choice.name }} (Nr. {{ choice.id }})"></option>{% endfor %}</datalist>
+        <p class="hint" id="other-hint">Name aus der Liste, ein eindeutiger Name oder die Nummer der Entität.</p>
+      </div>
+      <div class="field">
+        <label for="valid_from">Gültig ab</label>
+        <input id="valid_from" name="valid_from" type="date" data-testid="relationship-from">
+      </div>
+      <div class="field">
+        <label for="valid_to">Gültig bis</label>
+        <input id="valid_to" name="valid_to" type="date" aria-describedby="valid_to-hint" data-testid="relationship-to">
+        <p class="hint" id="valid_to-hint">Leer: besteht noch.</p>
+      </div>
+      <div class="field field-wide">
+        <label for="note">Quelle</label>
+        <input id="note" name="note" type="text" required maxlength="1000" aria-describedby="note-hint" data-testid="relationship-note">
+        <p class="hint" id="note-hint">Ein Link oder eine Notiz, woher die Beziehung bekannt ist. Erfasst gilt sie als bestätigt.</p>
+      </div>
+      <div class="form-actions">
+        <button class="button" type="submit" data-testid="add-relationship">Beziehung erfassen</button>
+      </div>
+    </form>
+  </div>
+</details>
+
 <details class="section" id="similar" open data-testid="similar-section">
   <summary><h2>Ähnliche Entitäten ({{ similar|length }})</h2></summary>
   <div class="stack">

@@ -18,6 +18,10 @@ individual - is no entity (datamodel.md, rule 13).
 
 Should an entity with a similar name have come since the LLM was asked, the effect raises JobDeferred and the job
 asks anew: two recognitions never found two entities for one name the LLM would have judged the same.
+
+The same call names the relationships the reports' statements state between the names (story 2, schema 2), each
+citing its statement; one between two names that became entities of fitting kinds is an Angabe of the relationship
+(relationship_service), its evidence the statement's Beleg.
 """
 import logging
 import time
@@ -33,8 +37,8 @@ from app.jobs.errors import JobDeferred
 from app.llm import entity_schema
 from app.llm.limiter import LlmCallLimiter
 from app.llm.ollama import OllamaClient
-from app.repositories import entity_repository, extraction_repository
-from app.services import job_service, seed_service
+from app.repositories import entity_repository, extraction_repository, relationship_repository
+from app.services import job_service, relationship_service, seed_service
 from app.services.entity_names import country_code, identifier_key, name_key, stated_in
 from app.services.extraction_service import DIRECTION_LABELS, HORIZON_LABELS
 
@@ -47,6 +51,8 @@ CANDIDATES_PER_NAME = 3
 MAX_KNOWN = 40
 LIST_LIMIT = 200
 MENTION_LIMIT = 100
+# Names a form offers to choose an entity from; beyond them it takes a number or a name typed in.
+CHOICES_LIMIT = 2000
 # Other name forms the LLM is shown of a known entity.
 FORMS_SHOWN = 3
 
@@ -60,8 +66,8 @@ PARENT_KINDS = (EntityKind.SUBSIDIARY, EntityKind.PRODUCT)
 # the dev data a person (2026-10-31) - datamodel.md, rule 13.
 NO_ENTITY = ("none", "private_person")
 
-SYSTEM_PROMPT = """You recognise the entities that news reports name, for an entity database. Answer only with JSON in
-the given schema: one item for each numbered name.
+SYSTEM_PROMPT = """You recognise the entities that news reports name, and the relationships between them, for an entity
+database. Answer only with JSON in the given schema: in entities one item for each numbered name.
 
 - public_role - first, for a named individual: the public or business position the reports give them, now or
   formerly, in a few words, e.g. "German Chancellor", "Mayor of Cali", "CEO of Cisco", "US First Lady", "State
@@ -95,7 +101,16 @@ the given schema: one item for each numbered name.
 - country_code: of a country its ISO 3166-1 alpha-2 code; else null.
 - category: of a commodity or a sector the key of the listed one; else null.
 - identifiers: an ISIN, an LEI or a stock ticker as EXCHANGE:SYMBOL (e.g. "NASDAQ:AAPL") only when the name's quote
-  states it; never one you know but the quote does not state."""
+  states it; never one you know but the quote does not state.
+- relationships: only those a numbered statement states between two numbered names that are entities, each once:
+  supplies - subject sells or delivers goods or services to object: its supplier, object its customer - the one that
+  delivers is the subject, never the one that uses what it gets;
+  competes - the statement says the two compete or are rivals; partners do not compete;
+  regulates - subject, an authority or organisation, oversees, licenses, fines or sanctions object;
+  depends_on - subject depends on object, a listed commodity.
+  ended: true when the statement says it ended - a contract cancelled, a supplier dropped, a dependency given up.
+  statement: the number of the statement that states it. None you know but the statements do not state; none for
+  an event between the two that is no lasting relationship (an attack, a meeting, a single sale)."""
 
 KIND_LABELS = {
     EntityKind.COMPANY: "Unternehmen",
@@ -211,9 +226,15 @@ class Category:
     english: str
 
 
-def messages(candidates: Iterable, names: list[Name], known: list[Known], categories: list[Category]) -> list[dict]:
-    """The reports, their names and the known entities, and the listed sectors and commodities, for the LLM."""
+def messages(
+    candidates: Iterable, names: list[Name], known: list[Known], categories: list[Category], statements: Iterable = ()
+) -> list[dict]:
+    """The reports, their names, their statements and the known entities, and the listed sectors and commodities, for
+    the LLM."""
     reports = "\n".join(f"- {candidate.title}: {candidate.summary}" for candidate in candidates)
+    stated = "\n".join(
+        f'{number}. {statement.text} Quote: "{statement.quote}"' for number, statement in enumerate(statements, start=1)
+    ) or "none"
     numbered = "\n".join(
         f'{number}. "{name.text}" - {name.context}' + (f'. Quote: "{name.quotes[0]}"' if name.quotes else "")
         for number, name in enumerate(names, start=1)
@@ -226,7 +247,10 @@ def messages(candidates: Iterable, names: list[Name], known: list[Known], catego
     for kind, title in ((EntityKind.SECTOR, "Listed sectors"), (EntityKind.COMMODITY, "Listed commodities")):
         lines = [f"{category.key}: {category.english}" for category in categories if category.kind == kind]
         listed.append(f"{title} (category key: what it covers):\n" + ("\n".join(lines) or "none - use none for any"))
-    user = f"Reports:\n{reports}\n\nNames:\n{numbered}\n\nKnown entities:\n{known_lines}\n\n" + "\n\n".join(listed)
+    user = (
+        f"Reports:\n{reports}\n\nNames:\n{numbered}\n\nStatements:\n{stated}\n\nKnown entities:\n{known_lines}\n\n"
+        + "\n\n".join(listed)
+    )
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
 
 
@@ -262,6 +286,31 @@ def recognised(answer: entity_schema.RecognitionAnswer, names: list[Name], known
         parent = " ".join((item.parent or "").split()) if item.kind in PARENT_KINDS else ""
         parent = parent if name_key(parent) and name_key(parent) not in {name_key(form) for form in forms} else None
         results.append(Recognised(name, item.kind, english, forms, identifiers, same_as, parent))
+    return results
+
+
+@dataclass(frozen=True)
+class Stated:
+    """A relationship a statement states between two names, as the answer gives it."""
+
+    subject: Name
+    kind: str
+    object: Name
+    ended: bool
+    statement: object  # the statement's row: id, candidate, text, quote, its report's time
+
+
+def stated_relationships(answer: entity_schema.RecognitionAnswer, names: list[Name], statements: list) -> list[Stated]:
+    """The relationships of the answer between two different names, each citing a statement of the question; the same
+    one again from the same statement counts once."""
+    results, seen = [], set()
+    for relationship in answer.relationships:
+        subject, object_, statement = relationship.subject - 1, relationship.object - 1, relationship.statement - 1
+        key = (subject, relationship.kind, object_, statement)
+        if subject == object_ or key in seen or not (0 <= subject < len(names) and 0 <= object_ < len(names) and 0 <= statement < len(statements)):
+            continue
+        seen.add(key)
+        results.append(Stated(names[subject], relationship.kind, names[object_], relationship.ended, statements[statement]))
     return results
 
 
@@ -301,12 +350,13 @@ def recognise(engine: Engine, extraction_id: int, client: OllamaClient, limiter:
         offered = {name.key: [entity_id for entity_id, _ in entity_repository.similar(connection, name.key, CANDIDATES_PER_NAME)] for name in names}
         known = _known(connection, offered)
         categories = _categories(entity_repository.catalogue(connection))
+        statements = list(relationship_repository.statements_of(connection, extraction_id))
     run = {"extraction_id": extraction_id, "schema_version": entity_schema.SCHEMA_VERSION, "names": len(names)}
-    items, started = [], time.perf_counter()
+    items, stated, started = [], [], time.perf_counter()
     if names:
-        schema = entity_schema.json_schema(len(names), len(known), [category.key for category in categories])
+        schema = entity_schema.json_schema(len(names), len(known), [category.key for category in categories], len(statements))
         with limiter.slot():
-            answer = client.chat_json(messages(candidates, names, known, categories), schema)
+            answer = client.chat_json(messages(candidates, names, known, categories, statements), schema)
         if not answer.complete:
             raise UnusableAnswer(f"Antwort abgeschnitten nach {answer.answer_tokens} Tokens")
         try:
@@ -314,6 +364,7 @@ def recognise(engine: Engine, extraction_id: int, client: OllamaClient, limiter:
         except ValidationError as error:
             raise UnusableAnswer(f"Antwort ausserhalb des Schemas: {entity_schema.error_summary(error)}") from None
         items = recognised(parsed, names, known, [category.key for category in categories])
+        stated = stated_relationships(parsed, names, statements)
         run |= {"model": answer.model, "duration_ms": round((time.perf_counter() - started) * 1000)}
 
     def store(connection: Connection) -> None:
@@ -321,24 +372,47 @@ def recognise(engine: Engine, extraction_id: int, client: OllamaClient, limiter:
         if entity_repository.recognised(connection, extraction_id):
             return
         created: set[int] = set()
-        mentions, linked, uncertain = [], 0, 0
+        resolved: dict[str, _Alias] = {}
+        mentions, uncertain = [], 0
         for item in items:
             alias = _resolve(connection, item, offered[item.name.key], created)
             if alias is None:
                 continue
-            linked += 1
+            resolved[item.name.key] = alias
             uncertain += alias.uncertain
             mentions += [
                 {"candidate_id": place.candidate_id, "alias_id": alias.id, "source": place.source, "position": place.position}
                 for place in item.name.places
             ]
         entity_repository.insert_mentions(connection, mentions)
-        entity_repository.insert_recognition(connection, run | {"linked": linked})
+        relationships = _record_relationships(connection, stated, resolved)
+        entity_repository.insert_recognition(connection, run | {"linked": len(resolved), "relationships": relationships})
         # IDs and counts only, never a name (datamodel.md, rule 13). Not "created": a LogRecord has that already.
-        fields = {"extraction_id": extraction_id, "names": len(names), "linked": linked, "founded": len(created), "uncertain": uncertain}
+        fields = {
+            "extraction_id": extraction_id, "names": len(names), "linked": len(resolved), "founded": len(created),
+            "uncertain": uncertain, "relationships": relationships,
+        }
         logger.info("Entities recognised", extra=fields | {"duration_ms": run.get("duration_ms")})
 
     return store
+
+
+def _record_relationships(connection: Connection, stated: list[Stated], resolved: dict[str, "_Alias"]) -> int:
+    """The Angaben of the stated relationships whose two names became entities of kinds that can stand in them; their
+    number."""
+    pairs = [(each, resolved.get(each.subject.key), resolved.get(each.object.key)) for each in stated]
+    pairs = [(each, subject, object_) for each, subject, object_ in pairs if subject and object_ and subject.entity_id != object_.entity_id]
+    kinds = {row.id: row.kind for row in entity_repository.entities(connection, {alias.entity_id for _, s, o in pairs for alias in (s, o)}).values()}
+    recorded = 0
+    for each, subject, object_ in pairs:
+        if not relationship_service.allowed(each.kind, kinds[subject.entity_id], kinds[object_.entity_id]):
+            continue
+        relationship_service.record_reported(
+            connection, each.kind, (subject.entity_id, subject.id), (object_.entity_id, object_.id), each.statement.candidate_id,
+            each.statement.id, each.statement.moment.astimezone(UTC).date(), each.ended,
+        )
+        recorded += 1
+    return recorded
 
 
 def _known(connection: Connection, offered: dict[str, list[int]]) -> list[Known]:
@@ -362,6 +436,7 @@ def _categories(catalogue: dict[str, int]) -> list[Category]:
 class _Alias:
     id: int
     uncertain: bool
+    entity_id: int
 
 
 def _resolve(connection: Connection, item: Recognised, offered: list[int], created: set[int]) -> _Alias | None:
@@ -395,14 +470,14 @@ def _resolve(connection: Connection, item: Recognised, offered: list[int], creat
     if entity_id is None:
         entity_id = entity_repository.create_entity(connection, {"kind": item.kind, "name": item.english})
         created.add(entity_id)
-    aliases = {key: _Alias(row.id, row.uncertain) for key, row in entity_repository.alias_keys(connection, entity_id).items()}
+    aliases = {key: _Alias(row.id, row.uncertain, entity_id) for key, row in entity_repository.alias_keys(connection, entity_id).items()}
     for scheme, value, key in [(AliasScheme.NAME, form, name_key(form)) for form in item.forms] + [(s, k, k) for s, k in item.identifiers]:
         if (scheme, key) in aliases or (scheme != AliasScheme.NAME and entity_repository.identifier_taken(connection, scheme, key)):
             continue
         similarity = entity_repository.best_similarity(connection, entity_id, key) if uncertain and scheme == AliasScheme.NAME else None
         values = {"entity_id": entity_id, "scheme": scheme, "value": value, "key": key, "match": match, "uncertain": uncertain,
                   "similarity": None if similarity is None else round(similarity, 3)}
-        aliases[(scheme, key)] = _Alias(entity_repository.insert_alias(connection, values), uncertain)
+        aliases[(scheme, key)] = _Alias(entity_repository.insert_alias(connection, values), uncertain, entity_id)
     if item.parent:
         _set_parent(connection, entity_id, item.parent, created)
     return aliases[(AliasScheme.NAME, item.name.key)]
@@ -619,3 +694,9 @@ def _list_item(row) -> EntityListItem:
 def _view(view, row):
     names = {each.name for each in fields(view)}
     return view(**{name: value for name, value in row._mapping.items() if name in names})
+
+
+def choices(engine: Engine) -> list[EntityRef]:
+    """The entities a form offers to choose from, by name, at most CHOICES_LIMIT."""
+    with engine.connect() as connection:
+        return [EntityRef(row.id, row.name) for row in entity_repository.choices(connection, CHOICES_LIMIT)]

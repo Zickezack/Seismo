@@ -50,8 +50,8 @@ def item(mention, kind, name=None, **fields):
     return values | fields
 
 
-def recognition(*items):
-    return json.dumps({"entities": list(items)})
+def recognition(*items, relationships=()):
+    return json.dumps({"entities": list(items), "relationships": list(relationships)})
 
 
 def recognise_all(database, ollama):

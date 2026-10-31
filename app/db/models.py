@@ -1,11 +1,12 @@
 """SQLAlchemy models. Documented in datamodel.md, "Entities"; changed only via skill datenmodell-aendern."""
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -183,6 +184,30 @@ class MentionSource(StrEnum):
 
     ACTOR = "actor"
     IMPACT = "impact"  # the target of an impact
+
+
+class RelationshipKind(StrEnum):
+    """What a relationship between two entities is (relationship_service); its labels there, from either side."""
+
+    SUPPLIES = "supplies"  # the subject supplies the object: supplier and customer
+    COMPETES = "competes"  # symmetric: the subject is the one with the lower id
+    REGULATES = "regulates"  # the subject, an authority or organisation, regulates the object
+    DEPENDS_ON = "depends_on"  # the subject depends on the object, a commodity
+
+
+class ReviewStatus(StrEnum):
+    """The quality flag of a relationship: the analyst's review (the admin's decision of 2026-10-31)."""
+
+    UNREVIEWED = "unreviewed"
+    CONFIRMED = "confirmed"
+    DISPUTED = "disputed"  # kept as history, not in effect
+
+
+class RecordOrigin(StrEnum):
+    """Who made an Angabe about a relationship."""
+
+    REPORT = "report"
+    ANALYST = "analyst"
 
 
 class BackfillStatus(StrEnum):
@@ -717,6 +742,59 @@ class EntityRecognition(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     names: Mapped[int] = mapped_column(Integer, server_default=text("0"))  # the distinct names the model was asked about
     linked: Mapped[int] = mapped_column(Integer, server_default=text("0"))  # of them, those linked to an entity
+    # Angaben of relationships it recorded (schema 2).
+    relationships: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+
+
+class EntityRelationship(Base):
+    """A relationship between two entities (UI term: Beziehung): who supplies, competes with, regulates or depends on
+    whom. Its state - validity and review - follows from its Angaben (relationship_service.replay), never stored
+    apart from them (datamodel.md, rules 3 and 10)."""
+
+    __tablename__ = "entity_relationship"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    subject_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("entity.id", ondelete="CASCADE"))
+    object_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("entity.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(kind.in_([s.value for s in RelationshipKind]), name="kind"),
+        CheckConstraint(subject_id != object_id, name="two_entities"),
+        UniqueConstraint(kind, subject_id, object_id),
+    )
+
+
+class RelationshipRecord(Base):
+    """One Angabe about a relationship: a report states that it holds or ended, backed by the quote of one of its
+    statements; or the analyst sets its validity and review, naming a source. Appended, never changed - only moved
+    with the name form or entity a correction moves."""
+
+    __tablename__ = "relationship_record"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    relationship_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("entity_relationship.id", ondelete="CASCADE"), index=True)
+    origin: Mapped[str] = mapped_column(String(10))
+    # Of a report's: the report, the statement whose Beleg backs it, and the name forms it names the two by. The
+    # Angabe stays should its article go.
+    candidate_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("event_candidate.id", ondelete="SET NULL"), index=True)
+    statement_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("statement.id", ondelete="SET NULL"))
+    subject_alias_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity_alias.id", ondelete="SET NULL"), index=True)
+    object_alias_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity_alias.id", ondelete="SET NULL"), index=True)
+    reported_on: Mapped[date | None] = mapped_column(Date)  # the report's day: its publication, else its fetch, in UTC
+    ended: Mapped[bool] = mapped_column(server_default=false())  # the report says it ended
+    # Of the analyst's: the validity and review it sets, and its source - a link or a note.
+    valid_from: Mapped[date | None] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date)
+    review: Mapped[str | None] = mapped_column(String(20))
+    note: Mapped[str | None] = mapped_column(Text)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(origin.in_([s.value for s in RecordOrigin]), name="origin"),
+        CheckConstraint(review.in_([s.value for s in ReviewStatus]), name="review"),
+    )
 
 
 class RawText(Base):

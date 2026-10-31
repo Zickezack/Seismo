@@ -406,3 +406,27 @@ def test_the_entities_go_with_a_downgrade_and_the_reports_stay(engine):
 
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_the_relationships_go_with_a_downgrade_and_the_entities_stay(engine):
+    upgrade(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO entity (kind, name) VALUES ('company', 'TSMC'), ('company', 'Apple')"))
+        connection.execute(text(
+            "INSERT INTO entity_relationship (kind, subject_id, object_id) "
+            "SELECT 'supplies', min(id), max(id) FROM entity"
+        ))
+        connection.execute(text(
+            "INSERT INTO relationship_record (relationship_id, origin, valid_from, review, note) "
+            "SELECT id, 'analyst', '2024-01-01', 'confirmed', 'Notiz' FROM entity_relationship"
+        ))
+
+    downgrade(engine, "6544d7bab59f")
+
+    with engine.connect() as connection:
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+        entities = connection.execute(text("SELECT count(*) FROM entity")).scalar_one()
+    assert not tables & {"entity_relationship", "relationship_record"} and entities == 2
+
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

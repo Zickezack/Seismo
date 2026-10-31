@@ -484,6 +484,21 @@ a:focus-visible {
   background: var(--color-success-background);
 }
 
+/* The analyst's review of a relationship (templates/entity.html, relationship.html). */
+.status-review-confirmed {
+  color: var(--color-success-text);
+  background: var(--color-success-background);
+}
+
+.status-review-disputed {
+  color: var(--color-error-text);
+  background: var(--color-error-background);
+}
+
+.status-review-unreviewed {
+  color: var(--color-muted);
+}
+
 .status-claim,
 .status-source_forecast,
 .status-contradicts,

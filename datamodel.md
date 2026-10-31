@@ -35,6 +35,7 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Nennung | `entity_mention` | An entity named in a report, as an actor or an impact's target, by one of its name forms. | none |
 | Entitätenerkennung | `entity_recognition` | The LLM run that recognised the entities an extraction's reports name. | none |
 | Beziehung | `entity_relationship` | A relationship between entities: supplier, customer, competitor, regulator, commodity dependency. | none |
+| Angabe | `relationship_record` | One statement about a relationship: a report's that it holds or ended, with its Beleg, or the analyst's validity and review, with its source. | none |
 | Wertpapier | `instrument` | A tradable security (stock, ETF, index) with symbol, ISIN, exchange and currency, optionally linked to an Entität. Its tracked flag (verfolgt) decides whether its prices are collected continuously. | none |
 | Kurspunkt | `price_point` | One price of a Wertpapier at a point in time or over an interval (open, high, low, close, volume), with UTC timestamp, resolution, source and a real-time or delayed flag. | none |
 | Wirkungsannahme | `impact_hypothesis` | An assumed effect of an event on companies, sectors or assets. | none |
@@ -382,7 +383,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | created_at | timestamptz | yes | now() | |
 
 - Relationships: has Namensformen, through them Nennungen; may belong to a parent Entität and have subsidiaries and products; a merged one points to the entity it was merged into.
-- Rules: recognised by the job "Entitäten erkennen" (see Entitätenerkennung), or imported with the starter list of sectors and commodities (`app/seeds/entities.json`, Seed-Protokoll `entities`) - sectors and commodities come only from that list. The list (UI: Entitäten, `/entities`) shows the 200 first by name, not merged ones, with their name forms, uncertain ones, reports and events; filters by kind, uncertain name forms and a part of a name form. The entity page (`/entities/<id>`) shows name forms, reports and similar entities - those of its kind (a company's subsidiaries too) with a name form of trigram similarity from 0.3, at most 10. The analyst merges the selected similar ones into it (UI: In diese Entität zusammenführen): their name forms, identifiers, subsidiaries and products move to it, all or nothing, of its kind only; it takes the first parent among them should it have none; a merged entity keeps its id and page, without name forms, and is no longer listed or compared. Never deleted.
+- Rules: recognised by the job "Entitäten erkennen" (see Entitätenerkennung), or imported with the starter list of sectors and commodities (`app/seeds/entities.json`, Seed-Protokoll `entities`) - sectors and commodities come only from that list. The list (UI: Entitäten, `/entities`) shows the 200 first by name, not merged ones, with their name forms, uncertain ones, reports and events; filters by kind, uncertain name forms and a part of a name form. The entity page (`/entities/<id>`) shows name forms, reports and similar entities - those of its kind (a company's subsidiaries too) with a name form of trigram similarity from 0.3, at most 10. The analyst merges the selected similar ones into it (UI: In diese Entität zusammenführen): their name forms, identifiers, subsidiaries and products move to it, all or nothing, of its kind only; it takes the first parent among them should it have none; a merged entity keeps its id and page, without name forms, and is no longer listed or compared; its relationships go along (see Beziehung). Never deleted.
 - Privacy: [privacy] for persons: name.
 
 ### Namensform (`entity_alias`)
@@ -435,9 +436,49 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | duration_ms | integer | no | | The model call, waiting for an LLM slot included. |
   | names | integer | yes | 0 | The distinct names (by key) of the reports' actors and impact targets the model was asked about, at most 50. |
   | linked | integer | yes | 0 | Of them, those that became a Nennung; the others the model judged no entity, or a sector or commodity not on the list. |
+  | relationships | integer | yes | 0 | The Angaben of relationships it recorded (schema 2); 0 for the runs before. |
 
 - Relationships: belongs to one Extraktion.
-- Rules: the job "Entitäten erkennen" (`entity_service`, one of the LLM jobs) runs for every valid extraction with reports and without a recognition, the earliest article first, queued in the worker's LLM sweep. The model is shown the reports, each name with its role or impact and quote, the known entities with a similar name form (pg_trgm similarity from 0.3, at most 3 per name, 40 in all) and the imported sectors and commodities; it answers each name's kind or none, a named individual's public or business position first (a person without one, or answered as a private individual, is no entity - rule 13), its usual English name, a short form the report uses, the known entity it is when it is sure, a subsidiary's parent or a product's maker, a country's code, a listed item's key and identifiers. An identifier counts only valid (ISIN, LEI by their check digits; a country code assigned, UK as GB) and stated in the name's quote (rule 5). Resolved in the effect's transaction under the advisory lock: an identifier or a name form of an entity of the kind (a company's subsidiary alike) - certain; else the known entity the LLM judged it - uncertain; else a new entity. An entity with a similar name that came since the LLM was asked defers the job (`JobDeferred`): it asks anew. An answer cut or outside the schema is retried with the job. Logged by ids and counts only (rule 13).
+- Rules: the job "Entitäten erkennen" (`entity_service`, one of the LLM jobs) runs for every valid extraction with reports and without a recognition, the earliest article first, queued in the worker's LLM sweep. The model is shown the reports, each name with its role or impact and quote, the known entities with a similar name form (pg_trgm similarity from 0.3, at most 3 per name, 40 in all) and the imported sectors and commodities; it answers each name's kind or none, a named individual's public or business position first (a person without one, or answered as a private individual, is no entity - rule 13), its usual English name, a short form the report uses, the known entity it is when it is sure, a subsidiary's parent or a product's maker, a country's code, a listed item's key and identifiers. An identifier counts only valid (ISIN, LEI by their check digits; a country code assigned, UK as GB) and stated in the name's quote (rule 5). Resolved in the effect's transaction under the advisory lock: an identifier or a name form of an entity of the kind (a company's subsidiary alike) - certain; else the known entity the LLM judged it - uncertain; else a new entity. An entity with a similar name that came since the LLM was asked defers the job (`JobDeferred`): it asks anew. Schema 2 shows the model the reports' statements, numbered with their quotes, and asks for the relationships they state between two names, each citing its statement; one between two names that became entities of kinds that can stand in it is an Angabe (see Beziehung). The runs before have none; nothing runs them again. An answer cut or outside the schema is retried with the job. Logged by ids and counts only (rule 13).
+- Privacy: none
+
+### Beziehung (`entity_relationship`)
+- Store: SQL table `entity_relationship`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | UI: Beziehung (the number). |
+  | kind | varchar(20) | yes | | `supplies` (subject supplies object: UI from the subject's side Kunde, from the object's Lieferant), `competes` (UI: Wettbewerber), `regulates` (UI: Reguliert, Regulator), `depends_on` (on a commodity; UI: Abhängig von, Abhängig davon); check constraint. |
+  | subject_id | bigint | yes | | Foreign key to `entity`, `ON DELETE CASCADE`. Of a competition the lower id. |
+  | object_id | bigint | yes | | Foreign key to `entity`, `ON DELETE CASCADE`. Index. Never the subject (check constraint). |
+  | created_at | timestamptz | yes | now() | |
+
+- Relationships: between two Entitäten; has Angaben.
+- Rules: unique by kind, subject and object (`uq_entity_relationship_kind`): a supplier and its customer are one relationship, seen from either side. Its sides by kind (`relationship_service.SIDES`): supplies - a company, subsidiary or country to a company, subsidiary, country, authority, organisation or sector; competes - companies, subsidiaries or products; regulates - an authority or organisation of a company, subsidiary, product or sector; depends_on - a company, subsidiary, country or sector on a commodity. Its state is not stored: it follows from its Angaben in the order they were recorded (`relationship_service.replay`), so every earlier state and the state at any past moment stay to be rebuilt (rules 3, 10, 11). The analyst's review is its quality flag (UI: Prüfung - Ungeprüft, Bestätigt, Bestritten; the admin's decision of 2026-10-31); it is in effect while it holds and is not disputed. The entity page lists an entity's relationships with Angaben, those in effect first (UI: Beziehungen - Rolle, Entität, Gültig, Prüfung, Berichte), confirms or disputes the selected ones all or nothing, their dates as they are, and takes the analyst's own (UI: Beziehung erfassen - the other's role, the other entity by name, number or the list, validity, a required source; confirmed). The relationship page (`/relationships/<id>`) shows its Angaben with the state after each (UI: Verlauf) and takes the analyst's Angabe of its validity and review (UI: Stand ändern). A merge of entities moves the Angaben of the merged one's relationships to the same relationships of the entity it went into; one between the two stays where it was. Never deleted.
+- Privacy: none
+
+### Angabe (`relationship_record`)
+- Store: SQL table `relationship_record`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | relationship_id | bigint | yes | | Foreign key to `entity_relationship`, `ON DELETE CASCADE`. Index. |
+  | origin | varchar(10) | yes | | `report` or `analyst`; check constraint. UI: Bericht, Analyst. |
+  | candidate_id | bigint | no | | Of a report's: the report. Foreign key to `event_candidate`, `ON DELETE SET NULL`: the Angabe stays. Index. |
+  | statement_id | bigint | no | | Of a report's: the statement that states it; its Beleg is the evidence - quote and source quality. Foreign key to `statement`, `ON DELETE SET NULL`. |
+  | subject_alias_id, object_alias_id | bigint | no | | Of a report's: the name forms it names the subject and the object by. Foreign keys to `entity_alias`, `ON DELETE SET NULL`. Index each. |
+  | reported_on | date | no | | Of a report's: its day - its article's publication, else fetch, in UTC. |
+  | ended | boolean | yes | false | Of a report's: it says the relationship ended (a contract cancelled, a supplier dropped). UI: beendet, else besteht. |
+  | valid_from, valid_to | date | no | | Of the analyst's: the validity it sets; empty `valid_to`: it holds, empty `valid_from`: start unknown. UI: Gültig ab, bis. |
+  | review | varchar(20) | no | | Of the analyst's: `unreviewed`, `confirmed`, `disputed`; check constraint. UI: Ungeprüft, Bestätigt, Bestritten. |
+  | note | text | no | | Of the analyst's: the source or reason, at most 1000 characters; required when the analyst enters a relationship. Never logged. UI: Quelle. |
+  | recorded_at | timestamptz | yes | now() | When Seismo learned it (rule 11): the order of the replay. UI: Erfasst. |
+
+- Relationships: belongs to one Beziehung; a report's to one Ereigniskandidat, one Aussage and two Namensformen.
+- Rules: appended, never changed (rule 3) - only moved by a correction of entities: a merge (see Beziehung), and a split of name forms, which moves the reports' Angaben that name an entity by a name form split off to the same relationship of the entity they now make; the analyst's stay with the entity they were made for. The replay (the admin's decision of 2026-10-31): the first Angabe founds the state - a report's that it holds from its day, that it ended until its day; later a report's that it holds opens it again after an end before its day, or moves its start earlier; that it ended closes it while it is open and from its start on; anything else changes nothing and confirms. The analyst's sets dates and review as given; a report never changes the review. Written by the recognition in its transaction, by the analyst under the entities' advisory lock.
 - Privacy: none
 
 ### Backfill (`backfill`)

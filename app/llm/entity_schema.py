@@ -3,16 +3,19 @@ of an extraction give, what it stands for - the JSON schema Ollama constrains th
 
 Versioned like the event schema: a change of the fields, their meaning or the prompt (app/services/entity_service.py)
 is a new SCHEMA_VERSION, stored with every recognition (datamodel.md, rule 2).
+
+Version 2 (story 2): the relationships the reports' statements state between the names, each citing its statement.
 """
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.db.models import AliasScheme, EntityKind
+from app.db.models import AliasScheme, EntityKind, RelationshipKind
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 MAX_NAMES = 50
 MAX_IDENTIFIERS = 3
+MAX_RELATIONSHIPS = 20
 
 # What a name stands for: one of the kinds of entity, a private individual, or none - the two make no entity.
 RecognisedKind = StrEnum(
@@ -53,13 +56,22 @@ class RecognisedName(_Strict):
     identifiers: list[StatedIdentifier] = Field(max_length=MAX_IDENTIFIERS)
 
 
+class StatedRelationship(_Strict):
+    subject: int  # a name's number
+    kind: RelationshipKind
+    object: int
+    ended: bool
+    statement: int  # the number of the statement that states it
+
+
 class RecognitionAnswer(_Strict):
     entities: list[RecognisedName] = Field(max_length=MAX_NAMES)
+    relationships: list[StatedRelationship] = Field(max_length=MAX_RELATIONSHIPS)
 
 
-def json_schema(names: int, known: int, categories: list[str]) -> dict:
-    """The answer's JSON schema for a question with this many names and known entities and these listed keys: a
-    number or key outside them cannot be written."""
+def json_schema(names: int, known: int, categories: list[str], statements: int = 0) -> dict:
+    """The answer's JSON schema for a question with this many names, known entities and statements and these listed
+    keys: a number or key outside them cannot be written. Without a statement or a second name, no relationship."""
     schema = RecognitionAnswer.model_json_schema()
     definitions = schema.pop("$defs")
     item = definitions["RecognisedName"]
@@ -70,6 +82,15 @@ def json_schema(names: int, known: int, categories: list[str]) -> dict:
     item["properties"]["identifiers"]["items"] = definitions["StatedIdentifier"]
     definitions["StatedIdentifier"]["properties"]["scheme"] = {"enum": [scheme.value for scheme in IdentifierScheme]}
     schema["properties"]["entities"]["items"] = item
+    relationship = definitions["StatedRelationship"]
+    # Never an empty enum, which a grammar converter may refuse; maxItems 0 keeps it unused then.
+    relationship["properties"]["subject"] = relationship["properties"]["object"] = {"enum": list(range(1, max(names, 1) + 1))}
+    relationship["properties"]["statement"] = {"enum": list(range(1, max(statements, 1) + 1))}
+    relationship["properties"]["kind"] = {"enum": [kind.value for kind in RelationshipKind]}
+    relationships = schema["properties"]["relationships"]
+    relationships["items"] = relationship
+    if not statements or names < 2:
+        relationships["maxItems"] = 0
     return schema
 
 

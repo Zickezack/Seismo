@@ -2,8 +2,9 @@
 form confirmed, name forms split off into an entity of their own, entities merged into one (datamodel.md, rule 9:
 never merged silently - by the analyst only).
 
-A name form carries its reports: moved, they name the entity it went to. A merged entity keeps its id and page, without
-name forms, marked as merged into the other; its subsidiaries and products go with it. Every correction runs under the
+A name form carries its reports: moved, they name the entity it went to, and so do the reports' Angaben of
+relationships that name the entity by it (relationship_service.follow_split). A merged entity keeps its id and page,
+without name forms, marked as merged into the other; its subsidiaries, products and relationships go with it. Every correction runs under the
 lock of the recognition (entity_repository.lock_entities), so a name form is never moved while a recognition adds to
 its entity. Sectors and commodities of the starter list keep their key: it is never split off.
 """
@@ -15,7 +16,7 @@ from sqlalchemy import Engine
 
 from app.db.models import AliasMatch, AliasScheme
 from app.repositories import entity_repository
-from app.services import entity_service
+from app.services import entity_service, relationship_service
 from app.services.bulk import BulkResult
 from app.services.entity_service import EntityListItem, matched_kinds
 
@@ -99,6 +100,7 @@ def split(engine: Engine, entity_id: int, alias_ids: Iterable[int]) -> SplitResu
         new_id = entity_repository.create_entity(connection, {"kind": entity.kind, "name": name})
         values = {"match": AliasMatch.SPLIT, "uncertain": False, "similarity": None}
         entity_repository.move_aliases(connection, alias_ids, new_id, values)
+        relationship_service.follow_split(connection, alias_ids, new_id)
     # IDs and counts only, never a name (datamodel.md, rule 13).
     logger.info("Name forms split off", extra={"entity_id": entity_id, "new_entity_id": new_id, "aliases": len(alias_ids)})
     return SplitResult(processed=len(alias_ids), blocked=[], entity_id=new_id)
@@ -123,6 +125,7 @@ def merge(engine: Engine, entity_id: int, other_ids: Iterable[int]) -> BulkResul
             return BulkResult(processed=0, blocked=blocked)
         entity_repository.take_parent(connection, entity_id, other_ids)
         moved = entity_repository.merge_into(connection, other_ids, entity_id)
+        relationship_service.follow_merge(connection, other_ids, entity_id)
     logger.info("Entities merged", extra={"entity_id": entity_id, "merged": other_ids, "aliases": moved})
     return BulkResult(processed=len(other_ids), blocked=[])
 

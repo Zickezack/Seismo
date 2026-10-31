@@ -29,8 +29,8 @@ def item(mention, kind, name=None, **fields):
     return values | fields
 
 
-def answer(*items):
-    return entity_schema.parse(json.dumps({"entities": list(items)}))
+def answer(*items, relationships=()):
+    return entity_schema.parse(json.dumps({"entities": list(items), "relationships": list(relationships)}))
 
 
 def test_a_name_is_asked_about_once_with_every_place_the_reports_give_it():
@@ -176,3 +176,43 @@ def test_a_mention_says_what_its_report_says_of_the_entity(source, detail, label
     mention = MentionView(1, source, detail, "Ukraine", False, 2, "Report", 3, "Event", 4, NOW, "Ukrinform")
 
     assert (mention.role_label, mention.quote) == (label, "q")
+
+
+def statement(statement_id, text="TSMC supplies chips to Apple.", quote="TSMC liefert Chips an Apple"):
+    return SimpleNamespace(id=statement_id, candidate_id=1, text=text, quote=quote, moment=NOW)
+
+
+def relationship(subject, kind, object_, statement_number=1, ended=False):
+    return {"subject": subject, "kind": kind, "object": object_, "ended": ended, "statement": statement_number}
+
+
+def test_a_stated_relationship_needs_two_different_names_and_a_statement_of_the_question_each_once():
+    names = names_of("TSMC", "Apple")
+    statements = [statement(7)]
+    parsed = answer(item(1, "company", "TSMC"), item(2, "company", "Apple"), relationships=[
+        relationship(1, "supplies", 2), relationship(1, "supplies", 2), relationship(1, "competes", 1),
+        relationship(2, "competes", 1, ended=True),
+    ])
+
+    found = entity_service.stated_relationships(parsed, names, statements)
+
+    assert [(each.subject.text, each.kind, each.object.text, each.ended, each.statement.id) for each in found] == [
+        ("TSMC", "supplies", "Apple", False, 7), ("Apple", "competes", "TSMC", True, 7),
+    ]
+
+
+def test_the_question_numbers_the_statements_with_their_quotes():
+    candidates = [candidate(1, actors=[("TSMC", "supplier", "TSMC")])]
+
+    [_, user] = entity_service.messages(candidates, entity_service.collect_names(candidates), [], [], [statement(7)])
+
+    assert 'Statements:\n1. TSMC supplies chips to Apple. Quote: "TSMC liefert Chips an Apple"' in user["content"]
+
+
+def test_without_a_statement_or_a_second_name_the_schema_allows_no_relationship():
+    def relationships(names, statements):
+        return entity_schema.json_schema(names, 0, [], statements)["properties"]["relationships"]
+
+    assert relationships(2, 1)["maxItems"] == entity_schema.MAX_RELATIONSHIPS
+    assert relationships(2, 0)["maxItems"] == 0 and relationships(2, 0)["items"]["properties"]["statement"] == {"enum": [1]}
+    assert relationships(1, 3)["maxItems"] == 0

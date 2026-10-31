@@ -1,12 +1,23 @@
 """Entitäten pages in the web layer, without a database: the services are replaced."""
+from datetime import date
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
-from app.services import entity_correction_service, entity_service, event_correction_service, event_service, seed_service
+from app.services import (
+    entity_correction_service,
+    entity_service,
+    event_correction_service,
+    event_service,
+    relationship_service,
+    seed_service,
+)
 from app.services.bulk import BulkResult
 from app.services.entity_correction_service import SimilarEntity, SplitResult
 from app.services.entity_service import AliasView, EntityDetail, EntityListItem, EntityOverview, EntityRef, EventEntity, MentionView
 from app.services.event_service import EventDetail
+from app.services.relationship_service import InvalidRelationship, RecordView, RelationshipDetail, RelationshipView, State
 from app.services.seed_service import SeedResult
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
@@ -58,6 +69,8 @@ def pages(monkeypatch):
     monkeypatch.setattr(entity_correction_service, "similar_entities", lambda _engine, entity_id: calls.get("similar", []))
     for name in ("confirm", "split", "merge"):
         monkeypatch.setattr(entity_correction_service, name, correct(name))
+    monkeypatch.setattr(relationship_service, "of_entity", lambda _engine, entity_id: calls.get("relationships", []))
+    monkeypatch.setattr(entity_service, "choices", lambda _engine: [EntityRef(3, "Alstom")])
     return calls
 
 
@@ -201,3 +214,97 @@ def test_the_starter_list_comes_in_only_by_the_admin_s_button(client, monkeypatc
     response = client.post("/settings/platform/seed/entities")
 
     assert (response.status_code, response.headers["location"]) == (303, "/settings/platform#starterdaten")
+
+
+def relationship(relationship_id, kind="supplies", is_subject=False, **fields):
+    values = dict(id=relationship_id, kind=kind, is_subject=is_subject, other=EntityRef(3, "TSMC", "company"),
+                  state=State(date(2026, 10, 24)), report_count=2, uncertain=False)
+    return RelationshipView(**values | fields)
+
+
+def test_the_entity_page_lists_its_relationships_to_review_and_a_form_to_add_one(client, pages):
+    pages["detail"] = EntityDetail(entity(7, kind="company", name="Apple"), [alias(1)], [], 0)
+    pages["relationships"] = [
+        relationship(4), relationship(5, kind="competes", is_subject=True, state=State(date(2026, 1, 1), date(2026, 3, 1), "disputed"), uncertain=True),
+    ]
+
+    html = client.get("/entities/7").text
+
+    assert tag_of(html, "relationship-list").startswith('<form class="stack" method="post" action="/entities/7/relationships/confirm" data-bulk-form')
+    dispute = tag_of(html, "dispute-relationships")
+    assert 'formaction="/entities/7/relationships/dispute"' in dispute and 'data-confirm-verb="bestreiten"' in dispute
+    assert (text_of(html, "relationship-role-4"), text_of(html, "relationship-other-4")) == ("Lieferant", "TSMC")
+    assert text_of(html, "relationship-validity-4") == "seit 24.10.2026"
+    assert "<s>01.01.2026 bis 01.03.2026</s>" in html and text_of(html, "relationship-uncertain-5") == "unsichere Namensform"
+    assert tag_of(html, "relationship-link-4") == '<a href="/relationships/4" data-testid="relationship-link-4">'
+    assert tag_of(html, "relationship-form").startswith('<form class="form-grid" method="post" action="/entities/7/relationships"')
+    assert '<option value="Alstom (Nr. 3)"></option>' in html and '<option value="customer">Kunde</option>' in html
+    assert text_of(html, "section-nav-relationships") == "Beziehungen"
+
+
+def test_adding_a_relationship_says_what_became_of_it(client, pages, monkeypatch):
+    added = []
+
+    def add(_engine, entity_id, role, other, valid_from, valid_to, note):
+        added.append((entity_id, role, other, valid_from, valid_to, note))
+        if not note:
+            raise InvalidRelationship("Bitte eine Quelle angeben: einen Link oder eine Notiz.")
+        return 12
+
+    monkeypatch.setattr(relationship_service, "add", add)
+    form = {"role": "supplier", "other": "TSMC (Nr. 3)", "valid_from": "2024-01-01", "valid_to": "", "note": "https://example.org"}
+
+    response = client.post("/entities/7/relationships", data=form)
+
+    assert (response.status_code, response.headers["location"]) == (303, "/entities/7#relationships")
+    assert added == [(7, "supplier", "TSMC (Nr. 3)", "2024-01-01", "", "https://example.org")]
+    assert "Beziehung 12 erfasst." in client.get("/entities").text
+    client.post("/entities/7/relationships", data=form | {"note": ""})
+    assert "Keine Beziehung erfasst. Bitte eine Quelle angeben" in client.get("/entities").text
+
+
+@pytest.mark.parametrize(("action", "status", "message"), [("confirm", "confirmed", "2 Beziehungen bestätigt."), ("dispute", "disputed", "2 Beziehungen bestritten.")])
+def test_reviewing_relationships_runs_on_the_selection(client, pages, monkeypatch, action, status, message):
+    reviewed = []
+    monkeypatch.setattr(relationship_service, "review", lambda _engine, entity_id, ids, review, note: reviewed.append((entity_id, ids, review, note)) or BulkResult(len(ids), []))
+
+    client.post(f"/entities/7/relationships/{action}", data={"relationship_id": ["4", "5"], "note": "geprüft"})
+
+    assert reviewed == [(7, [4, 5], status, "geprüft")]
+    assert message in client.get("/entities").text
+
+
+def test_the_relationship_page_shows_every_angabe_with_the_state_after_it(client, monkeypatch):
+    report_record = SimpleNamespace(
+        id=1, origin="report", ended=False, reported_on=date(2026, 10, 24), recorded_at=NOW, article_id=30, report_title="Report",
+        statement_text="TSMC supplies Apple.", quote="TSMC liefert an Apple", source_display_name="Reuters", source_quality="medium",
+        subject_uncertain=False, object_uncertain=True, note=None,
+    )
+    analyst_record = SimpleNamespace(
+        id=2, origin="analyst", valid_from=date(2020, 1, 1), valid_to=None, review="confirmed", reported_on=None, recorded_at=NOW,
+        note="Geschäftsbericht", subject_uncertain=None, object_uncertain=None,
+    )
+    detail = RelationshipDetail(4, "supplies", EntityRef(3, "TSMC", "company"), EntityRef(7, "Apple", "company"), State(date(2020, 1, 1), None, "confirmed"), [
+        RecordView(report_record, State(date(2026, 10, 24)), True), RecordView(analyst_record, State(date(2020, 1, 1), None, "confirmed"), True),
+    ])
+    monkeypatch.setattr(relationship_service, "detail", lambda _engine, relationship_id: detail if relationship_id == 4 else None)
+
+    html = client.get("/relationships/4").text
+
+    assert tag_of(html, "relationship-subject") == '<a href="/entities/3" data-testid="relationship-subject">'
+    assert "TSMC</a> liefert an <a" in html
+    assert text_of(html, "meta-validity") == "seit 01.01.2020"
+    assert text_of(html, "record-says-1") == "Bericht: besteht" and text_of(html, "record-says-2") == "Analyst: seit 01.01.2020, Bestätigt"
+    assert "„TSMC liefert an Apple“ · Reuters · Quelle mittel" in html and "unsichere Namensform" in html
+    assert text_of(html, "record-state-2") == "seit 01.01.2020, Bestätigt"
+    assert 'value="2020-01-01"' in tag_of(html, "state-from") and '<option value="confirmed" selected>' in html
+    assert client.get("/relationships/5").headers["location"] == "/entities"
+
+
+def test_setting_a_state_records_the_analyst_s_angabe(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(relationship_service, "set_state", lambda _engine, *args: calls.append(args))
+
+    response = client.post("/relationships/4/state", data={"valid_from": "2020-01-01", "valid_to": "", "review": "confirmed", "note": "Bericht"})
+
+    assert response.headers["location"] == "/relationships/4#records" and calls == [(4, "2020-01-01", "", "confirmed", "Bericht")]
