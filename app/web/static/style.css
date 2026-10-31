@@ -507,6 +507,7 @@ a:focus-visible {
 .status-claim,
 .status-source_forecast,
 .status-contradicts,
+.status-change,
 .status-uncertain {
   color: var(--color-warning-text);
   background: var(--color-warning-background);
@@ -515,6 +516,18 @@ a:focus-visible {
 .status-interpretation {
   color: var(--color-primary);
   background: #e6eefa;
+}
+
+/* An event's reports in time order, each with its statements (templates/event.html, Chronik). */
+.chronicle {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.chronicle-time {
+  font-weight: 600;
 }
 
 /* Extracted statements, each with the quote that backs it (templates/article.html). */

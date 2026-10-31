@@ -1,6 +1,66 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
+{% macro event_rows(items, kind) %}
+<div class="table-container">
+  <table class="table" data-testid="{{ kind }}-events">
+    <thead>
+      <tr>
+        <th>Ereignis</th>
+        <th>Zustand</th>
+        <th>Im Zeitraum</th>
+        <th>Zuletzt berichtet</th>
+        <th>Typ</th>
+        <th>Land</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      {% set event = item.event %}
+      <tr data-testid="{{ kind }}-event-{{ event.id }}">
+        <td class="cell-title"><a href="/events/{{ event.id }}" data-testid="{{ kind }}-title-{{ event.id }}">{{ event.title }}</a></td>
+        <td class="cell-wrap" data-testid="{{ kind }}-state-{{ event.id }}">{{ event.state_label }}{% for change in item.changes %}<span class="status status-change" data-testid="{{ kind }}-change-{{ event.id }}-{{ loop.index }}">{{ change.status_label }}</span>{% endfor %}</td>
+        <td class="cell-wrap" data-testid="{{ kind }}-recent-{{ event.id }}">{{ item.recent_reports }} {{ "Bericht" if item.recent_reports == 1 else "Berichte" }} aus {{ item.recent_sources }} {{ "Quelle" if item.recent_sources == 1 else "Quellen" }}{% if item.recent_reports != event.report_count %}<span class="hint">von {{ event.report_count }} insgesamt</span>{% endif %}</td>
+        <td>{{ event.last_reported_at|local_time }}</td>
+        <td class="cell-wrap">{{ event.type_label }}</td>
+        <td>{{ event.country or "–" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
 {% block content %}
 <h1>Dashboard</h1>
-<p data-testid="dashboard-intro">Hier erscheinen künftig neue und sich entwickelnde Ereignisse.</p>
+
+<section class="card stack">
+  {# Plain links: the period works without JavaScript and the URL can be bookmarked. #}
+  <nav class="filters" aria-label="Zeitraum" data-testid="period-filter">
+    {% for key, label in periods.items() %}
+    <a class="filter" href="/?period={{ key }}" data-testid="period-{{ key }}"{% if dashboard.period == key %} aria-current="true"{% endif %}>Letzte {{ label }}</a>
+    {% endfor %}
+  </nav>
+  <p class="hint" data-testid="dashboard-summary">Seit {{ dashboard.since|local_time }}: {{ dashboard.new_total }} {{ "neues Ereignis" if dashboard.new_total == 1 else "neue Ereignisse" }}, {{ dashboard.developing_total }} in Entwicklung{% if dashboard.changed_total %}, davon {{ dashboard.changed_total }} mit Zustandswechsel{% endif %}. Zeit eines Berichts: die Veröffentlichung seines Artikels, sonst der Abruf.</p>
+</section>
+
+<section class="card stack" id="new" data-testid="section-new">
+  <h2>Neue Ereignisse ({{ dashboard.new_total }})</h2>
+  {% if dashboard.new %}
+  <p class="hint">Zuerst berichtet im Zeitraum. Zuerst die von den meisten Quellen berichteten.</p>
+  {{ event_rows(dashboard.new, "new") }}
+  {% if dashboard.new_total > dashboard.new|length %}<p class="hint" data-testid="new-more">Angezeigt: {{ dashboard.new|length }} von {{ dashboard.new_total }}; alle unter <a href="/events">Ereignisse</a>.</p>{% endif %}
+  {% else %}
+  <p data-testid="no-new">Kein neues Ereignis in den letzten {{ dashboard.period_label }}.</p>
+  {% endif %}
+</section>
+
+<section class="card stack" id="developing" data-testid="section-developing">
+  <h2>In Entwicklung ({{ dashboard.developing_total }})</h2>
+  {% if dashboard.developing %}
+  <p class="hint">Früher berichtet und im Zeitraum wieder. Zuerst die mit einem Zustandswechsel im Zeitraum - Eskalation, Abschluss, Wiederaufnahme -, dann die von den meisten Quellen berichteten.</p>
+  {{ event_rows(dashboard.developing, "developing") }}
+  {% if dashboard.developing_total > dashboard.developing|length %}<p class="hint" data-testid="developing-more">Angezeigt: {{ dashboard.developing|length }} von {{ dashboard.developing_total }}; alle unter <a href="/events">Ereignisse</a>.</p>{% endif %}
+  {% else %}
+  <p data-testid="no-developing">Kein früher berichtetes Ereignis kam in den letzten {{ dashboard.period_label }} wieder vor.</p>
+  {% endif %}
+</section>
 {% endblock %}

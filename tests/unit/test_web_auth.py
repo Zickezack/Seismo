@@ -5,6 +5,7 @@ The whole web stack runs, without a database: the login never touches it.
 import logging
 import re
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.routing import APIRoute, iter_route_contexts
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
 from app.config import AuthSettings, Settings
+from app.services import dashboard_service
 from app.web.access import SESSION_COOKIE
 from app.web.main import create_app
 from app.web.routes import auth as auth_routes
@@ -27,6 +29,13 @@ BROWSER = {"Accept": "text/html,application/xhtml+xml"}
 
 def make_client(auth=AUTH):
     return TestClient(create_app(SETTINGS, auth), follow_redirects=False)
+
+
+@pytest.fixture(autouse=True)
+def start_page_without_database(monkeypatch):
+    """The start page lists events: here it lists none, without a database."""
+    empty = dashboard_service.Dashboard("24h", datetime(2026, 10, 31, tzinfo=UTC), [], [], 0, 0, 0)
+    monkeypatch.setattr(dashboard_service, "overview", lambda _engine, _period: empty)
 
 
 @pytest.fixture

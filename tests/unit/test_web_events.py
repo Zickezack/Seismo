@@ -18,6 +18,7 @@ from app.services.event_service import (
     StateEffect,
     StateView,
 )
+from app.services.extraction_service import StatementView
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
 
@@ -310,3 +311,27 @@ def test_a_reason_too_long_corrects_nothing_and_says_why(client, monkeypatch, pa
     assert text_of(client.get("/events").text, "flash") == (
         "Nichts zusammengeführt. Die Begründung hat 1001 Zeichen, höchstens 1000 sind möglich."
     )
+
+
+def test_the_chronicle_traces_every_statement_of_every_report_to_its_quote_and_article(client, pages):
+    later = NOW + timedelta(hours=2)
+    pages["detail"] = EventDetail(
+        event(7), [report(1, "new"), report(2, "score", 0.81, moment=later, source_display_name="AP", effect=StateEffect.CONFIRMS)],
+        statements={
+            1: [StatementView("fact", "The quake hit at 9:05.", "Das Beben ereignete sich um 9.05 Uhr", "high", "high")],
+            2: [StatementView("claim", "Officials expect more victims.", "Behörden rechnen mit weiteren Opfern", "medium", None)],
+        },
+    )
+
+    html = client.get("/events/7").text
+
+    assert re.findall(r'data-testid="chronicle-report-(\d+)"', html) == ["1", "2"]
+    assert tag_of(html, "chronicle-article-2") == '<a href="/articles/20#events" data-testid="chronicle-article-2">'
+    first = re.search(r'data-testid="chronicle-statements-1">(.*?)</ul>', html, re.DOTALL).group(1)
+    assert "Tatsache" in first and "The quake hit at 9:05." in first and "Extraktion hoch · Quelle hoch" in first
+    assert '<blockquote class="quote">Das Beben ereignete sich um 9.05 Uhr</blockquote>' in first
+    second = re.search(r'data-testid="chronicle-report-2">(.*?)</li>\s*</ol>', html, re.DOTALL).group(1)
+    assert "AP" in second and "bestätigt" in second and "Quelle unbekannt" in second
+    # Two sources, the one that reported first first.
+    assert [re.search(rf'data-testid="source-{index}">\s*<td class="cell-title">([^<]*)<', html).group(1) for index in (1, 2)] == ["Xinhua", "AP"]
+    assert re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html)[:5] == ["states", "chronicle", "reports", "sources", "entities"]

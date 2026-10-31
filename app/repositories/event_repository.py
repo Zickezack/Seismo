@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import Connection, Row, exists, func, insert, literal, select, text, update
 from sqlalchemy.orm import aliased
 
-from app.db.models import Article, Event, EventCandidate, EventState, Extraction, Job, Source
+from app.db.models import Article, Event, EventCandidate, EventState, Evidence, Extraction, Job, Source, Statement
 
 # Of the two-key advisory lock that serialises the assignments (7301 LLM slots, 7302 duplicate checks).
 EVENT_LOCK_NAMESPACE = 7303
@@ -220,6 +220,60 @@ def _listed():
         .join(reports, reports.c.event_id == Event.id)
         .where(Event.merged_into_id.is_(None))
     )
+
+
+def active_since(connection: Connection, since: datetime) -> Sequence[Row]:
+    """The events, not merged ones, with a report from `since` on: each with its state now, its reports and sources in
+    all and those from `since` on."""
+    source = func.coalesce(Source.name, Article.source_name)
+    recent = _MOMENT >= since
+    reports = (
+        select(
+            EventCandidate.event_id,
+            func.count().label("report_count"),
+            func.count(func.distinct(source)).label("source_count"),
+            func.count().filter(recent).label("recent_reports"),
+            func.count(func.distinct(source)).filter(recent).label("recent_sources"),
+        )
+        .join(Article, Article.id == EventCandidate.article_id)
+        .outerjoin(Source, Source.id == Article.source_id)
+        .where(EventCandidate.event_id.is_not(None))
+        .group_by(EventCandidate.event_id)
+        .subquery()
+    )
+    statement = (
+        select(Event.__table__, _CURRENT_STATE, reports.c.report_count, reports.c.source_count, reports.c.recent_reports,
+               reports.c.recent_sources)
+        .join(reports, reports.c.event_id == Event.id)
+        .where(Event.merged_into_id.is_(None), Event.last_reported_at >= since, reports.c.recent_reports > 0)
+    )
+    return connection.execute(statement).all()
+
+
+def versions_of(connection: Connection, event_ids: Iterable[int]) -> Sequence[Row]:
+    """The versions not withdrawn of these events, each event's the earliest first: what tells a change from a
+    repeat (event_service.mark_repeats)."""
+    statement = (
+        select(EventState.event_id, EventState.status, EventState.valid_from)
+        .where(EventState.event_id.in_(list(event_ids)), _NOT_WITHDRAWN)
+        .order_by(EventState.event_id, EventState.valid_from, EventState.id)
+    )
+    return connection.execute(statement).all()
+
+
+def statements_of(connection: Connection, event_id: int) -> Sequence[Row]:
+    """The statements of the event's reports with their quotes, each report's in order: the Chronik's evidence."""
+    statement = (
+        select(
+            Statement.candidate_id, Statement.kind, Statement.text, Statement.extraction_confidence, Evidence.quote,
+            Evidence.source_quality,
+        )
+        .join(EventCandidate, EventCandidate.id == Statement.candidate_id)
+        .join(Evidence, Evidence.statement_id == Statement.id)
+        .where(EventCandidate.event_id == event_id)
+        .order_by(Statement.candidate_id, Statement.position)
+    )
+    return connection.execute(statement).all()
 
 
 def count(connection: Connection) -> int:

@@ -40,7 +40,7 @@ from app.llm.limiter import LlmCallLimiter
 from app.llm.ollama import OllamaClient
 from app.repositories import event_correction_repository, event_repository
 from app.services import job_service
-from app.services.extraction_service import EVENT_TYPE_LABELS, STATUS_LABELS
+from app.services.extraction_service import EVENT_TYPE_LABELS, STATUS_LABELS, StatementView
 
 logger = logging.getLogger(__name__)
 
@@ -479,16 +479,40 @@ class CorrectionView:
 
 
 @dataclass(frozen=True)
+class SourceSummary:
+    """A source of an event's reports (UI: Quellen)."""
+
+    name: str
+    report_count: int
+    first_reported_at: datetime
+    last_reported_at: datetime
+
+
+@dataclass(frozen=True)
 class EventDetail:
     event: EventListItem
     reports: list[ReportView] = field(default_factory=list)  # the earliest first
     states: list[StateView] = field(default_factory=list)  # the earliest first, the withdrawn ones too
     corrections: list[CorrectionView] = field(default_factory=list)  # the earliest first
     merged_into: EventRef | None = None
+    # Each report's statements with their quotes, by the report's id (UI: Chronik).
+    statements: dict[int, list[StatementView]] = field(default_factory=dict)
 
     @property
     def contradictions(self) -> int:
         return sum(report.effect == StateEffect.CONTRADICTS for report in self.reports)
+
+    @property
+    def sources(self) -> list[SourceSummary]:
+        """The sources of its reports, the one that reported first first."""
+        by_name: dict[str, list[ReportView]] = {}
+        for report in self.reports:
+            by_name.setdefault(report.source_display_name, []).append(report)
+        summaries = [
+            SourceSummary(name, len(reports), min(report.moment for report in reports), max(report.moment for report in reports))
+            for name, reports in by_name.items()
+        ]
+        return sorted(summaries, key=lambda summary: (summary.first_reported_at, summary.name))
 
     def correction(self, correction_id: int | None) -> CorrectionView | None:
         return next((correction for correction in self.corrections if correction.id == correction_id), None)
@@ -515,6 +539,11 @@ def detail(engine: Engine, event_id: int) -> EventDetail | None:
             return None
         states = mark_repeats([_state(each) for each in event_repository.states(connection, event_id)])
         reports = [_report(each, states) for each in event_repository.reports(connection, event_id)]
+        statements: dict[int, list[StatementView]] = {}
+        for each in event_repository.statements_of(connection, event_id):
+            statements.setdefault(each.candidate_id, []).append(
+                StatementView(each.kind, each.text, each.quote, each.extraction_confidence, each.source_quality)
+            )
         corrections = _corrections(connection, event_id)
         merged_into = None
         if row.merged_into_id is not None:
@@ -528,7 +557,7 @@ def detail(engine: Engine, event_id: int) -> EventDetail | None:
         replace(report, moved_by=moved_by.get(report.id), founding=report.id == row.founding_candidate_id) for report in reports
     ]
     counts = {"report_count": len(reports), "source_count": len({report.source_display_name for report in reports})}
-    return EventDetail(_list_item(row, **counts), reports, states, corrections, merged_into)
+    return EventDetail(_list_item(row, **counts), reports, states, corrections, merged_into, statements)
 
 
 def _corrections(connection: Connection, event_id: int) -> list[CorrectionView]:

@@ -5,7 +5,7 @@
 {% set merged = detail.merged_into is not none %}
 {# A split needs a report to leave and one to stay. #}
 {% set splittable = not merged and detail.reports|length > 1 %}
-{% set sections = [("states", "Verlauf"), ("reports", "Berichte"), ("entities", "Entitäten")]
+{% set sections = [("states", "Verlauf"), ("chronicle", "Chronik"), ("reports", "Berichte"), ("sources", "Quellen"), ("entities", "Entitäten")]
   + ([] if merged else [("similar", "Ähnliche Ereignisse")])
   + ([("corrections", "Korrekturen")] if detail.corrections else []) %}
 <h1 data-testid="event-title">{{ event.title }}</h1>
@@ -77,6 +77,35 @@
   </div>
 </details>
 
+{# Every statement of every report with its quote, the earliest report first: each traced back to its source
+   (Dashboard, Recherche und Alerts, story 1). The levels stay apart (datamodel.md, rule 7). #}
+<details class="section" id="chronicle" open data-testid="chronicle-section">
+  <summary><h2>Chronik</h2></summary>
+  <div class="stack">
+    {% if detail.reports %}
+    <ol class="chronicle" data-testid="chronicle">
+      {% for report in detail.reports %}
+      <li class="stack" data-testid="chronicle-report-{{ report.id }}">
+        <p><span class="chronicle-time">{{ report.moment|local_time }}</span> · {{ report.source_display_name }} · <a href="/articles/{{ report.article_id }}#events" data-testid="chronicle-article-{{ report.id }}">{{ report.title }}</a></p>
+        <p class="hint">{{ report.status_label }}{% if report.effect != "none" %} · {{ report.effect_label }}{% endif %}</p>
+        {% set statements = detail.statements.get(report.id, []) %}
+        {% if statements %}
+        <ul class="statements" data-testid="chronicle-statements-{{ report.id }}">
+          {% for statement in statements %}
+          <li><span class="status status-{{ statement.kind }}">{{ statement.kind_label }}</span> {{ statement.text }} <span class="hint">{{ statement.levels_label }}</span>
+            <blockquote class="quote">{{ statement.quote }}</blockquote></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p data-testid="no-chronicle">Keine Berichte.</p>
+    {% endif %}
+  </div>
+</details>
+
 <details class="section" id="reports" open data-testid="reports-section">
   <summary><h2>Berichte ({{ detail.reports|length }})</h2></summary>
   <div class="stack">
@@ -124,6 +153,31 @@
     </form>
     {% else %}
     <p data-testid="no-reports">Keine Berichte.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="section" id="sources" open data-testid="sources-section">
+  <summary><h2>Quellen ({{ detail.sources|length }})</h2></summary>
+  <div class="stack">
+    {% if detail.sources %}
+    <div class="table-container">
+      <table class="table">
+        <thead><tr><th>Quelle</th><th>Berichte</th><th>Zuerst</th><th>Zuletzt</th></tr></thead>
+        <tbody>
+          {% for source in detail.sources %}
+          <tr data-testid="source-{{ loop.index }}">
+            <td class="cell-title">{{ source.name }}</td>
+            <td>{{ source.report_count }}</td>
+            <td>{{ source.first_reported_at|local_time }}</td>
+            <td>{{ source.last_reported_at|local_time }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-sources">Keine Quellen.</p>
     {% endif %}
   </div>
 </details>
