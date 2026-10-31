@@ -1,0 +1,35 @@
+{# The fields of a Wertpapier, to enter one and to change one. #}
+{% macro instrument_fields(values, kinds, choices) %}
+<div class="field">
+  <label for="symbol">Symbol</label>
+  <input id="symbol" name="symbol" required maxlength="30" value="{{ values.symbol or '' }}" placeholder="z. B. NESN" data-testid="field-symbol">
+</div>
+<div class="field">
+  <label for="exchange">Börse</label>
+  <input id="exchange" name="exchange" required maxlength="20" value="{{ values.exchange or '' }}" placeholder="z. B. SW" aria-describedby="exchange-hint" data-testid="field-exchange">
+</div>
+<p class="hint field-wide" id="exchange-hint">Symbol und Börse wie EODHD sie nennt: NESN an SW (SIX Swiss Exchange), AAPL an US, SAP an XETRA; ein Index an INDX, z. B. GSPC für den S&amp;P 500.</p>
+<div class="field field-wide">
+  <label for="name">Name</label>
+  <input id="name" name="name" required maxlength="200" value="{{ values.name or '' }}" data-testid="field-name">
+</div>
+<div class="field">
+  <label for="kind">Art</label>
+  <select id="kind" name="kind" data-testid="field-kind">
+    {% for code, label in kinds.items() %}<option value="{{ code }}"{% if values.kind == code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+</div>
+<div class="field">
+  <label for="currency">Währung</label>
+  <input id="currency" name="currency" maxlength="3" value="{{ values.currency or '' }}" placeholder="z. B. CHF; leer für einen Index" data-testid="field-currency">
+</div>
+<div class="field">
+  <label for="isin">ISIN</label>
+  <input id="isin" name="isin" maxlength="12" value="{{ values.isin or '' }}" placeholder="optional" data-testid="field-isin">
+</div>
+<div class="field">
+  <label for="entity">Entität</label>
+  <input id="entity" name="entity" list="entity-choices" value="{% if values.entity_id %}{{ values.entity_name }} (Nr. {{ values.entity_id }}){% endif %}" placeholder="leer: nach ISIN" data-testid="field-entity">
+  <datalist id="entity-choices">{% for choice in choices %}<option value="{{ choice.name }} (Nr. {{ choice.id }})"></option>{% endfor %}</datalist>
+</div>
+{% endmacro %}

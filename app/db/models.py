@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    Numeric,
     SmallInteger,
     String,
     Text,
@@ -229,6 +230,18 @@ class ReprocessingStatus(StrEnum):
     RUNNING = "running"
     DONE = "done"  # every run it selected was queued once
     CANCELLED = "cancelled"  # by the admin; jobs queued before still run
+
+
+class InstrumentKind(StrEnum):
+    STOCK = "stock"
+    ETF = "etf"
+    INDEX = "index"  # in points, without a currency
+
+
+class PriceResolution(StrEnum):
+    """What a Kurspunkt covers: one price at its time, or an interval (story 2)."""
+
+    QUOTE = "quote"  # the last price at its time, with the day's open, high, low and volume so far
 
 
 class TdmrepStatus(StrEnum):
@@ -874,6 +887,62 @@ class RelationshipRecord(Base):
     __table_args__ = (
         CheckConstraint(origin.in_([s.value for s in RecordOrigin]), name="origin"),
         CheckConstraint(review.in_([s.value for s in ReviewStatus]), name="review"),
+    )
+
+
+class Instrument(Base):
+    """A tradable security (UI term: Wertpapier): a stock, an ETF or an index, by its symbol at an exchange of its price
+    source (price_service)."""
+
+    __tablename__ = "instrument"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    # As the price source names it: the symbol and the source's exchange code (EODHD: "NESN" at "SW").
+    symbol: Mapped[str] = mapped_column(String(30))
+    exchange: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(10))
+    currency: Mapped[str | None] = mapped_column(String(3))  # ISO 4217; empty for an index, in points
+    isin: Mapped[str | None] = mapped_column(String(12))
+    # The Entität it belongs to: found by its ISIN among the name forms, or chosen.
+    entity_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity.id", ondelete="SET NULL"), index=True)
+    is_active: Mapped[bool] = mapped_column(server_default=true())
+    # The fetch's outcome for it: shown to the admin, never logged (datamodel.md, rule 13).
+    last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(kind.in_([s.value for s in InstrumentKind]), name="kind"),
+        UniqueConstraint(symbol, exchange),
+    )
+
+
+class PricePoint(Base):
+    """One price of a Wertpapier (UI term: Kurspunkt), as received - unadjusted, in UTC, with the time it became
+    available (datamodel.md, rule 14)."""
+
+    __tablename__ = "price_point"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instrument.id", ondelete="CASCADE"))
+    resolution: Mapped[str] = mapped_column(String(10))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))  # the price's own time, as the source states it
+    open: Mapped[float | None] = mapped_column(Numeric(20, 6))
+    high: Mapped[float | None] = mapped_column(Numeric(20, 6))
+    low: Mapped[float | None] = mapped_column(Numeric(20, 6))
+    close: Mapped[float] = mapped_column(Numeric(20, 6))  # of a quote: its price
+    volume: Mapped[int | None] = mapped_column(BigInteger)
+    previous_close: Mapped[float | None] = mapped_column(Numeric(20, 6))  # of a quote: the last trading day's close
+    source: Mapped[str] = mapped_column(String(20))
+    delayed: Mapped[bool]  # the source delays it (EODHD: 15 to 20 minutes); else real time
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(resolution.in_([s.value for s in PriceResolution]), name="resolution"),
+        # A price asked for again unchanged - the market closed - is stored once.
+        UniqueConstraint(instrument_id, resolution, at),
     )
 
 

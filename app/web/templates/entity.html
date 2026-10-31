@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% from "_price.html" import price %}
 {% block title %}Entität{% endblock %}
 {% block content %}
 {% set entity = detail.entity %}
 {% set merged = detail.merged_into is not none %}
 {% set sections = [("aliases", "Namensformen"), ("mentions", "Berichte")]
-  + ([] if merged else [("relationships", "Beziehungen"), ("similar", "Ähnliche Entitäten")]) %}
+  + ([] if merged else [("relationships", "Beziehungen"), ("instruments", "Wertpapiere"), ("similar", "Ähnliche Entitäten")]) %}
 <h1 data-testid="entity-title">{{ entity.name }}</h1>
 
 {% if merged %}
@@ -201,6 +202,31 @@
         <button class="button" type="submit" data-testid="add-relationship">Beziehung erfassen</button>
       </div>
     </form>
+  </div>
+</details>
+
+{# Its Wertpapiere with their latest price (Live-Kurse und Kursdatenspeicher, story 1). #}
+<details class="section" id="instruments" open data-testid="instruments-section">
+  <summary><h2>Wertpapiere ({{ instruments|length }})</h2></summary>
+  <div class="stack">
+    {% if instruments %}
+    <p class="hint">Seine aktiven Wertpapiere mit dem letzten Kurs; verknüpft auf der Seite des Wertpapiers, oder über die ISIN.</p>
+    <div class="table-container">
+      <table class="table">
+        <thead><tr><th>Wertpapier</th><th>Kurs</th></tr></thead>
+        <tbody>
+          {% for instrument in instruments %}
+          <tr data-testid="instrument-{{ instrument.id }}">
+            <td class="cell-title"><a href="/instruments/{{ instrument.id }}">{{ instrument.name }}</a><span class="hint">{{ instrument.code }}</span></td>
+            <td class="cell-wrap">{{ price(instrument.price, "instrument-price-" ~ instrument.id) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-instruments">Kein Wertpapier verknüpft. Ein Wertpapier kommt über seine ISIN oder die Angabe auf seiner Seite zu einer Entität.</p>
+    {% endif %}
   </div>
 </details>
 

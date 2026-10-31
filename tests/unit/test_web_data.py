@@ -26,6 +26,7 @@ STORAGE = Storage(
     database_bytes=337_641_472, tables=[TableSize("raw_text", 297_795_584, 0.88), TableSize("article", 16_777_216, 0.05)],
     article_count=6500, raw_text_count=4826, raw_text_bytes=268_435_456, backup_count=2, backup_bytes=104_857_600,
     backup_free_bytes=None, by_source=[SourceRawTexts(3, "GDELT – Energie <1>", 2000, 157_286_400), SourceRawTexts(None, "Alt", 4, 4096)],
+    price_count=1440, price_bytes=262_144,
 )
 
 
@@ -72,6 +73,7 @@ def test_the_page_shows_the_storage_now_its_tables_and_the_raw_texts_per_source(
     assert text_of(html, "storage-database") == "322 MB"
     assert re.search(r'data-testid="storage-raw-texts">256 MB <span class="hint">4826 von 6500 Artikeln', html)
     assert text_of(html, "storage-free") == "–"
+    assert re.search(r'data-testid="storage-prices">256 kB <span class="hint">1440 Kurse', html)
     assert re.findall(r'data-testid="table-(\w+)"', html) == ["raw_text", "article"]
     row = re.search(r'data-testid="raw-texts-1">(.*?)</tr>', html, re.DOTALL).group(1)
     assert '<a href="/sources/3">GDELT – Energie &lt;1&gt;</a>' in row and "150 MB" in row and "77 kB" in row

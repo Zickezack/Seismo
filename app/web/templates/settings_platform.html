@@ -173,6 +173,16 @@
       <button class="button" type="submit" data-testid="import-entities"{% if entities_seed.imported == entities_seed.total %} disabled title="Alle Einträge der Starterliste sind schon importiert"{% endif %}>Starterliste importieren</button>
     </div>
   </form>
+  <form class="form-grid" method="post" action="/settings/platform/seed/instruments" data-testid="seed-instruments-form">
+    <div class="field field-wide">
+      <span class="field-label">Starterliste Wertpapiere</span>
+      <p class="hint" data-testid="seed-instruments-status">{{ instruments_seed.imported }} von {{ instruments_seed.total }} Wertpapieren importiert.</p>
+      <p class="hint">Grosse Indizes (S&amp;P 500, Dow Jones, Nasdaq 100, SMI, DAX, Euro Stoxx 50, FTSE 100, CAC 40, Nikkei 225) und breite ETFs (S&amp;P 500, Nasdaq 100, US-Gesamtmarkt, SMI, Schweiz, Gold, Öl), aktiv angelegt; ihre Kurse ruft der Worker ab, sobald EODHD_API_KEY gesetzt ist. Jeder Eintrag kommt nur einmal.</p>
+    </div>
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="import-instruments"{% if instruments_seed.imported == instruments_seed.total %} disabled title="Alle Wertpapiere der Starterliste sind schon importiert"{% endif %}>Starterliste importieren</button>
+    </div>
+  </form>
   <form class="form-grid" method="post" action="/settings/platform/seed/source-regions" data-testid="seed-regions-form">
     <div class="field field-wide">
       <span class="field-label">Regionen aus dem Katalog</span>

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_price.html" import price %}
+{% from "_instrument_fields.html" import instrument_fields %}
+{% block title %}Wertpapier{% endblock %}
+{% block content %}
+{% set instrument = detail.instrument %}
+<h1 data-testid="instrument-title">{{ instrument.name }}</h1>
+
+<section class="card stack">
+  <div class="table-container">
+    <table class="table table-details" data-testid="instrument-meta">
+      <tbody>
+        <tr><th scope="row">Kurs</th><td>{{ price(instrument.price, "meta-price") }}</td></tr>
+        <tr><th scope="row">Symbol</th><td data-testid="meta-code">{{ instrument.code }}</td></tr>
+        <tr><th scope="row">Börse</th><td data-testid="meta-exchange">{{ instrument.exchange_label }}</td></tr>
+        <tr><th scope="row">Art</th><td>{{ instrument.kind_label }}</td></tr>
+        <tr><th scope="row">Währung</th><td data-testid="meta-currency">{{ instrument.currency or "Punkte (Index)" }}</td></tr>
+        <tr><th scope="row">ISIN</th><td>{{ instrument.isin or "–" }}</td></tr>
+        <tr><th scope="row">Entität</th><td data-testid="meta-entity">{% if instrument.entity_id %}<a href="/entities/{{ instrument.entity_id }}">{{ instrument.entity_name }}</a>{% else %}–{% endif %}</td></tr>
+        <tr><th scope="row">Abruf</th><td data-testid="meta-status">{% if not instrument.is_active %}Inaktiv{% elif instrument.failing %}<span class="status status-failing">Fehler</span> <span class="hint">{{ instrument.last_error }}, {{ instrument.last_error_at|local_time }}</span>{% else %}Aktiv{% if instrument.last_fetched_at %} <span class="hint">zuletzt {{ instrument.last_fetched_at|local_time }}</span>{% endif %}{% endif %}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<details class="card section" id="prices" open data-testid="section-prices">
+  <summary><h2>Kurse ({{ detail.price_count }})</h2></summary>
+  <div class="stack">
+    {% if detail.prices %}
+    <p class="hint">Die letzten {{ detail.prices|length }}, jeder wie die Quelle ihn sandte, unbereinigt; ein Kurs mit derselben Zeit kommt nur einmal.</p>
+    <div class="table-container">
+      <table class="table" data-testid="price-table">
+        <thead><tr><th>Zeit</th><th>Kurs</th><th>Erhalten</th></tr></thead>
+        <tbody>
+          {% for point in detail.prices %}
+          <tr data-testid="price-{{ loop.index }}">
+            <td>{{ point.at|local_time }}</td>
+            <td class="cell-wrap">{{ price(point, "price-value-" ~ loop.index) }}</td>
+            <td>{{ point.received_at|local_time }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-prices">Noch kein Kurs.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="card section" id="settings" open data-testid="section-settings">
+  <summary><h2>Angaben</h2></summary>
+  <form class="form-grid" method="post" action="/instruments/{{ instrument.id }}" data-testid="instrument-form">
+    {{ instrument_fields(instrument, kinds, choices) }}
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="save-instrument">Speichern</button>
+    </div>
+  </form>
+</details>
+{% endblock %}

@@ -75,6 +75,7 @@ def services(monkeypatch):
     monkeypatch.setattr(platform_settings_service, "save", save)
     monkeypatch.setattr(seed_service, "sources_status", lambda _engine: SeedStatus(total=17, imported=0))
     monkeypatch.setattr(seed_service, "entities_status", lambda _engine: SeedStatus(total=52, imported=0))
+    monkeypatch.setattr(seed_service, "instruments_status", lambda _engine: SeedStatus(total=16, imported=0))
     # The settings page counts the sources without a region.
     monkeypatch.setattr(source_service, "list_sources", lambda _engine, region=None, sort=None: [])
     return calls

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "_price.html" import price %}
+{% from "_instrument_fields.html" import instrument_fields %}
+{% block title %}Wertpapiere{% endblock %}
+{% block content %}
+<h1>Wertpapiere</h1>
+{% if not overview.configured %}
+<p class="message message-warning" role="status" data-testid="key-missing">Kein Schlüssel der Kursquelle: Ohne <code>{{ overview.key_variable }}</code> in der Umgebung von Worker und api ruft der Worker keine Kurse ab (README).</p>
+{% endif %}
+
+<section class="card stack">
+  <p class="hint">Der Worker fragt jede Minute die letzten Kurse aller aktiven Wertpapiere bei EODHD ab, 15 bis 20 Minuten verzögert, und speichert jeden Kurs, wie er kommt. Jeder Abruf zählt je Wertpapier einen Aufruf des Tageskontingents.</p>
+</section>
+
+<form class="stack" method="post" action="/instruments/delete" data-bulk-form data-testid="instrument-list">
+  <div class="toolbar">
+    <div class="actions">
+      <button class="button button-secondary" type="submit" formaction="/instruments/activate" data-bulk-action data-testid="activate" disabled>Aktivieren</button>
+      <button class="button button-secondary" type="submit" formaction="/instruments/deactivate" data-bulk-action data-testid="deactivate" disabled>Deaktivieren</button>
+      <button class="button button-danger" type="submit" formaction="/instruments/delete" data-bulk-action data-confirm="Wertpapier|Wertpapiere" data-testid="delete" disabled>Löschen</button>
+    </div>
+    <a class="button" href="#new" data-testid="new-instrument">Wertpapier hinzufügen</a>
+  </div>
+  {% if overview.instruments %}
+  <div class="table-container">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Wertpapiere auswählen" data-testid="select-all"></th>
+          <th>Wertpapier</th>
+          <th>Kurs</th>
+          <th>Art</th>
+          <th>Entität</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for instrument in overview.instruments %}
+        <tr data-testid="instrument-{{ instrument.id }}">
+          <td class="cell-select"><input type="checkbox" name="instrument_id" value="{{ instrument.id }}" data-select-row data-name="{{ instrument.name }}" aria-label="{{ instrument.name }} auswählen" data-testid="select-{{ instrument.id }}"></td>
+          <td class="cell-title"><a href="/instruments/{{ instrument.id }}" data-testid="instrument-name-{{ instrument.id }}">{{ instrument.name }}</a><span class="hint">{{ instrument.code }} · {{ instrument.exchange_label }}</span></td>
+          <td class="cell-wrap">{{ price(instrument.price, "instrument-price-" ~ instrument.id) }}</td>
+          <td>{{ instrument.kind_label }}</td>
+          <td class="cell-wrap">{% if instrument.entity_id %}<a href="/entities/{{ instrument.entity_id }}">{{ instrument.entity_name }}</a>{% else %}–{% endif %}</td>
+          <td class="cell-wrap" data-testid="instrument-status-{{ instrument.id }}">{% if not instrument.is_active %}<span class="status status-inactive">Inaktiv</span>{% elif instrument.failing %}<span class="status status-failing">Fehler</span><span class="hint">{{ instrument.last_error }}</span>{% else %}<span class="status status-active">Aktiv</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p data-testid="no-instruments">Noch keine Wertpapiere. Hier eines erfassen, oder die Starterliste importieren (Plattform-Einstellungen, Starterdaten).</p>
+  {% endif %}
+</form>
+
+<details class="card section" id="new" open data-testid="section-new">
+  <summary><h2>Wertpapier hinzufügen</h2></summary>
+  <form class="form-grid" method="post" action="/instruments" data-testid="instrument-form">
+    {{ instrument_fields({"kind": "stock"}, kinds, choices) }}
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="create-instrument">Hinzufügen</button>
+    </div>
+  </form>
+</details>
+{% endblock %}

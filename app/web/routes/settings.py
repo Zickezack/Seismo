@@ -36,6 +36,7 @@ def platform_settings(request: Request) -> Response:
         "fields": platform_settings_service.FORM_FIELDS,
         "sources_seed": seed_service.sources_status(engine),
         "entities_seed": seed_service.entities_status(engine),
+        "instruments_seed": seed_service.instruments_status(engine),
         "sources_without_region": len(source_service.list_sources(engine, region=source_service.NO_REGION)),
         "llm": extraction_service.llm_status(*request.app.state.llm),
         "backups": backup_service.stored_backups(request.app.state.backup_dir, engine.url.database),
@@ -167,6 +168,18 @@ def import_entity_catalogue(request: Request) -> Response:
     text = f"Starterliste Branchen und Rohstoffe: {result.imported} importiert, {result.skipped} schon früher importiert."
     if result.name_taken:
         flash(request, f"{text} Nicht importiert, Schlüssel schon vergeben: {name_list(result.name_taken)}.", "error")
+    else:
+        flash(request, text)
+    return RedirectResponse("/settings/platform#starterdaten", status_code=303)
+
+
+@router.post("/seed/instruments")
+def import_instrument_catalogue(request: Request) -> Response:
+    """Wertpapiere of the starter list come in only through this admin action as well."""
+    result = seed_service.import_instruments(request.app.state.engine)
+    text = f"Starterliste Wertpapiere: {result.imported} importiert, {result.skipped} schon früher importiert."
+    if result.name_taken:
+        flash(request, f"{text} Nicht importiert, schon erfasst: {name_list(result.name_taken)}.", "error")
     else:
         flash(request, text)
     return RedirectResponse("/settings/platform#starterdaten", status_code=303)

@@ -1,0 +1,5 @@
+{# A price with everything requirements.md asks it to show (Live-Kurse und Kursdatenspeicher, criterion 1): its time,
+   source, exchange, currency and whether it is real time - the same wherever it appears. #}
+{% macro price(p, testid) %}
+{% if p %}<span class="price" data-testid="{{ testid }}"><strong>{{ p.price_label }}</strong>{% if p.change_label %} <span class="price-change">{{ p.change_label }}</span>{% endif %}<span class="hint">{{ p.at|local_time }} · {{ p.exchange_label }} · {{ p.source_label }}</span></span>{% else %}<span class="hint" data-testid="{{ testid }}">Noch kein Kurs</span>{% endif %}
+{% endmacro %}

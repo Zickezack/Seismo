@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from app.services import entity_service, event_correction_service, event_service
+from app.services import entity_service, event_correction_service, event_service, instrument_service
 from app.services.bulk import BulkResult
 from app.services.event_correction_service import InvalidReason, SimilarEvent, SplitResult
 from app.services.event_service import (
@@ -50,6 +50,7 @@ def pages(monkeypatch):
     monkeypatch.setattr(event_service, "detail", lambda _engine, event_id: calls.get("detail"))
     monkeypatch.setattr(event_correction_service, "similar_events", lambda _engine, event_id: calls.get("similar", []))
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: calls.get("entities", []))
+    monkeypatch.setattr(instrument_service, "of_entities", lambda _engine, entity_ids: calls.get("instruments", []))
     return calls
 
 

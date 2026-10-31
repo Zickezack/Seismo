@@ -43,6 +43,9 @@ NORMALIZE_JOB_KIND = "normalize_article"
 EXTRACT_EVENTS_JOB_KIND = "extract_events"
 ASSIGN_EVENT_JOB_KIND = "assign_event"
 RECOGNISE_ENTITIES_JOB_KIND = "recognise_entities"
+# The latest prices of a batch of Wertpapiere (price_service); no retry: the next fetch comes a minute later anyway.
+FETCH_PRICES_JOB_KIND = "fetch_prices"
+FETCH_PRICES_MAX_ATTEMPTS = 1
 # A reprocessing's (reprocessing_service): behind live work, labelled without "(Backfill)".
 REEXTRACT_EVENTS_JOB_KIND = "reextract_events"
 RERECOGNISE_ENTITIES_JOB_KIND = "rerecognise_entities"
@@ -61,6 +64,7 @@ KIND_LABELS = {
     EXTRACT_EVENTS_JOB_KIND: "Ereignisse extrahieren",
     ASSIGN_EVENT_JOB_KIND: "Ereignis zuordnen",
     RECOGNISE_ENTITIES_JOB_KIND: "Entitäten erkennen",
+    FETCH_PRICES_JOB_KIND: "Kurse abrufen",
     REEXTRACT_EVENTS_JOB_KIND: "Ereignisse neu extrahieren",
     RERECOGNISE_ENTITIES_JOB_KIND: "Entitäten neu erkennen",
 }

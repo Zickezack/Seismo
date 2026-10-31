@@ -12,7 +12,8 @@ for every extraction without one (app/services/entity_service.py) and the next j
 within its own budget (app/services/reprocessing_service.py). Once a minute, too, the reports of replaced readings
 leave their events once the new ones have theirs; once an hour it measures the storage, if not yet that day
 (app/services/storage_service.py), and deletes the raw texts whose retention period is over
-(app/services/raw_text_service.py).
+(app/services/raw_text_service.py). Once a minute, too, it queues the fetch of the latest prices of the active
+Wertpapiere, while the price source's key is set (app/services/price_service.py).
 """
 import logging
 import os
@@ -43,6 +44,7 @@ from app.services import (
     extraction_service,
     ingestion_service,
     normalization_service,
+    price_service,
     raw_text_service,
     reprocessing_service,
     storage_service,
@@ -72,6 +74,8 @@ RETIRE_CHECK_INTERVAL_SECONDS = 60
 STORAGE_CHECK_INTERVAL_SECONDS = 60 * 60
 # Retention periods are whole days; a raw text stays at most this much longer.
 RAW_TEXT_CHECK_INTERVAL_SECONDS = 60 * 60
+# The latest prices: as near to the source's own delay as a minute allows (the admin's decision of 2026-10-31).
+PRICE_CHECK_INTERVAL_SECONDS = 60
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:
@@ -104,7 +108,7 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
         logger.warning("No Ollama configured (OLLAMA_BASE_URL): no event extraction is queued")
     was_ready = llm_served = None
     next_purge = next_backup_check = next_fetch_check = next_normalize_check = next_llm_check = time.monotonic()
-    next_retire_check = next_storage_check = next_raw_text_check = time.monotonic()
+    next_retire_check = next_storage_check = next_raw_text_check = next_price_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -136,6 +140,9 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and time.monotonic() >= next_raw_text_check:
                 next_raw_text_check = time.monotonic() + RAW_TEXT_CHECK_INTERVAL_SECONDS
                 _delete_due_raw_texts(engine)
+            if report.ready and time.monotonic() >= next_price_check:
+                next_price_check = time.monotonic() + PRICE_CHECK_INTERVAL_SECONDS
+                _enqueue_due_price_fetches(engine)
             # After a job, take the next one at once; wait only while the queue is empty.
             claimable = _claimable(handlers, llm_served)
             if report.ready and _run_next_job(engine, claimable, owner, renew_interval, heartbeat_file):
@@ -230,6 +237,17 @@ def _measure_storage(engine: Engine, backup_dir: Path) -> None:
     except SQLAlchemyError as error:
         # Checked again at the next interval; the day's measurement comes later.
         logger.warning("Storage measurement failed: %s", getattr(error, "orig", None) or error)
+
+
+def _enqueue_due_price_fetches(engine: Engine) -> None:
+    try:
+        job_ids = price_service.enqueue_due(engine)
+    except SQLAlchemyError as error:
+        # Checked again at the next interval; a minute's prices come later.
+        logger.warning("Price fetch check failed: %s", getattr(error, "orig", None) or error)
+        return
+    if job_ids:
+        logger.debug("Price fetch jobs queued", extra={"jobs": len(job_ids)})
 
 
 def _delete_due_raw_texts(engine: Engine) -> None:

@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% from "_price.html" import price %}
 {% block title %}Ereignis{% endblock %}
 {% block content %}
 {% set event = detail.event %}
 {% set merged = detail.merged_into is not none %}
 {# A split needs a report to leave and one to stay. #}
 {% set splittable = not merged and detail.reports|length > 1 %}
-{% set sections = [("states", "Verlauf"), ("chronicle", "Chronik"), ("reports", "Berichte"), ("sources", "Quellen"), ("entities", "Entitäten")]
+{% set sections = [("states", "Verlauf"), ("chronicle", "Chronik"), ("reports", "Berichte"), ("sources", "Quellen"), ("entities", "Entitäten"), ("instruments", "Kurse")]
   + ([] if merged else [("similar", "Ähnliche Ereignisse")])
   + ([("corrections", "Korrekturen")] if detail.corrections else []) %}
 <h1 data-testid="event-title">{{ event.title }}</h1>
@@ -212,6 +213,31 @@
     <p class="hint">Unsicher: mindestens ein Bericht nennt die Entität mit einer Namensform, die das LLM nur nach einem ähnlichen Namen zugeordnet hat und die noch niemand bestätigt hat.</p>
     {% else %}
     <p data-testid="no-entities">{% if merged %}Keine: die Berichte stehen beim Ereignis, in das es zusammengeführt wurde.{% else %}Noch keine erkannt.{% endif %}</p>
+    {% endif %}
+  </div>
+</details>
+
+{# Its Wertpapiere with their latest price (Live-Kurse und Kursdatenspeicher, story 1). #}
+<details class="section" id="instruments" open data-testid="instruments-section">
+  <summary><h2>Kurse ({{ instruments|length }})</h2></summary>
+  <div class="stack">
+    {% if instruments %}
+    <p class="hint">Die aktiven Wertpapiere der Entitäten seiner Berichte mit dem letzten Kurs.</p>
+    <div class="table-container">
+      <table class="table">
+        <thead><tr><th>Wertpapier</th><th>Kurs</th></tr></thead>
+        <tbody>
+          {% for instrument in instruments %}
+          <tr data-testid="instrument-{{ instrument.id }}">
+            <td class="cell-title"><a href="/instruments/{{ instrument.id }}">{{ instrument.name }}</a><span class="hint">{{ instrument.code }}{% if instrument.entity_id %} · <a href="/entities/{{ instrument.entity_id }}">{{ instrument.entity_name }}</a>{% endif %}</span></td>
+            <td class="cell-wrap">{{ price(instrument.price, "instrument-price-" ~ instrument.id) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-instruments">Keine Entität seiner Berichte hat ein Wertpapier.</p>
     {% endif %}
   </div>
 </details>

@@ -59,6 +59,14 @@ never into the log. After setting it, recreate the worker. An EIA Quelle's URL i
 browser (https://www.eia.gov/opendata/browser) shows for a data set, e.g.
 `https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value`.
 
+`EODHD_API_KEY` (optional) is the key of EODHD's price API (https://eodhd.com): the latest prices of the Wertpapiere,
+delayed 15 to 20 minutes, under EODHD's personal licence. Live prices are in every plan; the free one allows 20 calls a
+day, too few - the worker asks once a minute for every active Wertpapier, each counting as one call (16 Wertpapiere of
+the starter list: about 23,000 calls a day; "Historian" and "Active trader" allow 100,000). It is a secret: worker and
+api get it (the api only to say on the Wertpapiere page whether prices are fetched), never a page or the log. After
+setting it, recreate both (`docker compose up -d api worker`). The starter list of indices and ETFs comes with
+Plattform-Einstellungen, Starterdaten.
+
 The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
 show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):
 

@@ -554,6 +554,51 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 - Rules: the worker measures once a UTC day, checking hourly (`storage_service.measure_if_due`); never changed. The Datenbestand page (`/data`) shows the state now - database, largest tables, raw texts and per Quelle, backups, free space - measured as it loads, the latest 60 days, and the growth per day over 7 and 30 days, from the measurement that far back, else the earliest (`requirements.md`, Verdichtung und Daten-Lifecycle, criterion 4).
 - Privacy: none
 
+### Wertpapier (`instrument`)
+- Store: SQL table `instrument`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | symbol | varchar(30) | yes | | As the price source names it, upper case, e.g. `NESN`, `GSPC`. Unique with `exchange`. UI: Symbol (with the exchange: `NESN.SW`). |
+  | exchange | varchar(20) | yes | | The price source's exchange code: `SW` (SIX Swiss Exchange), `US`, `XETRA`, ..., `INDX` for an index. UI: Börse, in words where known. |
+  | name | varchar(200) | yes | | Sorted with the ICU collation `de-x-icu`. UI: Name. |
+  | kind | varchar(10) | yes | | `stock`, `etf`, `index`; check constraint. UI: Aktie, ETF, Index. |
+  | currency | varchar(3) | no | | ISO 4217 of its prices; required for a stock or an ETF, empty for an index, which counts in points. UI: Währung, "Punkte". |
+  | isin | varchar(12) | no | | Checked by its check digit. Links it to the Entität with that ISIN among its identifiers. |
+  | entity_id | bigint | no | | The Entität it belongs to: as the form names it ("Name (Nr. 12)"), else the one with its ISIN. Foreign key to `entity`, `ON DELETE SET NULL`. Index. UI: Entität. |
+  | is_active | boolean | yes | true | Only active ones are fetched. UI: Aktiv / Inaktiv. |
+  | last_fetched_at | timestamptz | no | | Its last price received. |
+  | last_error, last_error_at | text, timestamptz | no | | The latest fetch's error for it, at most 2000 characters, e.g. "Kein Kurs von EODHD ..." or "HTTP 401"; kept after a success. Shown to the admin, never logged. UI: Fehler, while newer than the last success. |
+  | created_at | timestamptz | yes | now() | |
+
+- Relationships: has Kurspunkte; may belong to an Entität.
+- Rules: entered by the admin on the Wertpapiere page (`/instruments`) or imported with the starter list of indices and broad ETFs (`app/seeds/instruments.json`, Seed-Protokoll `instruments`). The list shows each with its latest price; activates, deactivates and deletes the selected ones, all or nothing - one with Kurspunkte is never deleted, only deactivated (rule 14). Its page shows its latest 100 Kurspunkte and takes changes. An entity's page lists its active Wertpapiere with their latest price, an event's page those of the entities its reports name (UI: Kurse). Not "verfolgt" yet: that flag comes with story 2.
+- Privacy: none
+
+### Kurspunkt (`price_point`)
+- Store: SQL table `price_point`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | instrument_id | bigint | yes | | Foreign key to `instrument`, `ON DELETE CASCADE` (a Wertpapier with Kurspunkte is not deleted). Unique with `resolution` and `at`. |
+  | resolution | varchar(10) | yes | | `quote`: the last price at its time (story 2 adds intervals); check constraint. |
+  | at | timestamptz | yes | | The price's own time as the source states it, in UTC. UI: Zeit. |
+  | open, high, low | numeric(20,6) | no | | Of a quote: the day's so far. |
+  | close | numeric(20,6) | yes | | Of a quote: the price. UI: Kurs, with the currency and the change against `previous_close`. |
+  | volume | bigint | no | | Of a quote: the day's so far. |
+  | previous_close | numeric(20,6) | no | | Of a quote: the last trading day's close. |
+  | source | varchar(20) | yes | | `eodhd`. UI: EODHD. |
+  | delayed | boolean | yes | | The source delays it (EODHD: 15 to 20 minutes); else real time. UI: "verzögert, 15 bis 20 Minuten" / "Echtzeit". |
+  | received_at | timestamptz | yes | now() | When Seismo received it: when it became available (rule 11). UI: Erhalten. |
+
+- Relationships: belongs to one Wertpapier.
+- Rules: as received, unadjusted (rule 14), each price once - one sent again with the same time, the market closed, is not stored again. The worker queues the job "Kurse abrufen" once a minute for the active Wertpapiere (the admin's decision of 2026-10-31), a job per 20, one request each, only while `EODHD_API_KEY` is set (`price_service`); no retry - the next comes a minute later. Every price shown names its time, exchange, currency, source and delay (`templates/_price.html`; requirements.md, Live-Kurse und Kursdatenspeicher, criterion 1). The Datenbestand page shows what they take.
+- Privacy: none
+
 ### Domain (`fetch_host`)
 - Store: SQL table `fetch_host`, one row per host
 - Fields:
@@ -581,7 +626,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
   | Field | Type | Required | Default | Notes |
   |-------|------|----------|---------|-------|
-  | seed_source | varchar(100) | yes | | Seed source: `sources` for `app/seeds/sources.json`, `entities` for `app/seeds/entities.json` (the starter list of sectors and commodities). Primary key with `item_key`. |
+  | seed_source | varchar(100) | yes | | Seed source: `sources` for `app/seeds/sources.json`, `entities` for `app/seeds/entities.json` (the starter list of sectors and commodities), `instruments` for `app/seeds/instruments.json` (the starter list of Wertpapiere). Primary key with `item_key`. |
   | item_key | varchar(200) | yes | | The item's stable key in its seed file, independent of its display name. |
   | imported_at | timestamptz | yes | now() | |
 

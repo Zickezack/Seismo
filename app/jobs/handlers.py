@@ -21,6 +21,7 @@ from app.services import (
     extraction_service,
     ingestion_service,
     normalization_service,
+    price_service,
 )
 from app.services.job_service import (
     ASSIGN_EVENT_JOB_KIND,
@@ -28,6 +29,7 @@ from app.services.job_service import (
     BACKUP_JOB_KIND,
     EXTRACT_EVENTS_JOB_KIND,
     FETCH_ARTICLE_JOB_KIND,
+    FETCH_PRICES_JOB_KIND,
     FETCH_SOURCE_JOB_KIND,
     NORMALIZE_JOB_KIND,
     RECOGNISE_ENTITIES_JOB_KIND,
@@ -60,6 +62,7 @@ def build_handlers(
         FETCH_SOURCE_JOB_KIND: lambda job: run_fetch_job(engine, job, fetch_contact),
         FETCH_ARTICLE_JOB_KIND: lambda job: run_full_text_job(engine, job, fetch_contact),
         BACKFILL_JOB_KIND: lambda job: run_backfill_job(engine, job, fetch_contact),
+        FETCH_PRICES_JOB_KIND: lambda job: run_price_job(engine, job, fetch_contact),
         # Reads only the raw text: no request, no slot.
         NORMALIZE_JOB_KIND: lambda job: normalization_service.normalize(engine, job.payload["article_id"]),
         EXTRACT_EVENTS_JOB_KIND: lambda job: run_extraction_job(engine, job, llm, limiter, stop_event),
@@ -151,6 +154,16 @@ def run_backfill_job(engine: Engine, job: ClaimedJob, fetch_contact: str) -> Eff
     final_attempt = job.attempts >= job.max_attempts
     try:
         return backfill_service.fetch_page(engine, job.payload["backfill_id"], fetch_contact, final_attempt)
+    except HostBusy as busy:
+        raise _deferral(busy, job) from None
+
+
+def run_price_job(engine: Engine, job: ClaimedJob, fetch_contact: str) -> Effect | None:
+    """The latest prices of a batch of Wertpapiere; a source that answers with nothing usable fails at once."""
+    try:
+        return price_service.fetch(engine, job.payload["instrument_ids"], fetch_contact, _reserved_slot(job))
+    except SourceRejected as error:
+        raise PermanentJobError(str(error)) from None
     except HostBusy as busy:
         raise _deferral(busy, job) from None
 

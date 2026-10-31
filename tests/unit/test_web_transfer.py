@@ -36,6 +36,7 @@ def client(backup_dir, monkeypatch):
     monkeypatch.setattr(platform_settings_service, "current", lambda _engine: PlatformSettings())
     monkeypatch.setattr(seed_service, "sources_status", lambda _engine: SeedStatus(total=1, imported=0))
     monkeypatch.setattr(seed_service, "entities_status", lambda _engine: SeedStatus(total=52, imported=0))
+    monkeypatch.setattr(seed_service, "instruments_status", lambda _engine: SeedStatus(total=16, imported=0))
     monkeypatch.setattr(source_service, "list_sources", lambda _engine, region=None, sort=None: [])
     monkeypatch.setattr(extraction_service, "llm_status", lambda *_llm: None)
     with TestClient(create_app(replace(SETTINGS, backup_dir=backup_dir), AUTH), follow_redirects=False) as client:

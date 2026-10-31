@@ -1,0 +1,18 @@
+[
+  {"key": "sp500", "symbol": "GSPC", "exchange": "INDX", "name": "S&P 500", "kind": "index", "currency": null, "isin": null},
+  {"key": "dow-jones", "symbol": "DJI", "exchange": "INDX", "name": "Dow Jones Industrial Average", "kind": "index", "currency": null, "isin": null},
+  {"key": "nasdaq-100", "symbol": "NDX", "exchange": "INDX", "name": "Nasdaq 100", "kind": "index", "currency": null, "isin": null},
+  {"key": "smi", "symbol": "SSMI", "exchange": "INDX", "name": "SMI", "kind": "index", "currency": null, "isin": null},
+  {"key": "dax", "symbol": "GDAXI", "exchange": "INDX", "name": "DAX", "kind": "index", "currency": null, "isin": null},
+  {"key": "euro-stoxx-50", "symbol": "STOXX50E", "exchange": "INDX", "name": "Euro Stoxx 50", "kind": "index", "currency": null, "isin": null},
+  {"key": "ftse-100", "symbol": "FTSE", "exchange": "INDX", "name": "FTSE 100", "kind": "index", "currency": null, "isin": null},
+  {"key": "cac-40", "symbol": "FCHI", "exchange": "INDX", "name": "CAC 40", "kind": "index", "currency": null, "isin": null},
+  {"key": "nikkei-225", "symbol": "N225", "exchange": "INDX", "name": "Nikkei 225", "kind": "index", "currency": null, "isin": null},
+  {"key": "spy", "symbol": "SPY", "exchange": "US", "name": "SPDR S&P 500 ETF Trust", "kind": "etf", "currency": "USD", "isin": "US78462F1030"},
+  {"key": "qqq", "symbol": "QQQ", "exchange": "US", "name": "Invesco QQQ Trust", "kind": "etf", "currency": "USD", "isin": "US46090E1038"},
+  {"key": "vti", "symbol": "VTI", "exchange": "US", "name": "Vanguard Total Stock Market ETF", "kind": "etf", "currency": "USD", "isin": "US9229087690"},
+  {"key": "cssmi", "symbol": "CSSMI", "exchange": "SW", "name": "iShares SMI ETF (CH)", "kind": "etf", "currency": "CHF", "isin": "CH0008899764"},
+  {"key": "ewl", "symbol": "EWL", "exchange": "US", "name": "iShares MSCI Switzerland ETF", "kind": "etf", "currency": "USD", "isin": "US4642867497"},
+  {"key": "gld", "symbol": "GLD", "exchange": "US", "name": "SPDR Gold Shares", "kind": "etf", "currency": "USD", "isin": "US78463V1070"},
+  {"key": "uso", "symbol": "USO", "exchange": "US", "name": "United States Oil Fund", "kind": "etf", "currency": "USD", "isin": "US91232N2071"}
+]

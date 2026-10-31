@@ -10,6 +10,7 @@ from app.services import (
     entity_service,
     event_correction_service,
     event_service,
+    instrument_service,
     relationship_service,
     seed_service,
 )
@@ -70,6 +71,7 @@ def pages(monkeypatch):
     for name in ("confirm", "split", "merge"):
         monkeypatch.setattr(entity_correction_service, name, correct(name))
     monkeypatch.setattr(relationship_service, "of_entity", lambda _engine, entity_id: calls.get("relationships", []))
+    monkeypatch.setattr(instrument_service, "of_entities", lambda _engine, entity_ids: calls.get("instruments", []))
     monkeypatch.setattr(entity_service, "choices", lambda _engine: [EntityRef(3, "Alstom")])
     return calls
 
@@ -195,6 +197,7 @@ def test_nothing_selected_is_said(client, pages):
 def test_the_event_page_lists_the_entities_its_reports_name(client, monkeypatch):
     monkeypatch.setattr(event_service, "detail", lambda _engine, event_id: EventDetail(event(8)))
     monkeypatch.setattr(event_correction_service, "similar_events", lambda _engine, event_id: [])
+    monkeypatch.setattr(instrument_service, "of_entities", lambda _engine, entity_ids: [])
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: [
         EventEntity(3, "person", "Volodymyr Zelenskyy", 2, True, ["Vladimir Zelensky", "Volodymyr Zelenskyy"]),
         EventEntity(4, "country", "Ukraine", 1, False, ["Ukraine"]),

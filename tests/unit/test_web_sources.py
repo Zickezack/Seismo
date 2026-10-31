@@ -116,6 +116,7 @@ def services(monkeypatch):
     monkeypatch.setattr(seed_service, "take_catalogue_regions", lambda _engine: calls.get("regions_given", 0))
     monkeypatch.setattr(seed_service, "sources_status", lambda _engine: calls.get("seed_status", SeedStatus(17, 0)))
     monkeypatch.setattr(seed_service, "entities_status", lambda _engine: calls.get("entities_status", SeedStatus(52, 0)))
+    monkeypatch.setattr(seed_service, "instruments_status", lambda _engine: calls.get("instruments_status", SeedStatus(16, 0)))
     monkeypatch.setattr(platform_settings_service, "current", lambda _engine: PlatformSettings())
 
     def start_backfill(_engine, source_id, form):
@@ -647,3 +648,18 @@ def test_settings_page_takes_regions_from_the_catalogue(client, services):
 
 def test_region_takeover_is_disabled_once_every_source_has_one(client, services):
     assert " disabled" in tag_of(client.get("/settings/platform").text, "take-regions")
+
+
+def test_the_starter_list_of_wertpapiere_is_offered_and_imported_only_on_request(client, services, monkeypatch):
+    calls = []
+    monkeypatch.setattr(seed_service, "import_instruments", lambda _engine: calls.append(1) or SeedResult(15, 0, ["GSPC.INDX"]))
+
+    html = client.get("/settings/platform").text
+    assert text_of(html, "seed-instruments-status") == "0 von 16 Wertpapieren importiert." and calls == []
+
+    client.post("/settings/platform/seed/instruments")
+
+    assert calls == [1]
+    assert text_of(client.get("/settings/platform").text, "flash") == (
+        "Starterliste Wertpapiere: 15 importiert, 0 schon früher importiert. Nicht importiert, schon erfasst: GSPC.INDX."
+    )
