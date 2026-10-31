@@ -32,6 +32,15 @@ def test_status_of_a_robots_txt_without_rules(status, expected):
     assert robots_rules(answer(status)).status == expected
 
 
+def test_a_robots_txt_cut_at_its_limit_counts_up_to_its_last_whole_line():
+    cut = HttpResponse(url="https://bank.example/robots.txt", content=b"User-agent: *\nDisallow: /a/\nDisallow: /b", cut=True)
+
+    rules = robots_rules(cut)
+
+    assert rules.robots_txt == "User-agent: *\nDisallow: /a/\n"
+    assert not rules.allows("https://bank.example/a/1") and rules.allows("https://bank.example/b")
+
+
 @pytest.mark.parametrize("status", [429, 500, 503])
 def test_robots_txt_that_says_nothing_yet_is_asked_again_later(status):
     with pytest.raises(SourceUnavailable, match=f"^robots.txt: HTTP {status}$"):

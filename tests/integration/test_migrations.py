@@ -484,3 +484,28 @@ def test_a_downgrade_keeps_the_new_readings_and_drops_the_replaced_ones_with_the
 
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_full_texts_failed_on_an_oversized_lookup_are_fetched_again_behind_live_work(engine):
+    upgrade(engine, "fb4c52ab16d6")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO article (source_name, source_url, item_key, url, full_text_status, full_text_error) VALUES "
+            "('G', 'https://g.org', 'a', 'https://a.org/a', 'failed', 'Antwort grösser als 100 KB'), "
+            "('G', 'https://g.org', 'b', 'https://b.org/b', 'failed', 'Antwort grösser als 500 KB'), "
+            "('G', 'https://g.org', 'c', 'https://c.org/c', 'failed', 'HTTP 404'), "
+            "('G', 'https://g.org', 'd', 'https://d.org/d', 'stored', NULL)"
+        ))
+
+    upgrade(engine)
+
+    with engine.connect() as connection:
+        articles = connection.execute(text("SELECT item_key, full_text_status, full_text_error FROM article ORDER BY item_key")).all()
+        queued = connection.execute(text(
+            "SELECT a.item_key, j.max_attempts, j.priority, j.dedupe_key = 'fetch_article:' || a.id FROM job j "
+            "JOIN article a ON a.id = (j.payload->>'article_id')::bigint WHERE j.kind = 'fetch_article' ORDER BY a.item_key"
+        )).all()
+    assert [tuple(row) for row in articles] == [
+        ("a", "pending", None), ("b", "pending", None), ("c", "failed", "HTTP 404"), ("d", "stored", None),
+    ]
+    assert [tuple(row) for row in queued] == [("a", 31, 1, True), ("b", 31, 1, True)]

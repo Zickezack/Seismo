@@ -112,11 +112,8 @@
 {% if not source %}
 <section class="card stack">{{ settings }}</section>
 {% else %}
-{# Several sections: quick navigation and collapsible sections (requirements.md, "Basic UI Requirements / Styleguide", items 4 and 5). #}
-<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
-  <a href="#einstellungen" data-testid="section-nav-einstellungen">Einstellungen</a>
-  <a href="#backfill" data-testid="section-nav-backfill">Backfill</a>
-</nav>
+{# Two sections: collapsible, without a quick navigation - that only from three on (requirements.md, "Basic UI
+   Requirements / Styleguide", items 4 and 5; skill settings-seite). #}
 <details class="card section" id="einstellungen" open data-testid="section-einstellungen">
   <summary><h2>Einstellungen</h2></summary>
   <div class="stack">{{ settings }}</div>

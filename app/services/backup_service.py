@@ -6,6 +6,7 @@ The newest file is the schedule: a backup is due once it is older than the backu
 An uploaded backup (`<database>-upload-<UTC time>.dump`) waits for a restore and counts for neither.
 """
 import logging
+import os
 import re
 import threading
 from collections.abc import Iterable
@@ -39,6 +40,9 @@ UPLOAD_MARK = "-upload"
 UPLOAD_PARTIAL_SUFFIX = ".dump.uploading"
 # The first bytes of a file in pg_dump's custom format, the one create_backup writes.
 PG_DUMP_SIGNATURE = b"PGDMP"
+# Free space an upload must leave on the backup store: a file of any size could fill it, and with it the backups made
+# here - and, on the same disk, the database.
+UPLOAD_KEEP_FREE_BYTES = 2 * 1024 ** 3
 
 
 class RestoreError(Exception):
@@ -123,26 +127,44 @@ def store_upload(backup_dir: Path, database: str, source: BinaryIO, now: datetim
     """Keep an uploaded pg_dump file for a restore from the command line (README.md, "Restore").
 
     Its name marks it as uploaded: the schedule and the number of backups to keep count only the backups made
-    here, so an upload neither delays the next backup nor pushes one out.
+    here, so an upload neither delays the next backup nor pushes one out. One that would leave less than
+    UPLOAD_KEEP_FREE_BYTES free on the backup store is refused - before copying by its size, while copying by what is
+    left, should something else take space meanwhile.
     """
     if source.read(len(PG_DUMP_SIGNATURE)) != PG_DUMP_SIGNATURE:
         raise InvalidBackup("Die Datei ist kein Backup von pg_dump (Format custom), wie es Seismo anlegt.")
+    size = source.seek(0, os.SEEK_END)
     source.seek(0)
     if not backup_dir.is_dir():
         raise InvalidBackup(f"Backup-Verzeichnis {backup_dir} fehlt (BACKUP_DIR, README.md).")
+    free = backup_repository.free_bytes(backup_dir)
+    if free is not None and free - size < UPLOAD_KEEP_FREE_BYTES:
+        raise InvalidBackup(_not_enough_space(size, free))
     now = now or datetime.now(UTC)
     target = backup_dir / backup_name(f"{database}{UPLOAD_MARK}", now)
     partial = target.with_name(target.name.removesuffix(BACKUP_SUFFIX) + UPLOAD_PARTIAL_SUFFIX)
     try:
-        backup_repository.save(source, partial)
+        backup_repository.save(source, partial, keep_free=UPLOAD_KEEP_FREE_BYTES)
         partial.rename(target)
     except FileExistsError:
         raise InvalidBackup("Eben wurde schon ein Backup hochgeladen, bitte in einer Sekunde erneut.") from None
+    except backup_repository.NotEnoughSpace:
+        raise InvalidBackup(_not_enough_space(size, backup_repository.free_bytes(backup_dir))) from None
     finally:
         backup_repository.delete([partial])
     backup = StoredBackup(target.name, now, target.stat().st_size, True)
     logger.info("Backup uploaded", extra={"file": target.name, "size_bytes": backup.size_bytes})
     return backup
+
+
+def _not_enough_space(size: int, free: int | None) -> str:
+    free_text = f"{_gigabytes(free)} frei" if free is not None else "frei: unbekannt"
+    return (f"Zu wenig Platz: die Datei ({_gigabytes(size)}) liesse weniger als {_gigabytes(UPLOAD_KEEP_FREE_BYTES)} auf dem "
+            f"Backup-Speicher frei ({free_text}).")
+
+
+def _gigabytes(size: int) -> str:
+    return f"{size / 1024 ** 3:.1f} GB".replace(".", ",")
 
 
 def delete_stored(backup_dir: Path, database: str, names: Iterable[str]) -> BulkResult:

@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import text
 
 from app.repositories import fetch_host_repository
+from app.services import fetch_policy_service
 from app.services.fetch_policy_service import PoliteHttp
 from app.sources.errors import FetchDisallowed, HostBusy, SourceUnavailable
 from app.sources.http import HttpClient
@@ -180,6 +181,28 @@ def test_retry_after_pauses_the_host_at_most_a_day(database, retry_after, pause)
         PoliteHttp(database, http, 10, reserved_slot=datetime.now(UTC)).get("https://bank.example/b", "*/*")
     assert busy.value.slot - datetime.now(UTC) > pause - timedelta(seconds=2)
     assert requests == ["https://bank.example/robots.txt", "https://bank.example/a"]
+
+
+def test_too_many_requests_without_a_retry_after_pauses_the_host_for_a_while(database):
+    def answer(request):
+        return httpx2.Response(404) if request.url.path == "/robots.txt" else httpx2.Response(429)
+
+    with pytest.raises(SourceUnavailable, match=r"^HTTP 429$") as error:
+        PoliteHttp(database, HttpClient("", httpx2.MockTransport(answer)), 10).get("https://bank.example/a", "*/*")
+
+    assert error.value.rate_limited and error.value.retry_after is None
+    pause = fetch_policy_service.RATE_LIMIT_PAUSE
+    assert pause - timedelta(seconds=1) < paused_for(database) <= pause
+
+
+def test_a_server_error_without_a_retry_after_pauses_nothing(database):
+    def answer(request):
+        return httpx2.Response(404) if request.url.path == "/robots.txt" else httpx2.Response(503)
+
+    with pytest.raises(SourceUnavailable, match=r"^HTTP 503$"):
+        PoliteHttp(database, HttpClient("", httpx2.MockTransport(answer)), 10).get("https://bank.example/a", "*/*")
+
+    assert paused_for(database) is None
 
 
 def test_a_robots_txt_that_asks_for_a_pause_pauses_the_host(database):

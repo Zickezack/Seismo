@@ -43,7 +43,7 @@
 <details class="section" id="states" open data-testid="states-section">
   <summary><h2>Verlauf ({{ detail.states|length }})</h2></summary>
   <div class="stack">
-    <p class="hint">Jeder Bericht wird am Zustand zu seiner eigenen Zeit gemessen: Ein neuer Zustand entsteht nur aus einem passenden Übergang (eine Eskalation oder ein Abschluss eines laufenden Ereignisses, die Wiederaufnahme eines abgeschlossenen). Ein Bericht, der dazu nicht passt, ändert nichts und bleibt unten als widersprechend stehen; seine Aussagen behält er. Nach einer Korrektur wird der Verlauf aus den Berichten neu hergeleitet: Was nicht mehr folgt, bleibt durchgestrichen stehen.</p>
+    <p class="hint">Jeder Bericht wird am Zustand zu seiner eigenen Zeit gemessen: Ein neuer Zustand entsteht nur aus einem passenden Übergang (eine Eskalation oder ein Abschluss eines laufenden Ereignisses, die Wiederaufnahme eines abgeschlossenen). Ein Bericht, der dazu nicht passt, ändert nichts und bleibt unten als widersprechend stehen; seine Aussagen behält er. Nennt ein später gefundener, früherer Bericht denselben Zustand, gilt dieser ab ihm; der spätere Eintrag bleibt als Bestätigung stehen. Nach einer Korrektur wird der Verlauf aus den Berichten neu hergeleitet: Was nicht mehr folgt, bleibt durchgestrichen stehen.</p>
     {% if detail.states %}
     <div class="table-container">
       <table class="table">
@@ -62,7 +62,7 @@
           {% set added_by = detail.correction(state.added_by_id) %}
           <tr data-testid="state-{{ state.id }}">
             <td>{{ state.valid_from|local_time }}</td>
-            <td class="cell-wrap" data-testid="state-status-{{ state.id }}">{% if state.withdrawn %}<s>{{ state.status_label }}</s><span class="hint" data-testid="state-withdrawn-{{ state.id }}">zurückgezogen{% if withdrawn_by %} durch {{ withdrawn_by.kind_label }}, {{ withdrawn_by.created_at|local_time }}{% endif %}</span>{% else %}{{ state.status_label }}{% endif %}</td>
+            <td class="cell-wrap" data-testid="state-status-{{ state.id }}">{% if state.withdrawn %}<s>{{ state.status_label }}</s><span class="hint" data-testid="state-withdrawn-{{ state.id }}">zurückgezogen{% if withdrawn_by %} durch {{ withdrawn_by.kind_label }}, {{ withdrawn_by.created_at|local_time }}{% endif %}</span>{% elif state.repeats %}{{ state.status_label }}<span class="hint" data-testid="state-repeats-{{ state.id }}">bestätigt, kein Wechsel: ein später gefundener, früherer Bericht nennt den Zustand schon</span>{% else %}{{ state.status_label }}{% endif %}</td>
             <td class="cell-title">{% if state.article_id %}<a href="/articles/{{ state.article_id }}#events" data-testid="state-report-{{ state.id }}">{{ state.report_title }}</a>{% if state.time_note %}<span class="hint">Zeitangabe im Artikel: {{ state.time_note }}</span>{% endif %}{% else %}<span class="hint">Bericht nicht mehr vorhanden</span>{% endif %}</td>
             <td class="cell-wrap">{{ state.source_display_name or "–" }}</td>
             <td class="cell-wrap" data-testid="state-recorded-{{ state.id }}">{{ state.recorded_at|local_time }}{% if added_by %}<span class="hint">durch {{ added_by.kind_label }}</span>{% endif %}</td>

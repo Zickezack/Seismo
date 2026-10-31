@@ -15,7 +15,7 @@ from app.db.models import Article, FetchHost, Job, JobStatus, RawText, Source
 from app.jobs.handlers import build_handlers
 from app.jobs.runner import run_next_job
 from app.repositories import platform_settings_repository
-from app.services import article_service, ingestion_service, job_service, source_service
+from app.services import article_service, fetch_policy_service, ingestion_service, job_service, source_service, tdm_policy
 from app.sources import ADAPTERS
 from app.sources.base import FetchedItem
 from app.sources.eia import EiaAdapter
@@ -860,6 +860,35 @@ def test_a_tdmrep_json_that_cannot_be_read_now_is_asked_again_before_the_page(da
     assert (job.status, job.last_error) == (JobStatus.QUEUED, "SourceUnavailable: tdmrep.json: HTTP 503")
     assert "https://a.bank.example/a.html" not in web.requests
     assert full_text(database, ids["a"]) == ("pending", None)
+
+
+def test_a_page_too_large_for_a_tdmrep_json_means_none_and_the_article_is_fetched(database, adapter, web):
+    # Many hosts answer any unknown path with a page of their own, often above the limit for tdmrep.json.
+    web.pages["https://a.bank.example/.well-known/tdmrep.json"] = (200, "text/html", b"<html>" + b"x" * tdm_policy.TDMREP_MAX_BYTES)
+    ids = fetch_articles(database, adapter, item("a"))
+
+    run_jobs(database)
+
+    assert full_text(database, ids["a"]) == ("stored", None)
+    with database.connect() as connection:
+        assert connection.execute(select(FetchHost.tdmrep_status).where(FetchHost.host == "a.bank.example")).scalar_one() == "none"
+
+
+def test_a_robots_txt_above_its_limit_counts_as_far_as_it_is_read(database, adapter, web):
+    padding = "# " + "x" * 1000 + "\n"
+    rules = "User-agent: *\nDisallow: /b.html\n" + padding * (fetch_policy_service.ROBOTS_MAX_BYTES // len(padding) + 1) + "Disallow: /a.html\n"
+    web.robots["a.bank.example"] = (200, rules)
+    ids = fetch_articles(database, adapter, item("a"), item("b", url="https://a.bank.example/b.html"))
+
+    run_jobs(database)
+    _set_host(database, next_slot_at=text("now()"), last_request_at=text("now() - interval '1 minute'"))
+    with database.begin() as connection:
+        connection.execute(update(Job).where(Job.status == JobStatus.QUEUED).values(run_after=text("now()")))
+    run_jobs(database)
+
+    # The rule beyond 500 KiB is never read (RFC 9309, 2.5); the one before holds.
+    assert full_text(database, ids["a"]) == ("stored", None)
+    assert full_text(database, ids["b"])[0] == "disallowed"
 
 
 def test_a_redirect_to_a_listed_domain_is_not_kept(database, adapter, web):

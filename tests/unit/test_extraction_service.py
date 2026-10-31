@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from app.db.models import EventType, ValidationResult
 from app.llm import event_schema
 from app.services import extraction_service
+from app.llm import ollama
 from app.services.extraction_service import RESERVED_TOKENS, backed_candidates, find_quote, fit_text, user_message
 
 TEXT = (
@@ -185,3 +186,9 @@ def test_the_schema_has_no_references_and_refuses_what_it_does_not_know():
         except ValueError:
             continue
         raise AssertionError(f"accepted {invalid}")
+
+
+def test_the_answer_may_take_more_than_the_room_a_text_leaves_it():
+    # A short text leaves the answer the rest of the context, up to the cap; a long one at least the room reserved.
+    assert ollama.MAX_ANSWER_TOKENS > ollama.MIN_ANSWER_ROOM_TOKENS
+    assert RESERVED_TOKENS == 1000 + ollama.MIN_ANSWER_ROOM_TOKENS

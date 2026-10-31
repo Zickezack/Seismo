@@ -24,7 +24,7 @@ from app.jobs.errors import JobInterrupted
 from app.llm import event_schema
 from app.llm.event_schema import Direction, Horizon, TargetKind
 from app.llm.limiter import LlmCallLimiter
-from app.llm.ollama import MAX_ANSWER_TOKENS, LlmAnswer, OllamaClient
+from app.llm.ollama import MIN_ANSWER_ROOM_TOKENS, LlmAnswer, OllamaClient
 from app.repositories import entity_repository, extraction_repository, relationship_repository
 from app.services import job_service, platform_settings_service, similarity_service
 
@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 BUDGET_PERIOD = timedelta(hours=1)
 # Of an unusable answer, kept for diagnosis: its start shows what went wrong.
 MAX_RAW_ANSWER_CHARS = 20_000
-# Tokens of the context kept from the article's text: the instructions with the article's header, and the answer.
-RESERVED_TOKENS = 1000 + MAX_ANSWER_TOKENS
+# Tokens of the context kept from the article's text: the instructions with the article's header, and the answer's
+# room - at least; a shorter text leaves the answer more.
+RESERVED_TOKENS = 1000 + MIN_ANSWER_ROOM_TOKENS
 # A shorter quote backs nothing: a name or a number is in many sentences. In a script without spaces between words
 # a character says about as much as a word: "美國期中選舉過後", after the US midterm elections.
 MIN_QUOTE_CHARS = 10

@@ -19,12 +19,16 @@ class SourceRejected(SourceError):
 class SourceUnavailable(SourceError):
     """The source could not be reached (timeout, connection error, HTTP 5xx); a later attempt may succeed.
 
-    `retry_after`: the seconds the host asked to wait (Retry-After header), if it did.
+    `retry_after`: the seconds the host asked to wait (Retry-After header), if it did. `rate_limited`: the host said
+    too many requests came (HTTP 429), with or without a wait of its own.
     """
 
-    def __init__(self, summary: str, detail: str | None = None, retry_after: float | None = None) -> None:
+    def __init__(
+        self, summary: str, detail: str | None = None, retry_after: float | None = None, rate_limited: bool = False
+    ) -> None:
         super().__init__(summary, detail)
         self.retry_after = retry_after
+        self.rate_limited = rate_limited
 
 
 class FetchDisallowed(SourceRejected):

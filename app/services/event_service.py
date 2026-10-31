@@ -420,6 +420,9 @@ class StateView:
     source_display_name: str | None
     added_by_id: int | None = None  # the correction that appended it; None: its report's assignment
     withdrawn_by_id: int | None = None  # the correction it no longer follows from
+    # The version before it has its status: a report found later stated the state earlier, so this one changed
+    # nothing - the state counts from the earlier one (the admin's decision of 2026-10-31).
+    repeats: bool = False
 
     @property
     def status_label(self) -> str:
@@ -429,6 +432,19 @@ class StateView:
     def withdrawn(self) -> bool:
         return self.withdrawn_by_id is not None
 
+
+def mark_repeats(states: list[StateView]) -> list[StateView]:
+    """The versions, the earliest first, each not withdrawn marked when the one in effect before it has its status:
+    no change, only a report the earlier one's report preceded in time but not in Seismo's learning of it. Versions
+    are only ever added (datamodel.md, rule 3), so the repeated one stays."""
+    marked, previous = [], None
+    for state in states:
+        if state.withdrawn:
+            marked.append(state)
+            continue
+        marked.append(replace(state, repeats=previous == state.status))
+        previous = state.status
+    return marked
 
 
 @dataclass(frozen=True)
@@ -497,7 +513,7 @@ def detail(engine: Engine, event_id: int) -> EventDetail | None:
         row = event_repository.get(connection, event_id)
         if row is None:
             return None
-        states = [_state(each) for each in event_repository.states(connection, event_id)]
+        states = mark_repeats([_state(each) for each in event_repository.states(connection, event_id)])
         reports = [_report(each, states) for each in event_repository.reports(connection, event_id)]
         corrections = _corrections(connection, event_id)
         merged_into = None
@@ -543,7 +559,7 @@ def _report(row: Row, states: list[StateView]) -> ReportView:
     values = {each.name: row._mapping[each.name] for each in fields(ReportView) if each.name in row._mapping}
     report = ReportView(**values)
     states = [state for state in states if not state.withdrawn]
-    if any(state.candidate_id == report.id for state in states):
+    if any(state.candidate_id == report.id and not state.repeats for state in states):
         return replace(report, effect=StateEffect.VERSION)
     in_effect = [state.status for state in states if state.valid_from <= report.moment]
     current = in_effect[-1] if in_effect else None

@@ -109,7 +109,8 @@ deleted. Both are set under **Einstellungen -> Backups** (default: every 24 hour
 - File: `<POSTGRES_DB>-<UTC time>.dump`, e.g. `seismo-20261023T030000Z.dump`, compressed `pg_dump`
   format. A dump that broke off never gets this name.
 - Uploaded: `<POSTGRES_DB>-upload-<UTC time>.dump`, a backup from elsewhere waiting for a restore. It
-  counts neither for the schedule nor for the number to keep, and stays until it is deleted.
+  counts neither for the schedule nor for the number to keep, and stays until it is deleted. An upload that would
+  leave less than 2 GB free on the backup store is refused.
 - Place: `/backups` in the worker and the api container (the api lists, serves and takes uploads). By default that is the Docker volume `db-backups` on the
   same disk as the database - it covers mistakes and broken migrations, not a lost disk. For that, set
   `BACKUP_HOST_DIR` to an absolute host path, e.g. a mounted NAS share, writable for user id 10001:

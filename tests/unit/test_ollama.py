@@ -30,7 +30,7 @@ def test_one_chat_constrained_to_the_schema_without_thinking():
     assert seen["url"] == "http://ollama:11434/api/chat"
     assert body["messages"] == [{"role": "system", "content": "system text"}, {"role": "user", "content": "user text"}]
     assert (body["format"], body["stream"], body["think"]) == ({"type": "object"}, False, False)
-    assert body["options"] == {"num_ctx": 8192, "num_predict": 3000, "temperature": 0}
+    assert body["options"] == {"num_ctx": 8192, "num_predict": 6000, "temperature": 0}
 
 
 def test_an_answer_cut_at_its_length_is_incomplete():

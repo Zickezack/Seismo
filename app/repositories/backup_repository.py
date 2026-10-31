@@ -69,10 +69,22 @@ def free_bytes(directory: Path) -> int | None:
         return None
 
 
-def save(source: BinaryIO, target: Path) -> None:
-    """Copy an open file into `target`, which must not exist yet."""
+class NotEnoughSpace(OSError):
+    """Copying stopped: the file system would keep less free than asked for."""
+
+
+# Copied in steps of this size, the free space checked after each.
+COPY_CHUNK_BYTES = 1024 * 1024
+
+
+def save(source: BinaryIO, target: Path, keep_free: int = 0) -> None:
+    """Copy an open file into `target`, which must not exist yet. Stops with NotEnoughSpace once less than `keep_free`
+    bytes are left on the file system; the part copied stays, for the caller to delete."""
     with target.open("xb") as file:
-        shutil.copyfileobj(source, file)
+        while chunk := source.read(COPY_CHUNK_BYTES):
+            file.write(chunk)
+            if keep_free and (free_bytes(target.parent) or 0) < keep_free:
+                raise NotEnoughSpace(f"less than {keep_free} bytes free")
 
 
 def delete(paths: Iterable[Path]) -> None:

@@ -123,6 +123,17 @@ def test_answer_above_the_size_limit_is_rejected(monkeypatch):
         http.get("https://feed.example/rss", "*/*")
 
 
+def test_an_answer_above_the_limit_is_cut_there_when_asked_so():
+    with client(lambda _request: httpx2.Response(200, content=b"x" * 2000)) as http:
+        cut = http.fetch("https://bank.example/robots.txt", "text/plain", 1024, cut=True)
+        whole = http.fetch("https://bank.example/robots.txt", "text/plain", 2000, cut=True)
+        with pytest.raises(SourceRejected, match="^Antwort grösser als 1 KB$"):
+            http.fetch("https://bank.example/robots.txt", "text/plain", 1024)
+
+    assert (len(cut.content), cut.cut) == (1024, True)
+    assert (len(whole.content), whole.cut) == (2000, False)
+
+
 def test_unsupported_scheme_is_rejected():
     # The real transport: it refuses the scheme before connecting anywhere.
     with HttpClient("") as http, pytest.raises(SourceRejected, match="^Ungültige URL$"):

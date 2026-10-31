@@ -422,10 +422,11 @@ def test_invalid_source_message_is_the_service_message(client, services, monkeyp
     assert text_of(response.text, "form-error") == "Name: „Neu“ ist bereits vergeben."
 
 
-def test_edit_page_has_settings_and_backfill_sections_with_quick_navigation(client, services):
+def test_edit_page_has_settings_and_backfill_sections_without_quick_navigation(client, services):
     html = client.get("/sources/5").text
 
-    assert [tag_of(html, f"section-nav-{name}") is not None for name in ("einstellungen", "backfill")] == [True, True]
+    # Two sections need none (skill settings-seite: from three on).
+    assert tag_of(html, "section-nav") is None
     assert " open" in tag_of(html, "section-einstellungen") and " open" in tag_of(html, "section-backfill")
     assert 'action="/sources/5/backfills"' in tag_of(html, "backfill-form")
     # GDELT reaches 3 months back; the form says so and suggests the last month.

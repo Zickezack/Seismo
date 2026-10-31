@@ -137,3 +137,20 @@ def test_a_report_shows_how_it_came_to_its_event(method, score, label):
     )
 
     assert (view.method_label, view.status_label) == (label, "Fortsetzung")
+
+
+def version(state_id, status, withdrawn_by_id=None):
+    return event_service.StateView(
+        id=state_id, status=status, valid_from=datetime(2026, 10, state_id, tzinfo=UTC), recorded_at=datetime(2026, 10, 31, tzinfo=UTC),
+        candidate_id=state_id, report_title=None, time_note=None, article_id=None, source_display_name=None,
+        withdrawn_by_id=withdrawn_by_id,
+    )
+
+
+def test_a_version_with_the_status_of_the_one_before_it_repeats_it_a_withdrawn_one_is_passed_over():
+    states = [version(1, "update"), version(2, "update"), version(3, "escalation", withdrawn_by_id=9), version(4, "update"),
+              version(5, "closure"), version(6, "closure")]
+
+    marked = event_service.mark_repeats(states)
+
+    assert [state.repeats for state in marked] == [False, True, False, True, False, True]

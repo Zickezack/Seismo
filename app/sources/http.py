@@ -38,6 +38,7 @@ class HttpResponse:
     content_type: str | None = None
     retry_after: float | None = None  # seconds, from the Retry-After header
     headers: Mapping[str, str] = field(default_factory=dict)  # names in lower case
+    cut: bool = False  # longer than asked for: `content` is its beginning (HttpClient.fetch with `cut`)
 
 
 def user_agent(contact: str) -> str:
@@ -76,13 +77,14 @@ class HttpClient:
             raise SourceRejected(f"HTTP {response.status}")
         return response
 
-    def fetch(self, url: str, accept: str, max_bytes: int | None = None) -> HttpResponse:
+    def fetch(self, url: str, accept: str, max_bytes: int | None = None, cut: bool = False) -> HttpResponse:
         """The answer whatever its status; only a failed connection, an answer above `max_bytes` or one not complete
-        within TOTAL_TIMEOUT_SECONDS raises."""
+        within TOTAL_TIMEOUT_SECONDS raises. With `cut`, an answer above `max_bytes` is read that far and returned
+        marked `cut` - for a file of which the beginning is enough, or whose size alone tells (robots.txt, tdmrep.json)."""
         max_bytes = max_bytes or MAX_RESPONSE_BYTES
         try:
             with self._watchdog.armed(TOTAL_TIMEOUT_SECONDS):
-                response = self._receive(url, accept, max_bytes)
+                response = self._receive(url, accept, max_bytes, cut)
         except (httpx2.InvalidURL, httpx2.UnsupportedProtocol):
             raise SourceRejected("Ungültige URL") from None
         except httpx2.TooManyRedirects:
@@ -98,14 +100,19 @@ class HttpClient:
             raise _incomplete()
         return response
 
-    def _receive(self, url: str, accept: str, max_bytes: int) -> HttpResponse:
+    def _receive(self, url: str, accept: str, max_bytes: int, cut: bool) -> HttpResponse:
         extensions = {"trace": self._watchdog.trace}
         with self._client.stream("GET", url, headers={"Accept": accept}, extensions=extensions) as response:
-            content = bytearray()
+            content, was_cut = bytearray(), False
             for chunk in response.iter_bytes():
                 content += chunk
                 if len(content) > max_bytes:
-                    raise SourceRejected(f"Antwort grösser als {_size(max_bytes)}")
+                    if not cut:
+                        raise SourceRejected(f"Antwort grösser als {_size(max_bytes)}")
+                    # The rest is never read: the connection closes with the stream.
+                    del content[max_bytes:]
+                    was_cut = True
+                    break
             return HttpResponse(
                 url=str(response.url),
                 content=bytes(content),
@@ -113,6 +120,7 @@ class HttpClient:
                 content_type=response.headers.get("content-type"),
                 retry_after=retry_after_seconds(response.headers.get("retry-after")),
                 headers={name.lower(): value for name, value in response.headers.items()},
+                cut=was_cut,
             )
 
 
@@ -174,7 +182,7 @@ def unavailable(response: HttpResponse, prefix: str = "") -> SourceUnavailable:
     message = f"{prefix}HTTP {response.status}"
     if response.retry_after:
         message += f" (Retry-After {round(response.retry_after)} s)"
-    return SourceUnavailable(message, retry_after=response.retry_after)
+    return SourceUnavailable(message, retry_after=response.retry_after, rate_limited=response.status == 429)
 
 
 def retry_after_seconds(value: str | None, now: datetime | None = None) -> float | None:

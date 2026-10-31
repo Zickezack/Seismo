@@ -271,6 +271,25 @@ def test_a_late_report_adds_its_version_where_it_belongs_and_never_replaces_one(
     assert versions(database, event_id) == [("start", start), ("escalation", worse), ("closure", over)]
 
 
+def test_earlier_reports_found_later_move_the_start_and_the_later_versions_only_confirm(database):
+    # Event 140 of the dev data: a continuation, then two earlier reports of it found later.
+    [latest] = reported(database, "a", QUAKE | {"status": "update"}, published_at=NOW)
+    assign_all(database, Ollama(status=503))
+    [earlier] = reported(database, "b", SAME_QUAKE | {"status": "update"}, published_at=NOW - timedelta(hours=1))
+    assign_all(database, Ollama(status=503))
+    [earliest] = reported(database, "c", SAME_QUAKE | {"status": "update"}, published_at=NOW - timedelta(hours=2))
+    assign_all(database, Ollama(status=503))
+
+    detail = event_service.detail(database, assigned(database)[latest].event_id)
+
+    # Versions are only ever added: all three stay, the state counts from the earliest.
+    assert [(state.candidate_id, state.repeats) for state in detail.states] == [(earliest, False), (earlier, True), (latest, True)]
+    assert {report.id: report.effect_label for report in detail.reports} == {
+        earliest: "Zustandswechsel", earlier: "bestätigt", latest: "bestätigt",
+    }
+    assert detail.event.state == "update"
+
+
 def test_the_migration_replays_the_assigned_reports_into_the_same_versions(database):
     [start] = reported(database, "a", QUAKE | {"status": "update"}, published_at=NOW - timedelta(hours=2))
     reported(database, "b", SAME_QUAKE | {"status": "start"}, published_at=NOW - timedelta(hours=1))

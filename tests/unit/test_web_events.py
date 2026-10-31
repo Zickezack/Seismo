@@ -124,6 +124,21 @@ def test_the_event_page_shows_its_versions_and_marks_a_contradicting_report(clie
     assert '<span class="status status-contradicts">widerspricht (Beginn)</span>' in html
 
 
+def test_a_version_an_earlier_report_found_later_made_redundant_shows_as_a_confirmation(client, pages):
+    earlier = NOW - timedelta(hours=1)
+    states = [
+        StateView(5, "update", earlier, NOW, 2, "Report 2", None, 11, "Xinhua"),
+        StateView(6, "update", NOW, NOW, 1, "Report 1", None, 10, "Xinhua", repeats=True),
+    ]
+    pages["detail"] = EventDetail(event(7, state="update"), [report(1, "new", status="update", effect=StateEffect.CONFIRMS)], states)
+
+    html = client.get("/events/7").text
+
+    assert text_of(html, "state-status-5") == "Fortsetzung" and tag_of(html, "state-repeats-5") is None
+    assert text_of(html, "state-repeats-6") == "bestätigt, kein Wechsel: ein später gefundener, früherer Bericht nennt den Zustand schon"
+    assert text_of(html, "report-effect-1") == "bestätigt"
+
+
 def test_an_event_without_a_known_state_says_so(client, pages):
     pages["detail"] = EventDetail(event(7, state=None), [report(1, "new", status="unknown")], [])
 

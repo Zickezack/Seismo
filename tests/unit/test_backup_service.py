@@ -241,6 +241,31 @@ def test_an_upload_without_the_backup_directory_is_refused(tmp_path):
         backup_service.store_upload(tmp_path / "missing", "seismo", io.BytesIO(b"PGDMP"), NOW)
 
 
+GB = 1024 ** 3
+
+
+def test_an_upload_that_would_leave_too_little_free_is_refused_before_copying(tmp_path, monkeypatch):
+    monkeypatch.setattr(backup_service.backup_repository, "free_bytes", lambda _directory: 2 * GB + 10)
+
+    with pytest.raises(InvalidBackup) as refused:
+        backup_service.store_upload(tmp_path, "seismo", io.BytesIO(b"PGDMP" + b"x" * 20), NOW)
+
+    assert str(refused.value) == "Zu wenig Platz: die Datei (0,0 GB) liesse weniger als 2,0 GB auf dem Backup-Speicher frei (2,0 GB frei)."
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_upload_stops_once_the_space_runs_short_while_copying_and_leaves_no_part(tmp_path, monkeypatch):
+    # Enough before copying; then something else takes the space.
+    free = iter([3 * GB, 3 * GB, GB, GB])
+    monkeypatch.setattr(backup_service.backup_repository, "free_bytes", lambda _directory: next(free))
+    monkeypatch.setattr(backup_service.backup_repository, "COPY_CHUNK_BYTES", 4)
+
+    with pytest.raises(InvalidBackup, match=r"^Zu wenig Platz: .*\(1,0 GB frei\)\.$"):
+        backup_service.store_upload(tmp_path, "seismo", io.BytesIO(b"PGDMP" + b"x" * 20), NOW)
+
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_only_a_listed_backup_is_served(tmp_path):
     touch(tmp_path, "seismo-20261023T030000Z.dump")
     touch(tmp_path, "notes.txt")

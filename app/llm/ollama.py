@@ -9,8 +9,13 @@ import httpx2
 # worker's stop_grace_period (docker-compose.yml) outlasts it, so a deploy lets a running call finish.
 ANSWER_TIMEOUT_SECONDS = 300
 CONNECT_TIMEOUT_SECONDS = 10
-# The longest answer; a model that runs on is cut here and its JSON is incomplete.
-MAX_ANSWER_TOKENS = 3000
+# The longest answer; a model that runs on is cut here, or at the context's end before, and its JSON is incomplete.
+# Long articles took more than 3000 (measured 2026-10-31: up to 4500, about 50 s on the 4070 Ti); 6000 stays within
+# ANSWER_TIMEOUT_SECONDS at about 30 tokens a second.
+MAX_ANSWER_TOKENS = 6000
+# The room for the answer a text to extract leaves at least (extraction_service.fit_text): a shorter text leaves more,
+# up to MAX_ANSWER_TOKENS, so a higher cap takes no text away.
+MIN_ANSWER_ROOM_TOKENS = 3000
 
 
 class LlmError(Exception):

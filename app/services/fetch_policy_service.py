@@ -37,6 +37,10 @@ USER_AGENT_TOKEN = "Seismo"
 SLOT_TOLERANCE = timedelta(seconds=1)
 # A longer Retry-After is taken as this: a mistake rather than a wish, and a feed paused for days loses items.
 MAX_PAUSE = timedelta(hours=24)
+# A host that answers "too many requests" (HTTP 429) without saying how long to wait is paused this long: each job of
+# it retrying on its own keeps a throttle going (GDELT, measured 2026-10-31: six queries and their retries kept being
+# refused, even a single request a minute and a half after the last).
+RATE_LIMIT_PAUSE = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -69,7 +73,11 @@ def robots_rules(response: HttpResponse) -> RobotsRules:
         raise unavailable(response, "robots.txt: ")
     if response.status >= 400:
         return RobotsRules(RobotsStatus.ALLOW_ALL)
-    return RobotsRules(RobotsStatus.RULES, response.content.decode("utf-8", errors="replace"))
+    content = response.content
+    if response.cut:
+        # RFC 9309, 2.5: read at least 500 KiB, and only that much; the line cut in two counts no more.
+        content = content[: content.rfind(b"\n") + 1]
+    return RobotsRules(RobotsStatus.RULES, content.decode("utf-8", errors="replace"))
 
 
 class PoliteHttp:
@@ -118,11 +126,12 @@ class PoliteHttp:
         scheme = urlsplit(url).scheme
         with self._pausing_on_retry_after(host):
             tdmrep_url = f"{scheme}://{host}{tdm_policy.TDMREP_PATH}"
-            response = self._http.fetch(tdmrep_url, "application/json", tdm_policy.TDMREP_MAX_BYTES)
+            # Cut, not refused: many hosts answer any unknown path with a page of their own, often above the limit.
+            response = self._http.fetch(tdmrep_url, "application/json", tdm_policy.TDMREP_MAX_BYTES, cut=True)
             if response.status >= 500 or response.status == 429:
                 raise unavailable(response, "tdmrep.json: ")
-        # No file, a 4xx or a file that is no TDMRep: the host does not use the protocol.
-        rules = tdm_policy.parse_tdmrep(response.content) if response.status == 200 else None
+        # No file, a 4xx, or a file that is no TDMRep - one cut at the limit is none: the host does not use the protocol.
+        rules = tdm_policy.parse_tdmrep(response.content) if response.status == 200 and not response.cut else None
         with self._engine.begin() as connection:
             status = TdmrepStatus.RULES if rules is not None else TdmrepStatus.NONE
             fetch_host_repository.save_tdmrep(connection, host, status, rules)
@@ -147,15 +156,16 @@ class PoliteHttp:
         try:
             yield
         except SourceUnavailable as error:
-            if error.retry_after:
+            pause = error.retry_after or (RATE_LIMIT_PAUSE.total_seconds() if error.rate_limited else None)
+            if pause:
                 with self._engine.begin() as connection:
-                    fetch_host_repository.pause(connection, host, min(error.retry_after, MAX_PAUSE.total_seconds()))
+                    fetch_host_repository.pause(connection, host, min(pause, MAX_PAUSE.total_seconds()))
             raise
 
     def _robots(self, host: str, robots_url: str, known: Row | None) -> RobotsRules:
         if known is not None and known.robots_fresh:
             return RobotsRules(RobotsStatus(known.robots_status), known.robots_txt)
-        rules = robots_rules(self._http.fetch(robots_url, "text/plain", ROBOTS_MAX_BYTES))
+        rules = robots_rules(self._http.fetch(robots_url, "text/plain", ROBOTS_MAX_BYTES, cut=True))
         with self._engine.begin() as connection:
             fetch_host_repository.save_robots(connection, host, rules.status, rules.robots_txt)
         return rules
