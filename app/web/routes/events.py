@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app.services import event_correction_service, event_service
+from app.services import entity_service, event_correction_service, event_service
 from app.services.event_correction_service import InvalidReason
 from app.web.templating import flash, name_list, templates
 
@@ -30,7 +30,11 @@ def event_page(request: Request, event_id: int) -> Response:
     if detail is None:
         flash(request, NOT_FOUND, "error")
         return RedirectResponse("/events", status_code=303)
-    context = {"detail": detail, "similar": event_correction_service.similar_events(engine, event_id)}
+    context = {
+        "detail": detail,
+        "similar": event_correction_service.similar_events(engine, event_id),
+        "entities": entity_service.of_event(engine, event_id),
+    }
     return templates.TemplateResponse(request, "event.html", context)
 
 

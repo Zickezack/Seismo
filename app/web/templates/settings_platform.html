@@ -163,6 +163,16 @@
       <button class="button" type="submit" data-testid="import-sources"{% if sources_seed.imported == sources_seed.total %} disabled title="Alle Quellen des Katalogs sind schon importiert"{% endif %}>Starterkatalog importieren</button>
     </div>
   </form>
+  <form class="form-grid" method="post" action="/settings/platform/seed/entities" data-testid="seed-entities-form">
+    <div class="field field-wide">
+      <span class="field-label">Starterliste Branchen und Rohstoffe</span>
+      <p class="hint" data-testid="seed-entities-status">{{ entities_seed.imported }} von {{ entities_seed.total }} Branchen und Rohstoffen importiert.</p>
+      <p class="hint">Die Entitätenerkennung ordnet Branchen und Rohstoffe nur diesen Einträgen zu (z. B. Banken, Halbleiter, Rohöl, Weizen); ohne sie erkennt sie keine. Jeder Eintrag kommt nur einmal.</p>
+    </div>
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="import-entities"{% if entities_seed.imported == entities_seed.total %} disabled title="Alle Einträge der Starterliste sind schon importiert"{% endif %}>Starterliste importieren</button>
+    </div>
+  </form>
   <form class="form-grid" method="post" action="/settings/platform/seed/source-regions" data-testid="seed-regions-form">
     <div class="field field-wide">
       <span class="field-label">Regionen aus dem Katalog</span>

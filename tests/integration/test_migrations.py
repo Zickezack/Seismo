@@ -371,3 +371,38 @@ def test_candidates_stored_so_far_wait_for_their_event(engine):
     assert (tuple(row), events) == ((None, None, None), 0)
     downgrade(engine, "29544a69c420")
     upgrade(engine)
+
+
+def test_the_entities_go_with_a_downgrade_and_the_reports_stay(engine):
+    upgrade(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO article (source_name, source_url, item_key, url) VALUES ('EZB', 'https://e.org', 'a', 'https://e.org/a')"))
+        connection.execute(text(
+            "INSERT INTO extraction (article_id, model, schema_version, duration_ms, input_chars, truncated) "
+            "SELECT id, 'm', '2', 1, 1, false FROM article"
+        ))
+        connection.execute(text(
+            "INSERT INTO event_candidate (extraction_id, article_id, position, event_type, status, title, summary) "
+            "SELECT id, article_id, 0, 'other', 'update', 'Report', 'Summary.' FROM extraction"
+        ))
+        connection.execute(text("INSERT INTO entity (kind, name) VALUES ('person', 'Volodymyr Zelenskyy')"))
+        connection.execute(text(
+            "INSERT INTO entity_alias (entity_id, scheme, value, key, match) SELECT id, 'name', name, lower(name), 'founding' FROM entity"
+        ))
+        connection.execute(text(
+            "INSERT INTO entity_mention (candidate_id, alias_id, source, position) "
+            "SELECT c.id, a.id, 'actor', 0 FROM event_candidate c, entity_alias a"
+        ))
+        connection.execute(text("INSERT INTO entity_recognition (extraction_id, schema_version) SELECT id, '1' FROM extraction"))
+
+    downgrade(engine, "0a882e94c29f")
+
+    with engine.connect() as connection:
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+        reports = connection.execute(text("SELECT count(*) FROM event_candidate")).scalar_one()
+        trigram = connection.execute(text("SELECT count(*) FROM pg_extension WHERE extname = 'pg_trgm'")).scalar_one()
+    assert not tables & {"entity", "entity_alias", "entity_mention", "entity_recognition"}
+    assert (reports, trigram) == (1, 0)
+
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

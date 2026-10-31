@@ -16,6 +16,7 @@ from app.db.models import BACKFILL_PRIORITY
 from app.services import (
     backfill_service,
     backup_service,
+    entity_service,
     event_service,
     extraction_service,
     ingestion_service,
@@ -29,6 +30,7 @@ from app.services.job_service import (
     FETCH_ARTICLE_JOB_KIND,
     FETCH_SOURCE_JOB_KIND,
     NORMALIZE_JOB_KIND,
+    RECOGNISE_ENTITIES_JOB_KIND,
     TEST_JOB_KIND,
 )
 from app.sources.errors import HostBusy, SourceRejected
@@ -61,6 +63,9 @@ def build_handlers(
         EXTRACT_EVENTS_JOB_KIND: lambda job: run_extraction_job(engine, job, llm, limiter, stop_event),
         ASSIGN_EVENT_JOB_KIND: lambda job: run_llm_job(
             llm, lambda client: event_service.assign(engine, job.payload["candidate_id"], client, limiter)
+        ),
+        RECOGNISE_ENTITIES_JOB_KIND: lambda job: run_llm_job(
+            llm, lambda client: entity_service.recognise(engine, job.payload["extraction_id"], client, limiter)
         ),
     }
 

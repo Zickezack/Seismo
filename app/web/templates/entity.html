@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Entität{% endblock %}
+{% block content %}
+{% set entity = detail.entity %}
+{% set merged = detail.merged_into is not none %}
+{% set sections = [("aliases", "Namensformen"), ("mentions", "Berichte")]
+  + ([] if merged else [("similar", "Ähnliche Entitäten")]) %}
+<h1 data-testid="entity-title">{{ entity.name }}</h1>
+
+{% if merged %}
+<p class="message message-warning" data-testid="merged-into">Zusammengeführt in <a href="/entities/{{ detail.merged_into.id }}">{{ detail.merged_into.name }}</a> (Entität {{ detail.merged_into.id }}). Ihre Namensformen und Berichte stehen dort.</p>
+{% endif %}
+
+<section class="card stack">
+  <div class="table-container">
+    <table class="table table-details" data-testid="entity-meta">
+      <tbody>
+        <tr><th scope="row">Entität</th><td data-testid="meta-id">{{ entity.id }}</td></tr>
+        <tr><th scope="row">Art</th><td data-testid="meta-kind">{{ entity.kind_label }}</td></tr>
+        {% if detail.parent %}<tr><th scope="row">{{ detail.parent_label }}</th><td data-testid="meta-parent"><a href="/entities/{{ detail.parent.id }}">{{ detail.parent.name }}</a></td></tr>{% endif %}
+        {% if detail.children %}<tr><th scope="row">Tochterunternehmen und Produkte</th><td data-testid="meta-children">{% for child in detail.children %}<a href="/entities/{{ child.id }}">{{ child.name }}</a> ({{ child.kind_label }}){% if not loop.last %}, {% endif %}{% endfor %}</td></tr>{% endif %}
+        <tr><th scope="row">Berichte</th><td data-testid="meta-reports">{{ entity.report_count }} in {{ entity.event_count }} {{ "Ereignis" if entity.event_count == 1 else "Ereignissen" }}</td></tr>
+        <tr><th scope="row">Unsichere Namensformen</th><td data-testid="meta-uncertain">{% if entity.uncertain_count %}<span class="status status-uncertain">{{ entity.uncertain_count }}</span>{% else %}keine{% endif %}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">Der Name stammt von der ersten Erkennung: der übliche englische Name, bei Branchen und Rohstoffen der deutsche der Starterliste.</p>
+</section>
+
+{# Quick navigation once there are several sections (requirements.md, "Basic UI Requirements / Styleguide", items 4
+   and 5); every section collapses and is expanded on load. #}
+{% if sections|length > 2 %}
+<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
+  {% for id, title in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+</nav>
+{% endif %}
+
+{# An uncertain name form is flagged until the analyst decides, never merged silently (datamodel.md, rule 9). #}
+<details class="section" id="aliases" open data-testid="aliases-section">
+  <summary><h2>Namensformen ({{ detail.aliases|length }})</h2></summary>
+  <div class="stack">
+    <p class="hint">Unsicher ist eine Namensform, die nur einem bekannten Namen ähnelt und die das LLM für dieselbe Entität hält; mit ihr auch die Namensformen, die zusammen mit ihr erkannt wurden. Bestätigt gilt sie als sicher. Abgetrennt werden die ausgewählten Namensformen samt ihren Berichten eine neue Entität derselben Art, benannt nach der frühesten von ihnen.</p>
+    {% if detail.aliases %}
+    <form class="stack" method="post" action="/entities/{{ entity.id }}/confirm" data-bulk-form data-testid="alias-list">
+      {% if not merged %}
+      <div class="toolbar">
+        <div class="actions">
+          <button class="button button-secondary" type="submit" data-bulk-action data-testid="confirm" disabled>Bestätigen</button>
+          <button class="button button-secondary" type="submit" formaction="/entities/{{ entity.id }}/split" data-bulk-action data-confirm="Namensform|Namensformen" data-confirm-verb="abtrennen" data-testid="split" disabled>Als neue Entität abtrennen</button>
+        </div>
+      </div>
+      {% endif %}
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              {% if not merged %}<th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Namensformen auswählen" data-testid="select-all-aliases"></th>{% endif %}
+              <th>Namensform</th>
+              <th>Art</th>
+              <th>Zuordnung</th>
+              <th>Berichte</th>
+              <th>Erfasst</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for alias in detail.aliases %}
+            <tr data-testid="alias-{{ alias.id }}">
+              {% if not merged %}<td class="cell-select"><input type="checkbox" name="alias_id" value="{{ alias.id }}" data-select-row data-name="{{ alias.value }}" aria-label="{{ alias.value }} auswählen" data-testid="select-alias-{{ alias.id }}"></td>{% endif %}
+              <td class="cell-title" data-testid="alias-value-{{ alias.id }}">{{ alias.value }}</td>
+              <td>{{ alias.scheme_label }}</td>
+              <td class="cell-wrap" data-testid="alias-match-{{ alias.id }}">{% if alias.uncertain %}<span class="status status-uncertain" data-testid="alias-uncertain-{{ alias.id }}">unsicher</span> {% endif %}{{ alias.match_label }}{% if alias.confirmed_at %}<span class="hint">bestätigt {{ alias.confirmed_at|local_time }}</span>{% endif %}</td>
+              <td data-testid="alias-mentions-{{ alias.id }}">{{ alias.mention_count }}</td>
+              <td>{{ alias.created_at|local_time }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% else %}
+    <p data-testid="no-aliases">Keine Namensformen.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="section" id="mentions" open data-testid="mentions-section">
+  <summary><h2>Berichte ({{ detail.mention_total }})</h2></summary>
+  <div class="stack">
+    {% if detail.mention_total > detail.mentions|length %}<p class="hint" data-testid="mentions-shown">Angezeigt: die {{ detail.mentions|length }} neuesten von {{ detail.mention_total }} Nennungen.</p>{% endif %}
+    {% if detail.mentions %}
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Veröffentlicht</th>
+            <th>Bericht</th>
+            <th>Ereignis</th>
+            <th>Genannt als</th>
+            <th>Rolle</th>
+            <th>Quelle</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for mention in detail.mentions %}
+          <tr data-testid="mention-{{ mention.id }}">
+            <td>{{ mention.moment|local_time }}</td>
+            <td class="cell-title"><a href="/articles/{{ mention.article_id }}#events" data-testid="mention-report-{{ mention.id }}">{{ mention.report_title }}</a></td>
+            <td class="cell-title">{% if mention.event_id %}<a href="/events/{{ mention.event_id }}" data-testid="mention-event-{{ mention.id }}">{{ mention.event_title }}</a>{% else %}<span class="hint">noch keinem zugeordnet</span>{% endif %}</td>
+            <td class="cell-wrap" data-testid="mention-alias-{{ mention.id }}">{{ mention.alias_value }}{% if mention.uncertain %} <span class="status status-uncertain">unsicher</span>{% endif %}</td>
+            <td class="cell-wrap">{{ mention.role_label }}{% if mention.quote %}<span class="hint">„{{ mention.quote }}“</span>{% endif %}</td>
+            <td class="cell-wrap">{{ mention.source_display_name }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-mentions">Kein Bericht nennt diese Entität.</p>
+    {% endif %}
+  </div>
+</details>
+
+{% if not merged %}
+<details class="section" id="similar" open data-testid="similar-section">
+  <summary><h2>Ähnliche Entitäten ({{ similar|length }})</h2></summary>
+  <div class="stack">
+    <p class="hint">Entitäten derselben Art mit einer ähnlichen Namensform (Trigramm-Ähnlichkeit ab 0,3), die ähnlichsten zuerst, höchstens zehn. Zusammengeführt gehen ihre Namensformen, Kennungen und Berichte in diese Entität über; sie selbst bleiben mit ihrer Nummer als zusammengeführt stehen.</p>
+    {% if similar %}
+    <form class="stack" method="post" action="/entities/{{ entity.id }}/merge" data-bulk-form data-testid="similar-list">
+      <div class="toolbar">
+        <div class="actions">
+          <button class="button button-secondary" type="submit" data-bulk-action data-confirm="Entität|Entitäten" data-confirm-verb="zusammenführen" data-testid="merge" disabled>In diese Entität zusammenführen</button>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle ähnlichen Entitäten auswählen" data-testid="select-all-similar"></th>
+              <th>Entität</th>
+              <th>Ähnlichkeit</th>
+              <th>Art</th>
+              <th>Namensformen</th>
+              <th>Berichte</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for each in similar %}
+            <tr data-testid="similar-{{ each.entity.id }}">
+              <td class="cell-select"><input type="checkbox" name="entity_id" value="{{ each.entity.id }}" data-select-row data-name="{{ each.entity.name }}" aria-label="{{ each.entity.name }} auswählen" data-testid="select-similar-{{ each.entity.id }}"></td>
+              <td class="cell-title"><a href="/entities/{{ each.entity.id }}" data-testid="similar-name-{{ each.entity.id }}">{{ each.entity.name }}</a></td>
+              <td data-testid="similar-score-{{ each.entity.id }}">{{ each.score_label }}</td>
+              <td>{{ each.entity.kind_label }}</td>
+              <td>{{ each.entity.alias_count }}</td>
+              <td>{{ each.entity.report_count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% else %}
+    <p data-testid="no-similar">Keine ähnlichen Entitäten.</p>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
+{% endblock %}

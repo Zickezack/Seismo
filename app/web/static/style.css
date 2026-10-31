@@ -486,7 +486,8 @@ a:focus-visible {
 
 .status-claim,
 .status-source_forecast,
-.status-contradicts {
+.status-contradicts,
+.status-uncertain {
   color: var(--color-warning-text);
   background: var(--color-warning-background);
 }

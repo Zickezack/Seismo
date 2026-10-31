@@ -30,8 +30,10 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Korrektur | `event_correction` | A merge or split of events by the analyst, with the reports it moved and the events they left: the audit trail of rule 3. | none |
 | Aussage | `statement` | One extracted statement, labelled Tatsache, Behauptung, Quellenprognose or Interpretation. | none |
 | Beleg | `evidence` | The source reference and text quote supporting a statement. | none |
-| Entität | `entity` | A company, subsidiary, person, country, authority, product, commodity or sector. | [privacy] for persons |
-| Namensform | `entity_alias` | A name variant or identifier of an entity. | [privacy] for persons |
+| Entität | `entity` | A company, subsidiary, person, country, authority, organisation, product, commodity or sector. | [privacy] for persons |
+| Namensform | `entity_alias` | A name variant or identifier of an entity, flagged while uncertain. | [privacy] for persons |
+| Nennung | `entity_mention` | An entity named in a report, as an actor or an impact's target, by one of its name forms. | none |
+| Entitätenerkennung | `entity_recognition` | The LLM run that recognised the entities an extraction's reports name. | none |
 | Beziehung | `entity_relationship` | A relationship between entities: supplier, customer, competitor, regulator, commodity dependency. | none |
 | Wertpapier | `instrument` | A tradable security (stock, ETF, index) with symbol, ISIN, exchange and currency, optionally linked to an Entität. Its tracked flag (verfolgt) decides whether its prices are collected continuously. | none |
 | Kurspunkt | `price_point` | One price of a Wertpapier at a point in time or over an interval (open, high, low, close, volume), with UTC timestamp, resolution, source and a real-time or delayed flag. | none |
@@ -62,7 +64,7 @@ These follow from the architecture principles (`architecture.md`) and apply to e
 10. Relationships carry a source, a validity period and a quality flag; historical changes are kept.
 11. Point in time: every analysis input records when it became available, so an analysis for a reference date only uses data that was available on that date.
 12. A forecast cannot be changed once it is logged; its outcome is stored in a separate record.
-13. Persons are personal data. Until user management exists, only the admin can read and export them. Logs reference entities and articles by ID only, never by name or text.
+13. Persons are personal data. Only persons in a public or business role become entities; a private individual a report names stays in its actors only. Until user management exists, only the admin can read and export them. Logs reference entities and articles by ID only, never by name or text.
 14. Kurspunkte are stored unadjusted, as received, in UTC, with the time they became available; split and dividend adjustments are stored separately. Full-resolution Kurspunkte of tracked Wertpapiere are kept for the configured retention period and then compressed into coarser intervals, never deleted without a replacement. Collection gaps stay gaps and are never interpolated.
 
 ## Entities
@@ -267,7 +269,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | time_note | text | no | | When the event happens, as the article states it, in a few English words, e.g. "on Friday morning", "effective Nov. 7". No date of the model's own: tried in development, it filled in the publication day for 24 of 27 candidates (rule 5); a date is derived later, in code, with the epic Ereignisidentität und zeitliche Entwicklung. |
   | time_quote | text | no | | The passage that states the time (schema 2); without one found, `time_note` is empty. |
   | inference_confidence | varchar(10) | no | | `high`, `medium`, `low`: how sure type, status and impacts follow from the article, as the model rates it (rule 7); check constraint; empty before schema 2. UI: Schlussfolgerung hoch, mittel, niedrig, unbekannt. |
-  | actors | jsonb | yes | `[]` | `[{name, role, quote}]`: who acts or is directly concerned; an actor without a quote found in the text is left out (schema 2). Entities come with their epic. |
+  | actors | jsonb | yes | `[]` | `[{name, role, quote}]`: who acts or is directly concerned; an actor without a quote found in the text is left out (schema 2). The entities they name: Nennung. |
   | impacts | jsonb | yes | `[]` | `[{target, target_kind, direction, horizon, description, quote}]`: only effects the article itself names, an impact without a quote found left out (schema 2); `target_kind` company, sector, commodity, country, market, other; `direction` positive, negative, mixed, unclear; `horizon` days, weeks, months, years, unknown. Not a Wirkungsannahme of the platform. |
   | event_id | bigint | no | | Its Ereignis; empty until assigned; changed only by a Korrektur. Foreign key to `event`, `ON DELETE SET NULL`. Index. |
   | assignment_method | varchar(10) | no | | How it was assigned: `new` (it founded its event), `score` (similar enough by its words), `llm` (in between, the LLM judged it the same incident); check constraint. A Korrektur that moves the report leaves it, with score and time, as it was; the event page then shows the correction (UI: Zusammenführung, Aufteilung) with this one as "zuerst". UI: Neues Ereignis, Ähnlichkeit, LLM. |
@@ -276,7 +278,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
 - Relationships: belongs to one Extraktion and its Artikel; has one or more Aussagen; belongs to one Ereignis once assigned.
 - Rules: stored only with at least one Aussage that has a Beleg. Assigned to an Ereignis by the job "Ereignis zuordnen" (see Ereignis); moved to another only by a Korrektur.
-- Privacy: none (actors may name persons; once entities exist they follow rule 13)
+- Privacy: none (actors may name persons, private individuals too: shown to the admin only, never logged - rule 13)
 
 ### Ereignis (`event`)
 - Store: SQL table `event`
@@ -366,6 +368,78 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 - Rules: a permissible evidence quote, kept after the raw text is deleted (rule 8).
 - Privacy: none
 
+### Entität (`entity`)
+- Store: SQL table `entity`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | UI: Entität (the number). |
+  | kind | varchar(20) | yes | | `company`, `subsidiary`, `person` (in a public or business role only), `country`, `authority` (a named body of one state: government, ministry, central bank, regulator, court, police, armed forces), `organization` (an international organisation, party, union, NGO, movement or armed group - the admin's decision of 2026-10-31), `product`, `commodity`, `sector`; check constraint. UI: Unternehmen, Tochterunternehmen, Person, Land, Behörde, Organisation, Produkt, Rohstoff, Branche. |
+  | name | text | yes | | The usual English name it was first recognised with, without legal form and title; of a starter list item its German name. Sorted with the ICU collation `de-x-icu`. [privacy] for persons. |
+  | parent_id | bigint | no | | Of a subsidiary the company that owns it, of a product the company that makes it, as the LLM knows it; founded as a company when not known yet. Never replaced by a recognition. Foreign key to `entity`, `ON DELETE SET NULL`. Index. UI: Mutterunternehmen, Hersteller. |
+  | merged_into_id | bigint | no | | Set by a merge, never cleared: the entity its name forms went to. Foreign key to `entity`, `ON DELETE SET NULL`. UI: Zusammengeführt in. |
+  | created_at | timestamptz | yes | now() | |
+
+- Relationships: has Namensformen, through them Nennungen; may belong to a parent Entität and have subsidiaries and products; a merged one points to the entity it was merged into.
+- Rules: recognised by the job "Entitäten erkennen" (see Entitätenerkennung), or imported with the starter list of sectors and commodities (`app/seeds/entities.json`, Seed-Protokoll `entities`) - sectors and commodities come only from that list. The list (UI: Entitäten, `/entities`) shows the 200 first by name, not merged ones, with their name forms, uncertain ones, reports and events; filters by kind, uncertain name forms and a part of a name form. The entity page (`/entities/<id>`) shows name forms, reports and similar entities - those of its kind (a company's subsidiaries too) with a name form of trigram similarity from 0.3, at most 10. The analyst merges the selected similar ones into it (UI: In diese Entität zusammenführen): their name forms, identifiers, subsidiaries and products move to it, all or nothing, of its kind only; it takes the first parent among them should it have none; a merged entity keeps its id and page, without name forms, and is no longer listed or compared. Never deleted.
+- Privacy: [privacy] for persons: name.
+
+### Namensform (`entity_alias`)
+- Store: SQL table `entity_alias`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | entity_id | bigint | yes | | Foreign key to `entity`, `ON DELETE CASCADE`. Index. |
+  | scheme | varchar(20) | yes | | `name`; an identifier: `iso3166` (a country's ISO 3166-1 alpha-2 code), `isin`, `lei`, `ticker` (EXCHANGE:SYMBOL), `catalogue` (the key of a starter list item); check constraint. UI: Name, ISO-Ländercode, ISIN, LEI, Ticker, Starterliste. |
+  | value | text | yes | | As recognised: a name as the report or the LLM gives it, an identifier in its one spelling. [privacy] for persons. UI: Namensform. |
+  | key | text | yes | | What it is looked up by: a name without accents, case, punctuation, a leading "the" and trailing legal forms (`entity_names.name_key`: "Boeing Co." and "The Boeing Company" are `boeing`); an identifier in upper case without spaces. Index with `scheme`; unique for identifiers (`uq_entity_alias_identifier`, `scheme <> 'name'`): an identifier names one entity only. Trigram GIN index on names (`ix_entity_alias_key_trgm`, pg_trgm). |
+  | match | varchar(20) | yes | | How it came: `founding` (recognised first with it), `name` (together with a name form the entity has), `identifier` (together with an identifier it has), `llm` (a similar name the LLM judged the same), `seed` (starter list), `split` (split off by the analyst); check constraint. UI: Zuordnung. |
+  | similarity | double precision | no | | Of an uncertain one: its trigram similarity to the entity's most similar name form when it came, three decimals. |
+  | uncertain | boolean | yes | false | Flagged (rule 9): the LLM only judged a similar name the same, or it was recognised together with an uncertain name form. Cleared only by the analyst's confirmation. UI: unsicher. |
+  | confirmed_at | timestamptz | no | | When the analyst confirmed it (UI: Bestätigen). |
+  | created_at | timestamptz | yes | now() | UI: Erfasst. |
+
+- Relationships: belongs to one Entität; has Nennungen.
+- Rules: added only by a recognition, the starter list import or a correction, all under one advisory lock (`entity_repository.lock_entities`, namespace 7304). A name form carries its reports: moved, they name the entity it went to. The analyst confirms selected uncertain ones, or splits selected ones off into one new entity of the same kind, certain, named after the earliest name form among them (UI: Als neue Entität abtrennen) - all or nothing; at least one name form goes and one stays, a starter list key never goes. Never deleted.
+- Privacy: [privacy] for persons: value.
+
+### Nennung (`entity_mention`)
+- Store: SQL table `entity_mention`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | candidate_id | bigint | yes | | The report; foreign key to `event_candidate`, `ON DELETE CASCADE`. Index. Unique with `source` and `position`. |
+  | alias_id | bigint | yes | | The name form it was recognised by - its entity, and whether it is uncertain; foreign key to `entity_alias`, `ON DELETE CASCADE`. Index. |
+  | source | varchar(10) | yes | | `actor` or `impact` (the impact's target); check constraint. UI: Rolle - Akteur, Betroffen. |
+  | position | smallint | yes | | Its place in the report's `actors` or `impacts`: role, impact and quote are read from there. |
+
+- Relationships: belongs to one Ereigniskandidat and one Namensform.
+- Rules: written with its recognition. A name the reports of one extraction give more than once - by the same key - is one entity at every place. The event page (UI: Entitäten) lists the entities its reports name, the most often named first, with the name forms used and whether one is uncertain; the entity page its reports, the latest 100.
+- Privacy: none (it names a person by reference only)
+
+### Entitätenerkennung (`entity_recognition`)
+- Store: SQL table `entity_recognition`, one row per extraction
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | extraction_id | bigint | yes | | Primary key; foreign key to `extraction`, `ON DELETE CASCADE`. |
+  | model | varchar(200) | no | | The model as Ollama names it; empty when the reports name nobody and no call was made. |
+  | schema_version | varchar(20) | yes | | `entity_schema.SCHEMA_VERSION`: the answer's fields, their meaning and the prompt. |
+  | recognised_at | timestamptz | yes | now() | |
+  | duration_ms | integer | no | | The model call, waiting for an LLM slot included. |
+  | names | integer | yes | 0 | The distinct names (by key) of the reports' actors and impact targets the model was asked about, at most 50. |
+  | linked | integer | yes | 0 | Of them, those that became a Nennung; the others the model judged no entity, or a sector or commodity not on the list. |
+
+- Relationships: belongs to one Extraktion.
+- Rules: the job "Entitäten erkennen" (`entity_service`, one of the LLM jobs) runs for every valid extraction with reports and without a recognition, the earliest article first, queued in the worker's LLM sweep. The model is shown the reports, each name with its role or impact and quote, the known entities with a similar name form (pg_trgm similarity from 0.3, at most 3 per name, 40 in all) and the imported sectors and commodities; it answers each name's kind or none, a named individual's public or business position first (a person without one, or answered as a private individual, is no entity - rule 13), its usual English name, a short form the report uses, the known entity it is when it is sure, a subsidiary's parent or a product's maker, a country's code, a listed item's key and identifiers. An identifier counts only valid (ISIN, LEI by their check digits; a country code assigned, UK as GB) and stated in the name's quote (rule 5). Resolved in the effect's transaction under the advisory lock: an identifier or a name form of an entity of the kind (a company's subsidiary alike) - certain; else the known entity the LLM judged it - uncertain; else a new entity. An entity with a similar name that came since the LLM was asked defers the job (`JobDeferred`): it asks anew. An answer cut or outside the schema is retried with the job. Logged by ids and counts only (rule 13).
+- Privacy: none
+
 ### Backfill (`backfill`)
 - Store: SQL table `backfill`
 - Fields:
@@ -415,7 +489,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
   | Field | Type | Required | Default | Notes |
   |-------|------|----------|---------|-------|
-  | seed_source | varchar(100) | yes | | Seed source, e.g. `sources` for `app/seeds/sources.json`. Primary key with `item_key`. |
+  | seed_source | varchar(100) | yes | | Seed source: `sources` for `app/seeds/sources.json`, `entities` for `app/seeds/entities.json` (the starter list of sectors and commodities). Primary key with `item_key`. |
   | item_key | varchar(200) | yes | | The item's stable key in its seed file, independent of its display name. |
   | imported_at | timestamptz | yes | now() | |
 

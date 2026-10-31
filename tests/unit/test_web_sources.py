@@ -115,6 +115,7 @@ def services(monkeypatch):
     monkeypatch.setattr(seed_service, "import_sources", import_sources)
     monkeypatch.setattr(seed_service, "take_catalogue_regions", lambda _engine: calls.get("regions_given", 0))
     monkeypatch.setattr(seed_service, "sources_status", lambda _engine: calls.get("seed_status", SeedStatus(17, 0)))
+    monkeypatch.setattr(seed_service, "entities_status", lambda _engine: calls.get("entities_status", SeedStatus(52, 0)))
     monkeypatch.setattr(platform_settings_service, "current", lambda _engine: PlatformSettings())
 
     def start_backfill(_engine, source_id, form):

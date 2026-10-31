@@ -42,8 +42,9 @@ BACKFILL_JOB_KIND = "backfill"
 NORMALIZE_JOB_KIND = "normalize_article"
 EXTRACT_EVENTS_JOB_KIND = "extract_events"
 ASSIGN_EVENT_JOB_KIND = "assign_event"
+RECOGNISE_ENTITIES_JOB_KIND = "recognise_entities"
 # The kinds that need Ollama: the worker claims them only while it serves the model (app/worker/main.py).
-LLM_JOB_KINDS = frozenset({EXTRACT_EVENTS_JOB_KIND, ASSIGN_EVENT_JOB_KIND})
+LLM_JOB_KINDS = frozenset({EXTRACT_EVENTS_JOB_KIND, ASSIGN_EVENT_JOB_KIND, RECOGNISE_ENTITIES_JOB_KIND})
 KIND_LABELS = {
     TEST_JOB_KIND: "Testjob",
     BACKUP_JOB_KIND: "Datenbank-Backup",
@@ -53,6 +54,7 @@ KIND_LABELS = {
     NORMALIZE_JOB_KIND: "Artikel normalisieren",
     EXTRACT_EVENTS_JOB_KIND: "Ereignisse extrahieren",
     ASSIGN_EVENT_JOB_KIND: "Ereignis zuordnen",
+    RECOGNISE_ENTITIES_JOB_KIND: "Entitäten erkennen",
 }
 
 

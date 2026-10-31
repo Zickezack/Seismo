@@ -1,0 +1,314 @@
+[
+  {
+    "key": "oil-gas",
+    "kind": "sector",
+    "name": "Öl und Gas",
+    "english": "oil and gas (exploration, production, refining, oilfield services)"
+  },
+  {
+    "key": "utilities",
+    "kind": "sector",
+    "name": "Versorger",
+    "english": "utilities (power, gas and water supply, grids)"
+  },
+  {
+    "key": "renewable-energy",
+    "kind": "sector",
+    "name": "Erneuerbare Energien",
+    "english": "renewable energy (solar, wind, hydro, hydrogen)"
+  },
+  {
+    "key": "mining-metals",
+    "kind": "sector",
+    "name": "Bergbau und Metalle",
+    "english": "mining and metals (including steel making)"
+  },
+  {
+    "key": "chemicals",
+    "kind": "sector",
+    "name": "Chemie",
+    "english": "chemicals and fertilizers"
+  },
+  {
+    "key": "agriculture-food",
+    "kind": "sector",
+    "name": "Landwirtschaft und Nahrungsmittel",
+    "english": "agriculture, food and beverages"
+  },
+  {
+    "key": "automotive",
+    "kind": "sector",
+    "name": "Automobil",
+    "english": "automotive (cars, trucks, parts, electric vehicles)"
+  },
+  {
+    "key": "aerospace-defense",
+    "kind": "sector",
+    "name": "Luftfahrt und Rüstung",
+    "english": "aerospace and defense (aircraft makers, arms, military equipment)"
+  },
+  {
+    "key": "industrial-goods",
+    "kind": "sector",
+    "name": "Industrie und Maschinenbau",
+    "english": "industrial goods and machinery"
+  },
+  {
+    "key": "construction-real-estate",
+    "kind": "sector",
+    "name": "Bau und Immobilien",
+    "english": "construction, building materials and real estate"
+  },
+  {
+    "key": "transport-logistics",
+    "kind": "sector",
+    "name": "Transport und Logistik",
+    "english": "transport and logistics (shipping, ports, rail, trucking, freight)"
+  },
+  {
+    "key": "airlines-tourism",
+    "kind": "sector",
+    "name": "Luftverkehr und Tourismus",
+    "english": "airlines, airports, travel, hotels and tourism"
+  },
+  {
+    "key": "banking",
+    "kind": "sector",
+    "name": "Banken",
+    "english": "banking"
+  },
+  {
+    "key": "insurance",
+    "kind": "sector",
+    "name": "Versicherungen",
+    "english": "insurance and reinsurance"
+  },
+  {
+    "key": "financial-services",
+    "kind": "sector",
+    "name": "Finanzdienstleistungen",
+    "english": "financial services (asset management, exchanges, payments, crypto platforms)"
+  },
+  {
+    "key": "software-it",
+    "kind": "sector",
+    "name": "Software und IT-Dienste",
+    "english": "software, internet platforms and IT services"
+  },
+  {
+    "key": "semiconductors",
+    "kind": "sector",
+    "name": "Halbleiter",
+    "english": "semiconductors and chip equipment"
+  },
+  {
+    "key": "hardware-electronics",
+    "kind": "sector",
+    "name": "Hardware und Elektronik",
+    "english": "computer hardware, consumer electronics and electronic components"
+  },
+  {
+    "key": "telecommunications",
+    "kind": "sector",
+    "name": "Telekommunikation",
+    "english": "telecommunications (networks, mobile operators, satellites)"
+  },
+  {
+    "key": "media-entertainment",
+    "kind": "sector",
+    "name": "Medien und Unterhaltung",
+    "english": "media, entertainment, gaming and sports business"
+  },
+  {
+    "key": "retail-consumer-goods",
+    "kind": "sector",
+    "name": "Handel und Konsumgüter",
+    "english": "retail, e-commerce and consumer goods"
+  },
+  {
+    "key": "healthcare-pharma",
+    "kind": "sector",
+    "name": "Gesundheit und Pharma",
+    "english": "healthcare, pharmaceuticals, biotech and medical devices"
+  },
+  {
+    "key": "crude-oil",
+    "kind": "commodity",
+    "name": "Rohöl",
+    "english": "crude oil (Brent, WTI)"
+  },
+  {
+    "key": "oil-products",
+    "kind": "commodity",
+    "name": "Ölprodukte",
+    "english": "oil products (gasoline, diesel, jet fuel, heating oil)"
+  },
+  {
+    "key": "natural-gas",
+    "kind": "commodity",
+    "name": "Erdgas",
+    "english": "natural gas and LNG"
+  },
+  {
+    "key": "coal",
+    "kind": "commodity",
+    "name": "Kohle",
+    "english": "coal"
+  },
+  {
+    "key": "electricity",
+    "kind": "commodity",
+    "name": "Strom",
+    "english": "electricity"
+  },
+  {
+    "key": "uranium",
+    "kind": "commodity",
+    "name": "Uran",
+    "english": "uranium"
+  },
+  {
+    "key": "gold",
+    "kind": "commodity",
+    "name": "Gold",
+    "english": "gold"
+  },
+  {
+    "key": "silver",
+    "kind": "commodity",
+    "name": "Silber",
+    "english": "silver"
+  },
+  {
+    "key": "platinum-group-metals",
+    "kind": "commodity",
+    "name": "Platinmetalle",
+    "english": "platinum and palladium"
+  },
+  {
+    "key": "copper",
+    "kind": "commodity",
+    "name": "Kupfer",
+    "english": "copper"
+  },
+  {
+    "key": "aluminium",
+    "kind": "commodity",
+    "name": "Aluminium",
+    "english": "aluminium"
+  },
+  {
+    "key": "nickel",
+    "kind": "commodity",
+    "name": "Nickel",
+    "english": "nickel"
+  },
+  {
+    "key": "zinc-lead",
+    "kind": "commodity",
+    "name": "Zink und Blei",
+    "english": "zinc and lead"
+  },
+  {
+    "key": "iron-ore",
+    "kind": "commodity",
+    "name": "Eisenerz",
+    "english": "iron ore"
+  },
+  {
+    "key": "steel",
+    "kind": "commodity",
+    "name": "Stahl",
+    "english": "steel"
+  },
+  {
+    "key": "lithium",
+    "kind": "commodity",
+    "name": "Lithium",
+    "english": "lithium"
+  },
+  {
+    "key": "cobalt",
+    "kind": "commodity",
+    "name": "Kobalt",
+    "english": "cobalt"
+  },
+  {
+    "key": "rare-earths",
+    "kind": "commodity",
+    "name": "Seltene Erden",
+    "english": "rare earths"
+  },
+  {
+    "key": "wheat",
+    "kind": "commodity",
+    "name": "Weizen",
+    "english": "wheat"
+  },
+  {
+    "key": "corn",
+    "kind": "commodity",
+    "name": "Mais",
+    "english": "corn (maize)"
+  },
+  {
+    "key": "soybeans",
+    "kind": "commodity",
+    "name": "Sojabohnen",
+    "english": "soybeans"
+  },
+  {
+    "key": "rice",
+    "kind": "commodity",
+    "name": "Reis",
+    "english": "rice"
+  },
+  {
+    "key": "sugar",
+    "kind": "commodity",
+    "name": "Zucker",
+    "english": "sugar"
+  },
+  {
+    "key": "coffee",
+    "kind": "commodity",
+    "name": "Kaffee",
+    "english": "coffee"
+  },
+  {
+    "key": "cocoa",
+    "kind": "commodity",
+    "name": "Kakao",
+    "english": "cocoa"
+  },
+  {
+    "key": "cotton",
+    "kind": "commodity",
+    "name": "Baumwolle",
+    "english": "cotton"
+  },
+  {
+    "key": "palm-oil",
+    "kind": "commodity",
+    "name": "Palmöl",
+    "english": "palm oil and vegetable oils"
+  },
+  {
+    "key": "livestock",
+    "kind": "commodity",
+    "name": "Vieh und Fleisch",
+    "english": "livestock and meat (cattle, hogs)"
+  },
+  {
+    "key": "fertilizers",
+    "kind": "commodity",
+    "name": "Düngemittel",
+    "english": "fertilizers (potash, phosphate, nitrogen)"
+  },
+  {
+    "key": "timber",
+    "kind": "commodity",
+    "name": "Holz",
+    "english": "timber and lumber"
+  }
+]

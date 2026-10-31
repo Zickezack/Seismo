@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Entitäten{% endblock %}
+{% block content %}
+<h1>Entitäten</h1>
+
+<section class="card stack">
+  {# A plain GET form: the filter works without JavaScript and the URL can be bookmarked. #}
+  <form class="toolbar" method="get" action="/entities" data-testid="entity-filter">
+    <div class="field">
+      <label for="kind">Art</label>
+      <select id="kind" name="kind" data-testid="filter-kind">
+        <option value="">Alle Arten</option>
+        {% for code, label in kinds.items() %}
+        <option value="{{ code }}"{% if kind == code %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="q">Name enthält</label>
+      <input type="search" id="q" name="q" value="{{ q }}" maxlength="200" data-testid="filter-q">
+      <label class="checkbox-label"><input type="checkbox" name="uncertain" value="1"{% if uncertain %} checked{% endif %} data-testid="filter-uncertain"> Nur mit unsicheren Namensformen</label>
+    </div>
+    <button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button>
+  </form>
+  <p class="hint" data-testid="entity-count">
+    {% if overview.total > overview.entities|length %}Angezeigt: die ersten {{ overview.entities|length }} von {{ overview.total }} Entitäten nach Name.{% else %}{{ overview.total }} {{ "Entität" if overview.total == 1 else "Entitäten" }}.{% endif %}
+    {% if overview.waiting %}{{ overview.waiting }} {{ "Extraktion wartet" if overview.waiting == 1 else "Extraktionen warten" }} auf die Entitätenerkennung.{% endif %}
+  </p>
+  <p class="hint">Das LLM erkennt in den Akteuren und betroffenen Zielen jedes Berichts Unternehmen, Personen in öffentlicher Rolle, Länder, Behörden, Organisationen und Produkte, Branchen und Rohstoffe nur aus der Starterliste. Eine bekannte Kennung oder Namensform ordnet sicher zu; einen bloss ähnlichen Namen, den das LLM für dieselbe Entität hält, markiert es als unsicher, bis er bestätigt oder abgetrennt ist.</p>
+</section>
+
+{% if overview.entities %}
+<div class="table-container">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Entität</th>
+        <th>Art</th>
+        <th>Namensformen</th>
+        <th>Unsicher</th>
+        <th>Berichte</th>
+        <th>Ereignisse</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entity in overview.entities %}
+      <tr data-testid="entity-{{ entity.id }}">
+        <td class="cell-title"><a href="/entities/{{ entity.id }}" data-testid="entity-name-{{ entity.id }}">{{ entity.name }}</a></td>
+        <td>{{ entity.kind_label }}</td>
+        <td>{{ entity.alias_count }}</td>
+        <td data-testid="entity-uncertain-{{ entity.id }}">{% if entity.uncertain_count %}<span class="status status-uncertain">{{ entity.uncertain_count }}</span>{% else %}–{% endif %}</td>
+        <td data-testid="entity-reports-{{ entity.id }}">{{ entity.report_count }}</td>
+        <td>{{ entity.event_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p data-testid="no-entities">{% if kind or uncertain or q %}Keine Entitäten für diese Auswahl.{% else %}Noch keine Entitäten. Der Worker erkennt sie einmal pro Minute in den extrahierten Berichten, solange Ollama das Modell bereitstellt; Branchen und Rohstoffe kommen mit der Starterliste in den Plattform-Einstellungen.{% endif %}</p>
+{% endif %}
+{% endblock %}

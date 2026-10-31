@@ -59,7 +59,7 @@ never into the log. After setting it, recreate the worker. An EIA Quelle's URL i
 browser (https://www.eia.gov/opendata/browser) shows for a data set, e.g.
 `https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value`.
 
-The event extraction asks an Ollama server (worker only; empty `OLLAMA_BASE_URL`: no extraction):
+The event extraction and the entity recognition ask an Ollama server (worker only; empty `OLLAMA_BASE_URL`: neither):
 
 | Variable | Rule |
 |----------|------|
@@ -68,7 +68,8 @@ The event extraction asks an Ollama server (worker only; empty `OLLAMA_BASE_URL`
 | `OLLAMA_NUM_CTX` | Optional, default `8192`, at least `6144`: the model's context in tokens; longer texts are cut to fit. |
 
 Which articles reach the model, and how many per hour, is set in the Plattform-Einstellungen (Ereignisextraktion)
-and per source (Ereignisse extrahieren).
+and per source (Ereignisse extrahieren). Sectors and commodities are recognised only after the admin imported their
+starter list (Plattform-Einstellungen, Starterdaten).
 
 ## Run the stack
 

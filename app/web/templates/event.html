@@ -5,7 +5,7 @@
 {% set merged = detail.merged_into is not none %}
 {# A split needs a report to leave and one to stay. #}
 {% set splittable = not merged and detail.reports|length > 1 %}
-{% set sections = [("states", "Verlauf"), ("reports", "Berichte")]
+{% set sections = [("states", "Verlauf"), ("reports", "Berichte"), ("entities", "Entitäten")]
   + ([] if merged else [("similar", "Ähnliche Ereignisse")])
   + ([("corrections", "Korrekturen")] if detail.corrections else []) %}
 <h1 data-testid="event-title">{{ event.title }}</h1>
@@ -124,6 +124,40 @@
     </form>
     {% else %}
     <p data-testid="no-reports">Keine Berichte.</p>
+    {% endif %}
+  </div>
+</details>
+
+{# The entities its reports name, by the name forms they give (Entitäten und Wissensmodell, story 1). #}
+<details class="section" id="entities" open data-testid="entities-section">
+  <summary><h2>Entitäten ({{ entities|length }})</h2></summary>
+  <div class="stack">
+    {% if entities %}
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Entität</th>
+            <th>Art</th>
+            <th>Genannt als</th>
+            <th>Berichte</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entity in entities %}
+          <tr data-testid="entity-{{ entity.id }}">
+            <td class="cell-title"><a href="/entities/{{ entity.id }}" data-testid="entity-name-{{ entity.id }}">{{ entity.name }}</a></td>
+            <td>{{ entity.kind_label }}</td>
+            <td class="cell-wrap" data-testid="entity-forms-{{ entity.id }}">{{ entity.forms|join(", ") }}{% if entity.uncertain %} <span class="status status-uncertain" data-testid="entity-uncertain-{{ entity.id }}">unsicher</span>{% endif %}</td>
+            <td>{{ entity.report_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Unsicher: mindestens ein Bericht nennt die Entität mit einer Namensform, die das LLM nur nach einem ähnlichen Namen zugeordnet hat und die noch niemand bestätigt hat.</p>
+    {% else %}
+    <p data-testid="no-entities">{% if merged %}Keine: die Berichte stehen beim Ereignis, in das es zusammengeführt wurde.{% else %}Noch keine erkannt.{% endif %}</p>
     {% endif %}
   </div>
 </details>

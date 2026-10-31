@@ -141,6 +141,50 @@ class CorrectionKind(StrEnum):
     SPLIT = "split"  # reports of an event split off into a new one
 
 
+class EntityKind(StrEnum):
+    """What an entity is (entity_service); labels there. Organisation: neither company nor authority - OPEC, a party,
+    a union, an armed group (the admin's decision of 2026-10-31)."""
+
+    COMPANY = "company"
+    SUBSIDIARY = "subsidiary"
+    PERSON = "person"  # in a public or business role only: personal data (datamodel.md, rule 13)
+    COUNTRY = "country"
+    AUTHORITY = "authority"
+    ORGANIZATION = "organization"
+    PRODUCT = "product"
+    COMMODITY = "commodity"  # of the starter list only
+    SECTOR = "sector"  # of the starter list only
+
+
+class AliasScheme(StrEnum):
+    """What a name form of an entity is: a name, or an identifier of a scheme."""
+
+    NAME = "name"
+    ISO3166 = "iso3166"  # a country's ISO 3166-1 alpha-2 code
+    ISIN = "isin"
+    LEI = "lei"
+    TICKER = "ticker"  # EXCHANGE:SYMBOL
+    CATALOGUE = "catalogue"  # the key of an item of the starter list of sectors and commodities
+
+
+class AliasMatch(StrEnum):
+    """How a name form came to its entity (entity_service)."""
+
+    FOUNDING = "founding"  # the entity was recognised with it first
+    NAME = "name"  # recognised together with a name form the entity has
+    IDENTIFIER = "identifier"  # recognised together with an identifier the entity has
+    LLM = "llm"  # a similar name the LLM judged the same: uncertain until the analyst confirms it
+    SEED = "seed"  # the starter list
+    SPLIT = "split"  # split off into an entity of its own by the analyst
+
+
+class MentionSource(StrEnum):
+    """Where in its report an entity is named."""
+
+    ACTOR = "actor"
+    IMPACT = "impact"  # the target of an impact
+
+
 class BackfillStatus(StrEnum):
     RUNNING = "running"
     DONE = "done"
@@ -588,6 +632,91 @@ class Evidence(Base):
     source_quality: Mapped[str | None] = mapped_column(String(10))
 
     __table_args__ = (CheckConstraint(source_quality.in_([s.value for s in ConfidenceLevel]), name="source_quality"),)
+
+
+class Entity(Base):
+    """A company, subsidiary, person, country, authority, organisation, product, commodity or sector (UI term:
+    Entität), recognised in reports (entity_service). Its name forms and identifiers are its aliases."""
+
+    __tablename__ = "entity"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    # The usual English name it was first recognised with, the German one of a starter list item. [privacy] for persons.
+    name: Mapped[str] = mapped_column(Text)
+    # Of a subsidiary the company that owns it, of a product the company that makes it.
+    parent_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity.id", ondelete="SET NULL"), index=True)
+    # Set by a merge, never cleared: the entity its name forms went to. Its id stays valid and leads there.
+    merged_into_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (CheckConstraint(kind.in_([s.value for s in EntityKind]), name="kind"),)
+
+
+class EntityAlias(Base):
+    """A name form or identifier of an entity (UI term: Namensform). Uncertain while the LLM only judged a similar
+    name the same and the analyst has not confirmed it (datamodel.md, rule 9)."""
+
+    __tablename__ = "entity_alias"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    entity_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("entity.id", ondelete="CASCADE"), index=True)
+    scheme: Mapped[str] = mapped_column(String(20))
+    value: Mapped[str] = mapped_column(Text)  # as recognised; [privacy] for persons
+    # What it is looked up by (entity_service.name_key, identifier_key).
+    key: Mapped[str] = mapped_column(Text)
+    match: Mapped[str] = mapped_column(String(20))
+    # Of an uncertain one: its trigram similarity to the entity's most similar name form when it came.
+    similarity: Mapped[float | None] = mapped_column(Float)
+    uncertain: Mapped[bool] = mapped_column(server_default=false())
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(scheme.in_([s.value for s in AliasScheme]), name="scheme"),
+        CheckConstraint(match.in_([s.value for s in AliasMatch]), name="match"),
+        Index("ix_entity_alias_scheme_key", scheme, key),
+        # An identifier names one entity only.
+        Index("uq_entity_alias_identifier", scheme, key, unique=True, postgresql_where=scheme != AliasScheme.NAME.value),
+        # Similar names (pg_trgm): the candidates the LLM is shown.
+        Index(
+            "ix_entity_alias_key_trgm", key, postgresql_using="gin", postgresql_ops={"key": "gin_trgm_ops"},
+            postgresql_where=scheme == AliasScheme.NAME.value,
+        ),
+    )
+
+
+class EntityMention(Base):
+    """An entity named in a report (UI term: Nennung): an actor or an impact's target of an event candidate, by the
+    name form it was recognised with - which carries the uncertainty."""
+
+    __tablename__ = "entity_mention"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event_candidate.id", ondelete="CASCADE"), index=True)
+    alias_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("entity_alias.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(10))
+    position: Mapped[int] = mapped_column(SmallInteger)  # in the candidate's actors or impacts
+
+    __table_args__ = (
+        CheckConstraint(source.in_([s.value for s in MentionSource]), name="source"),
+        UniqueConstraint(candidate_id, source, position),
+    )
+
+
+class EntityRecognition(Base):
+    """The recognition of the entities an extraction's reports name (UI term: Entitätenerkennung): one LLM run per
+    extraction, or none when they name nobody."""
+
+    __tablename__ = "entity_recognition"
+
+    extraction_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("extraction.id", ondelete="CASCADE"), primary_key=True)
+    model: Mapped[str | None] = mapped_column(String(200))  # empty without a call
+    schema_version: Mapped[str] = mapped_column(String(20))
+    recognised_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    names: Mapped[int] = mapped_column(Integer, server_default=text("0"))  # the distinct names the model was asked about
+    linked: Mapped[int] = mapped_column(Integer, server_default=text("0"))  # of them, those linked to an entity
 
 
 class RawText(Base):

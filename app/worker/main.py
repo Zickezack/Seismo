@@ -6,8 +6,9 @@ hour the worker deletes finished jobs whose retention period has passed; once a 
 backup job if a backup is due (app/services/backup_service.py), a fetch job for every source whose
 next fetch is due (app/services/ingestion_service.py), a normalization for every article whose full
 text is settled (app/services/normalization_service.py) and, with an Ollama configured, an extraction for the
-articles that pass its pre-filter, within the hour's budget (app/services/extraction_service.py), and an assignment
-to its event for every event candidate without one (app/services/event_service.py).
+articles that pass its pre-filter, within the hour's budget (app/services/extraction_service.py), an assignment
+to its event for every event candidate without one (app/services/event_service.py) and a recognition of the entities
+for every extraction without one (app/services/entity_service.py).
 """
 import logging
 import os
@@ -31,7 +32,14 @@ from app.jobs.runner import Handler, run_next_job
 from app.llm.limiter import LlmCallLimiter
 from app.logging_config import configure_logging
 from app.llm.ollama import OllamaClient
-from app.services import backup_service, event_service, extraction_service, ingestion_service, normalization_service
+from app.services import (
+    backup_service,
+    entity_service,
+    event_service,
+    extraction_service,
+    ingestion_service,
+    normalization_service,
+)
 from app.services.health_service import HealthReport, check_readiness
 from app.db.models import JobStatus
 from app.services.job_service import LEASE_SECONDS, LLM_JOB_KINDS, purge_finished_jobs
@@ -48,8 +56,8 @@ BACKUP_CHECK_INTERVAL_SECONDS = 60
 FETCH_CHECK_INTERVAL_SECONDS = 60
 # An article is normalized at most this late after its full text is settled.
 NORMALIZE_CHECK_INTERVAL_SECONDS = 60
-# An article reaches the extraction at most this late after its normalization, a candidate its event this late after
-# its extraction; the extraction's budget counts per hour.
+# An article reaches the extraction at most this late after its normalization, a candidate its event and an extraction
+# its entities this late after the extraction; the extraction's budget counts per hour.
 LLM_CHECK_INTERVAL_SECONDS = 60
 
 
@@ -183,8 +191,8 @@ def _enqueue_due_normalizations(engine: Engine) -> None:
 
 
 def _enqueue_due_llm_jobs(engine: Engine, llm: Callable[[], OllamaClient], was_served: bool | None) -> bool:
-    """Queue extractions and assignments while Ollama serves the model: queued before it is pulled, they would only
-    fail. Returns whether it does; a change is logged, the state itself not every minute."""
+    """Queue extractions, assignments and recognitions while Ollama serves the model: queued before it is pulled, they
+    would only fail. Returns whether it does; a change is logged, the state itself not every minute."""
     with llm() as client:
         served = client.serves_model()
     if served != was_served:
@@ -195,11 +203,16 @@ def _enqueue_due_llm_jobs(engine: Engine, llm: Callable[[], OllamaClient], was_s
             logger.warning("LLM model not available: Ollama unreachable or the model not pulled", extra=fields)
     if not served:
         return False
-    for enqueue_due, name in ((extraction_service.enqueue_due, "Extraction"), (event_service.enqueue_due, "Assignment")):
+    sweeps = (
+        (extraction_service.enqueue_due, "Extraction"),
+        (event_service.enqueue_due, "Assignment"),
+        (entity_service.enqueue_due, "Entity recognition"),
+    )
+    for enqueue_due, name in sweeps:
         try:
             job_ids = enqueue_due(engine)
         except SQLAlchemyError as error:
-            # Checked again at the next interval; the articles or candidates wait meanwhile.
+            # Checked again at the next interval; the articles, candidates or extractions wait meanwhile.
             logger.warning("%s check failed: %s", name, getattr(error, "orig", None) or error)
             continue
         if job_ids:
