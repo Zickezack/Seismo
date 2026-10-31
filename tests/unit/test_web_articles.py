@@ -456,3 +456,15 @@ def test_reprocessing_an_article_without_a_step_says_so(client, monkeypatch, ove
     client.post("/articles/4/reprocess", data={})
 
     assert text_of(client.get("/articles").text, "flash") == "Keine Schritte ausgewählt."
+
+
+def test_an_article_whose_raw_text_is_deleted_says_since_when_and_what_stays(client, page, overview):
+    deleted = article(4, full_text_bytes=None, text_chars=None, normalization_status="done", raw_text_deleted_at=NOW)
+    page["detail"] = detail(deleted)
+    overview["overview"] = ArticleOverview(source_id=None, hide_duplicates=False, sources=[], articles=[deleted], matching=1)
+
+    html = client.get("/articles/4").text
+
+    note = re.search(r'data-testid="meta-text-note">(.*?)</span>', html, re.DOTALL).group(1)
+    assert note.startswith("Rohtext gelöscht <time") and "nach Ablauf der Aufbewahrung; Zitate und Metadaten bleiben" in note
+    assert text_of(client.get("/articles").text, "text-note-4") == "Rohtext gelöscht"

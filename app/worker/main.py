@@ -11,7 +11,8 @@ to its event for every event candidate without one (app/services/event_service.p
 for every extraction without one (app/services/entity_service.py) and the next jobs of a running reprocessing,
 within its own budget (app/services/reprocessing_service.py). Once a minute, too, the reports of replaced readings
 leave their events once the new ones have theirs; once an hour it measures the storage, if not yet that day
-(app/services/storage_service.py).
+(app/services/storage_service.py), and deletes the raw texts whose retention period is over
+(app/services/raw_text_service.py).
 """
 import logging
 import os
@@ -42,6 +43,7 @@ from app.services import (
     extraction_service,
     ingestion_service,
     normalization_service,
+    raw_text_service,
     reprocessing_service,
     storage_service,
 )
@@ -68,6 +70,8 @@ LLM_CHECK_INTERVAL_SECONDS = 60
 RETIRE_CHECK_INTERVAL_SECONDS = 60
 # Measured once a UTC day; checking hourly measures soon after midnight.
 STORAGE_CHECK_INTERVAL_SECONDS = 60 * 60
+# Retention periods are whole days; a raw text stays at most this much longer.
+RAW_TEXT_CHECK_INTERVAL_SECONDS = 60 * 60
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:
@@ -100,7 +104,7 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
         logger.warning("No Ollama configured (OLLAMA_BASE_URL): no event extraction is queued")
     was_ready = llm_served = None
     next_purge = next_backup_check = next_fetch_check = next_normalize_check = next_llm_check = time.monotonic()
-    next_retire_check = next_storage_check = time.monotonic()
+    next_retire_check = next_storage_check = next_raw_text_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -129,6 +133,9 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and time.monotonic() >= next_storage_check:
                 next_storage_check = time.monotonic() + STORAGE_CHECK_INTERVAL_SECONDS
                 _measure_storage(engine, settings.backup_dir)
+            if report.ready and time.monotonic() >= next_raw_text_check:
+                next_raw_text_check = time.monotonic() + RAW_TEXT_CHECK_INTERVAL_SECONDS
+                _delete_due_raw_texts(engine)
             # After a job, take the next one at once; wait only while the queue is empty.
             claimable = _claimable(handlers, llm_served)
             if report.ready and _run_next_job(engine, claimable, owner, renew_interval, heartbeat_file):
@@ -223,6 +230,14 @@ def _measure_storage(engine: Engine, backup_dir: Path) -> None:
     except SQLAlchemyError as error:
         # Checked again at the next interval; the day's measurement comes later.
         logger.warning("Storage measurement failed: %s", getattr(error, "orig", None) or error)
+
+
+def _delete_due_raw_texts(engine: Engine) -> None:
+    try:
+        raw_text_service.delete_due(engine)
+    except SQLAlchemyError as error:
+        # Tried again at the next interval; the raw texts take their space a while longer.
+        logger.warning("Deleting raw texts failed: %s", getattr(error, "orig", None) or error)
 
 
 def _enqueue_due_llm_jobs(engine: Engine, llm: Callable[[], OllamaClient], was_served: bool | None) -> bool:

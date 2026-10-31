@@ -507,6 +507,8 @@ class Article(Base):
     text_signature: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
     # Its bands: an article sharing one is a candidate for a similar text.
     text_bands: Mapped[list[int] | None] = mapped_column(ARRAY(BigInteger))
+    # When its raw text was deleted, its source's retention period over (raw_text_service); the metadata above stays.
+    raw_text_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         UniqueConstraint(source_id, item_key),

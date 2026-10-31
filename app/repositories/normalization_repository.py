@@ -37,6 +37,7 @@ def get(connection: Connection, article_id: int) -> Row | None:
             Article.published_at,
             Article.published_at_source,
             Article.normalization_status,
+            Article.raw_text_deleted_at,
             RawText.content,
             RawText.content_type,
             RawText.url.label("raw_url"),

@@ -49,6 +49,17 @@
 <details class="card section" id="rohtexte" open data-testid="section-rohtexte">
   <summary><h2>Rohtexte nach Quelle</h2></summary>
   <div class="stack">
+    <div class="table-container">
+      <table class="table table-details" data-testid="raw-text-lifecycle">
+        <tbody>
+          <tr><th scope="row">In Verarbeitung</th><td data-testid="raw-texts-processing">{{ raw_texts.processing }} <span class="hint">normalisiert wird noch, oder die Extraktion kann den Artikel noch nehmen</span></td></tr>
+          <tr><th scope="row">Aufbewahrt</th><td data-testid="raw-texts-kept">{{ raw_texts.kept }} <span class="hint">verarbeitet, die Aufbewahrungsfrist der Quelle läuft</span></td></tr>
+          <tr><th scope="row">Fällig</th><td data-testid="raw-texts-due">{{ raw_texts.due }} <span class="hint">Frist abgelaufen: der Worker löscht sie stündlich</span></td></tr>
+          <tr><th scope="row">Behalten</th><td data-testid="raw-texts-failed">{{ raw_texts.failed }} <span class="hint">Verarbeitung fehlgeschlagen - Text nicht lesbar, oder nur unbrauchbare Antworten des Modells; erneut eingereiht (Jobs) und erfolgreich, gilt die Frist</span></td></tr>
+          <tr><th scope="row">Gelöscht</th><td data-testid="raw-texts-deleted">{{ raw_texts.deleted }} <span class="hint">bisher; Metadaten, Zitate und Prüfsummen der Artikel bleiben</span></td></tr>
+        </tbody>
+      </table>
+    </div>
     {% if storage.by_source %}
     <div class="table-container">
       <table class="table" data-testid="raw-texts-by-source">
@@ -68,7 +79,7 @@
     {% else %}
     <p class="hint" data-testid="no-raw-texts">Keine Rohtexte gespeichert.</p>
     {% endif %}
-    <p class="hint">Wie lange eine Quelle ihre Rohtexte aufbewahrt, steht in ihren Einstellungen.</p>
+    <p class="hint">Wie lange eine Quelle ihre Rohtexte nach der Verarbeitung aufbewahrt, steht in ihren Einstellungen (Rohtext aufbewahren). Ist ein Rohtext gelöscht, lässt sich sein Artikel nicht mehr neu extrahieren.</p>
   </div>
 </details>
 

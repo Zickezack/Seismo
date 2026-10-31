@@ -6,8 +6,9 @@ from urllib.parse import urlencode
 import pytest
 from fastapi.testclient import TestClient
 
-from app.services import reprocessing_service, storage_service
+from app.services import raw_text_service, reprocessing_service, storage_service
 from app.services.bulk import BulkResult
+from app.services.raw_text_service import Lifecycle
 from app.services.reprocessing_service import Group, InvalidReprocessing, Overview, Preview, ReprocessingView
 from app.services.storage_service import Measurement, SourceRawTexts, Storage, TableSize
 from app.web.main import create_app
@@ -61,6 +62,7 @@ def page(monkeypatch):
     monkeypatch.setattr(reprocessing_service, "overview", fake_overview)
     monkeypatch.setattr(storage_service, "current", lambda _engine, backup_dir: STORAGE)
     monkeypatch.setattr(storage_service, "history", lambda _engine: calls["measurements"])
+    monkeypatch.setattr(raw_text_service, "lifecycle", lambda _engine: Lifecycle(processing=120, kept=4700, due=0, failed=3, deleted=55))
     return calls
 
 
@@ -77,6 +79,14 @@ def test_the_page_shows_the_storage_now_its_tables_and_the_raw_texts_per_source(
     # Without measurements yet, the page says when they come.
     assert text_of(html, "no-measurements") == "Noch keine Messung. Der Worker misst einmal am Tag (UTC)."
     assert 'aria-current="page"' in tag_of(html, "nav-data")
+
+
+def test_the_page_says_where_the_raw_texts_stand(client, page):
+    html = client.get("/data").text
+
+    assert [text_of(html, f"raw-texts-{state}") for state in ("processing", "kept", "due", "failed", "deleted")] == [
+        "120", "4700", "0", "3", "55",
+    ]
 
 
 def test_every_section_is_linked_from_the_quick_navigation(client, page):

@@ -50,6 +50,7 @@ class ArticleListItem:
     duplicate_count: int  # an original's
     link_count: int  # similar articles, separated ones not counted
     first_linked_source: str | None  # the source of a linked article published before this one; None: this one first
+    raw_text_deleted_at: datetime | None = None  # its source's retention period over (raw_text_service)
 
     @property
     def full_text_label(self) -> str:
@@ -76,6 +77,8 @@ class ArticleListItem:
         """What normalization made of the raw text."""
         if self.normalization_status == "failed":
             return "Text nicht lesbar"
+        if self.raw_text_deleted_at is not None:
+            return "Rohtext gelöscht"
         if self.text_chars is None:
             return ""
         return f"Text {self.text_chars}\u00a0Zeichen" if self.text_chars else "kein Text erkannt"

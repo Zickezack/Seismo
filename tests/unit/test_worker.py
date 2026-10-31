@@ -82,6 +82,7 @@ def no_database(monkeypatch):
     engine.normalize_checks = 0
     engine.retire_checks = 0
     engine.storage_checks = []
+    engine.raw_text_checks = 0
 
     def purge(_engine):
         engine.purges += 1
@@ -106,6 +107,10 @@ def no_database(monkeypatch):
         engine.storage_checks.append(backup_dir)
         return False
 
+    def delete_due(_engine):
+        engine.raw_text_checks += 1
+        return 0
+
     monkeypatch.setattr(worker, "create_db_engine", lambda _settings: engine)
     monkeypatch.setattr(worker, "purge_finished_jobs", purge)
     monkeypatch.setattr(worker.backup_service, "enqueue_if_due", enqueue_backup_if_due)
@@ -113,6 +118,7 @@ def no_database(monkeypatch):
     monkeypatch.setattr(worker.normalization_service, "enqueue_due", enqueue_due_normalizations)
     monkeypatch.setattr(worker.reprocessing_service, "retire_replaced", retire_replaced)
     monkeypatch.setattr(worker.storage_service, "measure_if_due", measure_if_due)
+    monkeypatch.setattr(worker.raw_text_service, "delete_due", delete_due)
     monkeypatch.setattr(worker, "head_revision", lambda: "head")
     return engine
 
@@ -267,6 +273,7 @@ def test_fetch_check_runs_once_ready_and_then_only_every_minute(readiness, queue
     assert no_database.retire_checks == 1
     # Once an hour, measuring at most once a day.
     assert no_database.storage_checks == [SETTINGS.backup_dir]
+    assert no_database.raw_text_checks == 1
 
 
 def test_failed_normalization_check_is_logged_and_the_worker_keeps_running(
@@ -363,6 +370,7 @@ def test_a_failing_extraction_check_does_not_keep_the_assignments_from_being_que
 @pytest.mark.parametrize(("check", "name", "message"), [
     ("retire_replaced", "reprocessing_service", "Retiring replaced reports failed: connection lost"),
     ("measure_if_due", "storage_service", "Storage measurement failed: connection lost"),
+    ("delete_due", "raw_text_service", "Deleting raw texts failed: connection lost"),
 ])
 def test_a_failed_retire_or_storage_check_is_logged_and_the_worker_keeps_running(
     readiness, queue, no_database, tmp_path, caplog, monkeypatch, check, name, message

@@ -82,6 +82,11 @@ def normalize(engine: Engine, article_id: int) -> Callable[[Connection], None] |
         article = normalization_repository.get(connection, article_id)
     if article is None or article.normalization_status != NormalizationStatus.PENDING:
         return None
+    if article.content is None and article.raw_text_deleted_at is not None:
+        # Normalized again without its raw text, deleted after its retention period ("Kein Duplikat"): what was read
+        # from it stays - canonical link, language, hash and fingerprint -, and the checks run on it once more.
+        kept = {"normalization_status": NormalizationStatus.DONE, "normalization_error": None}
+        return lambda connection: _finish(connection, article_id, kept, None)
     link = article.canonical_url or clean_url(article.url)
     try:
         page = None if article.content is None else read_page(article.content, article.content_type, article.raw_url)

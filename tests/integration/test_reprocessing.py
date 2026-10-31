@@ -329,12 +329,14 @@ def test_the_storage_is_measured_once_a_day_and_its_growth_follows_from_two(data
     backup = tmp_path / backup_service.backup_name(database.url.database, NOW)
     backup.write_bytes(b"x" * 1000)
 
-    assert storage_service.measure_if_due(database, tmp_path, NOW)
-    assert not storage_service.measure_if_due(database, tmp_path, NOW + timedelta(hours=5))
-    assert storage_service.measure_if_due(database, tmp_path, NOW + timedelta(days=1))
+    # Midday: five hours later is the same UTC day, whatever the time the test runs.
+    noon = NOW.replace(hour=12, minute=0, second=0, microsecond=0)
+    assert storage_service.measure_if_due(database, tmp_path, noon)
+    assert not storage_service.measure_if_due(database, tmp_path, noon + timedelta(hours=5))
+    assert storage_service.measure_if_due(database, tmp_path, noon + timedelta(days=1))
 
     history = storage_service.history(database)
-    assert [each.measured_on for each in history] == [NOW.date() + timedelta(days=1), NOW.date()]
+    assert [each.measured_on for each in history] == [noon.date() + timedelta(days=1), noon.date()]
     assert (history[0].raw_text_count, history[0].article_count, history[0].backup_bytes) == (1, 1, 1000)
     assert history[0].backup_free_bytes > 0
     growth = storage_service.growth(history, 7)

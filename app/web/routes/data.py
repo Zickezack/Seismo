@@ -1,12 +1,13 @@
-"""Datenbestand: what the data takes - now, per Quelle and day by day - and the reprocessing of runs made with an older
-schema version or another model (userstories.md, Verdichtung und Daten-Lifecycle, story 2)."""
+"""Datenbestand: what the data takes - now, per Quelle and day by day -, where the raw texts stand in their lifecycle
+(story 1), and the reprocessing of runs made with an older schema version or another model (userstories.md,
+Verdichtung und Daten-Lifecycle, story 2)."""
 from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app.services import reprocessing_service, storage_service
+from app.services import raw_text_service, reprocessing_service, storage_service
 from app.services.reprocessing_service import InvalidReprocessing
 from app.web.forms import form_values
 from app.web.templating import flash, name_list, templates
@@ -32,6 +33,7 @@ def data_page(request: Request, group: str = "", source_id: str = "", period_sta
     measurements = storage_service.history(engine)
     context = {
         "storage": storage_service.current(engine, request.app.state.backup_dir),
+        "raw_texts": raw_text_service.lifecycle(engine),
         "measurements": measurements,
         "growths": [growth for days in storage_service.GROWTH_PERIODS if (growth := storage_service.growth(measurements, days))],
         "overview": overview,

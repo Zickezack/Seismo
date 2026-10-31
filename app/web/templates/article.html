@@ -18,7 +18,7 @@
         <tr><th scope="row">Veröffentlicht</th><td data-testid="meta-published">{{ article.published_at|local_time }}{% if article.published_note %} <span class="hint">{{ article.published_note }}</span>{% endif %}</td></tr>
         <tr><th scope="row">Abgerufen</th><td>{{ article.fetched_at|local_time }}</td></tr>
         <tr><th scope="row">Sprache</th><td>{{ article.language_label }}</td></tr>
-        <tr><th scope="row">Volltext</th><td data-testid="meta-full-text"><span class="status status-{{ article.full_text_status }}">{{ article.full_text_label }}</span>{% if article.full_text_size %} {{ article.full_text_size }}{% endif %}{% if article.text_note %} <span class="hint">{{ article.text_note }}</span>{% endif %}{% if article.full_text_error %} <span class="hint">{{ article.full_text_error }}</span>{% endif %}</td></tr>
+        <tr><th scope="row">Volltext</th><td data-testid="meta-full-text"><span class="status status-{{ article.full_text_status }}">{{ article.full_text_label }}</span>{% if article.full_text_size %} {{ article.full_text_size }}{% endif %}{% if article.text_note %} <span class="hint" data-testid="meta-text-note">{{ article.text_note }}{% if article.raw_text_deleted_at %} {{ article.raw_text_deleted_at|local_time }}, nach Ablauf der Aufbewahrung; Zitate und Metadaten bleiben{% endif %}</span>{% endif %}{% if article.full_text_error %} <span class="hint">{{ article.full_text_error }}</span>{% endif %}</td></tr>
       </tbody>
     </table>
   </div>
