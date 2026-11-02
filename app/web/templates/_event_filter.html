@@ -1,0 +1,88 @@
+{# The filter of the events (event_service.parse_filter), on the list and the start page. A plain GET form: it works
+   without JavaScript and the URL can be bookmarked. The start page keeps its period by a hidden field. #}
+{% macro event_filter(filter, choices, action, period=None) %}
+<details class="card section" id="filter"{% if filter.active or period is none %} open{% endif %} data-testid="section-filter">
+  <summary><h2>Filter{% if filter.active %} (aktiv){% endif %}</h2></summary>
+  <form class="form-grid" method="get" action="{{ action }}" data-testid="event-filter">
+    {% if period is none %}
+    <div class="field">
+      <label for="filter-period">Zeitraum</label>
+      <select id="filter-period" name="period" data-testid="filter-period">
+        <option value="">Jederzeit</option>
+        {% for key, label in choices.periods.items() %}
+        <option value="{{ key }}"{% if filter.values.period == key %} selected{% endif %}>Letzte {{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="filter-development">Entwicklung im Zeitraum</label>
+      <select id="filter-development" name="development" data-testid="filter-development">
+        <option value="">Alle mit einem Bericht</option>
+        {% for key, label in choices.developments.items() %}
+        <option value="{{ key }}"{% if filter.values.development == key %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% else %}
+    <input type="hidden" name="period" value="{{ period }}">
+    {% endif %}
+    <div class="field">
+      <label for="filter-type">Typ</label>
+      <select id="filter-type" name="type" data-testid="filter-type">
+        <option value="">Alle Typen</option>
+        {% for key, label in choices.types.items() %}
+        <option value="{{ key }}"{% if filter.values.type == key %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="filter-country">Land</label>
+      <select id="filter-country" name="country" data-testid="filter-country">
+        <option value="">Alle Länder</option>
+        {% for code in choices.countries %}
+        <option value="{{ code }}"{% if filter.values.country == code %} selected{% endif %}>{{ code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="filter-sector">Branche</label>
+      <select id="filter-sector" name="sector" data-testid="filter-sector">
+        <option value="">Alle Branchen</option>
+        {% for sector in choices.sectors %}
+        <option value="{{ sector.id }}"{% if filter.values.sector == sector.id|string %} selected{% endif %}>{{ sector.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="filter-company">Unternehmen (Namensform enthält)</label>
+      <input type="search" id="filter-company" name="company" value="{{ filter.values.company or '' }}" maxlength="200" data-testid="filter-company">
+    </div>
+    <div class="field">
+      <label for="filter-sources">Relevanz: berichtet von</label>
+      <select id="filter-sources" name="sources" data-testid="filter-sources">
+        <option value="">Beliebig vielen Quellen</option>
+        {% for number in choices.min_sources %}
+        <option value="{{ number }}"{% if filter.values.sources == number|string %} selected{% endif %}>Mindestens {{ number }} Quellen</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="filter-horizon">Zeithorizont einer genannten Wirkung</label>
+      <select id="filter-horizon" name="horizon" data-testid="filter-horizon">
+        <option value="">Beliebig</option>
+        {% for key, label in choices.horizons.items() %}
+        <option value="{{ key }}"{% if filter.values.horizon == key %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field field-wide">
+      <label class="checkbox-label"><input type="checkbox" name="impact" value="1"{% if filter.values.impact %} checked{% endif %} data-testid="filter-impact"> Nur mit genannter wirtschaftlicher Wirkung (auf ein Unternehmen, eine Branche, einen Rohstoff oder einen Markt)</label>
+      <p class="hint">Ein Ereignis hat ein Land, einen Typ, eine Branche, ein Unternehmen oder eine Wirkung, wenn es selbst oder einer seiner Berichte es nennt.</p>
+    </div>
+    <div class="form-actions actions">
+      <button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button>
+      {% if filter.active or (period is none and filter.values.period) %}<a class="button button-secondary" href="{{ action }}{% if period %}?period={{ period }}{% endif %}" data-testid="reset-filter">Filter zurücksetzen</a>{% endif %}
+    </div>
+  </form>
+</details>
+{% endmacro %}

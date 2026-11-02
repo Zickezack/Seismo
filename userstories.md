@@ -42,7 +42,6 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 2. As an analyst, I want reproducible backtests with transaction costs, realistic execution assumptions and simple baselines, measuring hit rate, calibration, return, drawdown and stability across market phases and flagging data leakage and multiple testing, so a model is never judged on in-sample results alone and paper trading precedes any real trading.
 
 ### Epic: Dashboard, Recherche und Alerts
-2. As an analyst, I want to filter events by country, sector, company, event type, relevance and time horizon, including new events and material changes, so I find what matters to me.
 3. As an analyst, I want watchlists and configurable, throttled rule-based alerts, so I learn about relevant new events and material changes without checking manually.
 4. As an analyst, I want historical search and similar past events, with uncertainty and contradicting evidence shown instead of hidden behind a single score, so I can put current events into context.
 
@@ -120,6 +119,8 @@ The first sprint does not build any comprehensive stock forecasting yet. It prov
 ### Epic: Dashboard, Recherche und Alerts
 1. As an analyst, I want an overview of new and developing events and an event detail page with chronology, sources and entities, so I can follow what is happening and trace every statement back to its sources.
    - Decided (2026-10-31): the start page shows the events new (first reported) and developing (reported before and again) within the last 24 hours, 3 or 7 days; developing ones with a change of state within the period - escalation, closure, resumption, a material change - first, then by the sources that reported within it. The event page, which had its history, reports, entities and corrections, adds the Chronik - every report in time order with its statements, their kind, levels and quotes, linked to the article - and its Quellen. No change of the data model.
+2. As an analyst, I want to filter events by country, sector, company, event type, relevance and time horizon, including new events and material changes, so I find what matters to me.
+   - Decided (2026-11-02): one filter on the Ereignisse list and the start page, in the database query and kept in the URL. Relevance is the breadth of the coverage - at least 2, 3 or 5 sources - and an economic impact a report names (on a company, sector, commodity or market). Country and type match the event or one of its reports; sector and company an entity its reports name (a company by a part of a name form); horizon an impact a report names. The list adds a period with new, developing or a change of state within it; the start page keeps its own period, its links keep the filter. Country choices show the ISO code only: country entities' names are not reliable (e.g. IN named Tamil Nadu). No change of the data model.
 
 ### Epic: Live-Kurse und Kursdatenspeicher
 1. As an analyst, I want prices of stocks, ETFs and indices (Wertpapiere) as close to real time as the licensed source allows, each shown with its timestamp, source, exchange, currency and a real-time or delayed label, so I can follow the market reaction to an event while it unfolds.

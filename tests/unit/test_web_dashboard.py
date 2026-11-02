@@ -5,11 +5,11 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from app.services import dashboard_service
+from app.services import dashboard_service, event_service
 from app.services.dashboard_service import Change, Dashboard, DashboardEvent
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
-from tests.unit.test_web_events import event
+from tests.unit.test_web_events import CHOICES, event
 
 
 @pytest.fixture
@@ -23,11 +23,12 @@ def client():
 def board(monkeypatch):
     calls = {"dashboard": Dashboard("24h", NOW - timedelta(hours=24), [], [], 0, 0, 0)}
 
-    def overview(_engine, period):
-        calls["period"] = period
+    def overview(_engine, period, criteria):
+        calls["period"], calls["criteria"] = period, criteria
         return calls["dashboard"]
 
     monkeypatch.setattr(dashboard_service, "overview", overview)
+    monkeypatch.setattr(event_service, "filter_choices", lambda _engine: CHOICES)
     return calls
 
 
@@ -59,3 +60,27 @@ def test_a_quiet_period_says_so(client, board):
     assert text_of(html, "no-new") == "Kein neues Ereignis in den letzten 24 Stunden."
     assert text_of(html, "no-developing") == "Kein früher berichtetes Ereignis kam in den letzten 24 Stunden wieder vor."
     assert board["period"] == ""
+
+
+def test_the_start_page_passes_the_filter_and_keeps_it_in_its_links(client, board):
+    board["dashboard"] = Dashboard("3d", NOW - timedelta(days=3), [DashboardEvent(event(5), 1, 1)], [], 30, 0, 0)
+
+    html = client.get("/", params={"period": "3d", "type": "labor", "sources": "2", "development": "new"}).text
+
+    criteria = board["criteria"]
+    # The start page has its own period and splits new from developing itself.
+    assert (criteria.event_type, criteria.min_sources, criteria.since, criteria.development) == ("labor", 2, None, None)
+    assert board["period"] == "3d"
+    assert "open" in tag_of(html, "section-filter")
+    assert tag_of(html, "filter-period") is None and '<input type="hidden" name="period" value="3d">' in html
+    assert 'href="/?type=labor&amp;sources=2&amp;period=7d"' in tag_of(html, "period-7d")
+    assert 'href="/events?type=labor&amp;sources=2&amp;period=3d&amp;development=new"' in tag_of(html, "new-all")
+    assert tag_of(html, "reset-filter") == '<a class="button button-secondary" href="/?period=3d" data-testid="reset-filter">'
+    assert "die zum Filter passen" in re.search(r'data-testid="dashboard-summary">(.*?)</p>', html, re.DOTALL).group(1)
+
+
+def test_without_a_filter_it_stays_folded(client, board):
+    html = client.get("/").text
+
+    assert "open" not in tag_of(html, "section-filter")
+    assert tag_of(html, "period-7d") == '<a class="filter" href="/?period=7d" data-testid="period-7d">'

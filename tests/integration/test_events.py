@@ -44,7 +44,7 @@ def reported(database, key, *reports, published_at=NOW):
     candidates = [
         {"event_type": each["event_type"], "status": each.get("status", "start"), "title": each["title"], "summary": each["summary"],
          "country": each["country"], "place": each["place"], "actors": [{"name": name, "role": "", "quote": name} for name in each["actors"]],
-         "impacts": [], "statements": []}
+         "impacts": each.get("impacts", []), "statements": []}
         for each in reports
     ]
     values = {"article_id": article_id, "model": "m", "schema_version": "2", "duration_ms": 1, "input_chars": 1, "truncated": False}

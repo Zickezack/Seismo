@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_event_filter.html" import event_filter %}
 {% block title %}Dashboard{% endblock %}
 {% macro event_rows(items, kind) %}
 <div class="table-container">
@@ -36,20 +37,22 @@
   {# Plain links: the period works without JavaScript and the URL can be bookmarked. #}
   <nav class="filters" aria-label="Zeitraum" data-testid="period-filter">
     {% for key, label in periods.items() %}
-    <a class="filter" href="/?period={{ key }}" data-testid="period-{{ key }}"{% if dashboard.period == key %} aria-current="true"{% endif %}>Letzte {{ label }}</a>
+    <a class="filter" href="/?{{ filter.query(period=key) }}" data-testid="period-{{ key }}"{% if dashboard.period == key %} aria-current="true"{% endif %}>Letzte {{ label }}</a>
     {% endfor %}
   </nav>
-  <p class="hint" data-testid="dashboard-summary">Seit {{ dashboard.since|local_time }}: {{ dashboard.new_total }} {{ "neues Ereignis" if dashboard.new_total == 1 else "neue Ereignisse" }}, {{ dashboard.developing_total }} in Entwicklung{% if dashboard.changed_total %}, davon {{ dashboard.changed_total }} mit Zustandswechsel{% endif %}. Zeit eines Berichts: die Veröffentlichung seines Artikels, sonst der Abruf.</p>
+  <p class="hint" data-testid="dashboard-summary">Seit {{ dashboard.since|local_time }}: {{ dashboard.new_total }} {{ "neues Ereignis" if dashboard.new_total == 1 else "neue Ereignisse" }}, {{ dashboard.developing_total }} in Entwicklung{% if dashboard.changed_total %}, davon {{ dashboard.changed_total }} mit Zustandswechsel{% endif %}{% if filter.active %}, die zum Filter passen{% endif %}. Zeit eines Berichts: die Veröffentlichung seines Artikels, sonst der Abruf.</p>
 </section>
+
+{{ event_filter(filter, choices, "/", dashboard.period) }}
 
 <section class="card stack" id="new" data-testid="section-new">
   <h2>Neue Ereignisse ({{ dashboard.new_total }})</h2>
   {% if dashboard.new %}
   <p class="hint">Zuerst berichtet im Zeitraum. Zuerst die von den meisten Quellen berichteten.</p>
   {{ event_rows(dashboard.new, "new") }}
-  {% if dashboard.new_total > dashboard.new|length %}<p class="hint" data-testid="new-more">Angezeigt: {{ dashboard.new|length }} von {{ dashboard.new_total }}; alle unter <a href="/events">Ereignisse</a>.</p>{% endif %}
+  {% if dashboard.new_total > dashboard.new|length %}<p class="hint" data-testid="new-more">Angezeigt: {{ dashboard.new|length }} von {{ dashboard.new_total }}; alle unter <a href="/events?{{ filter.query(period=dashboard.period, development='new') }}" data-testid="new-all">Ereignisse</a>.</p>{% endif %}
   {% else %}
-  <p data-testid="no-new">Kein neues Ereignis in den letzten {{ dashboard.period_label }}.</p>
+  <p data-testid="no-new">Kein neues Ereignis{% if filter.active %}, das zum Filter passt,{% endif %} in den letzten {{ dashboard.period_label }}.</p>
   {% endif %}
 </section>
 
@@ -58,9 +61,9 @@
   {% if dashboard.developing %}
   <p class="hint">Früher berichtet und im Zeitraum wieder. Zuerst die mit einem Zustandswechsel im Zeitraum - Eskalation, Abschluss, Wiederaufnahme -, dann die von den meisten Quellen berichteten.</p>
   {{ event_rows(dashboard.developing, "developing") }}
-  {% if dashboard.developing_total > dashboard.developing|length %}<p class="hint" data-testid="developing-more">Angezeigt: {{ dashboard.developing|length }} von {{ dashboard.developing_total }}; alle unter <a href="/events">Ereignisse</a>.</p>{% endif %}
+  {% if dashboard.developing_total > dashboard.developing|length %}<p class="hint" data-testid="developing-more">Angezeigt: {{ dashboard.developing|length }} von {{ dashboard.developing_total }}; alle unter <a href="/events?{{ filter.query(period=dashboard.period, development='developing') }}" data-testid="developing-all">Ereignisse</a>.</p>{% endif %}
   {% else %}
-  <p data-testid="no-developing">Kein früher berichtetes Ereignis kam in den letzten {{ dashboard.period_label }} wieder vor.</p>
+  <p data-testid="no-developing">Kein früher berichtetes Ereignis{% if filter.active %}, das zum Filter passt,{% endif %} kam in den letzten {{ dashboard.period_label }} wieder vor.</p>
   {% endif %}
 </section>
 {% endblock %}

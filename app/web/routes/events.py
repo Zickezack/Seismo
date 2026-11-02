@@ -1,4 +1,4 @@
-"""Ereignisse: the most recently reported events, and one event with its reports, where the analyst merges similar
+"""Ereignisse: the most recently reported events, filtered as the analyst chooses, and one event with its reports, where the analyst merges similar
 events into it and splits off reports of another incident."""
 from typing import Annotated
 
@@ -19,7 +19,14 @@ Reason = Annotated[str, Form()]
 
 @router.get("")
 def event_list(request: Request) -> Response:
-    context = {"overview": event_service.overview(request.app.state.engine)}
+    """Filtered by a plain GET form: works without JavaScript, and the URL can be bookmarked."""
+    engine = request.app.state.engine
+    form = event_service.parse_filter(request.query_params)
+    context = {
+        "overview": event_service.overview(engine, form.criteria),
+        "filter": form,
+        "choices": event_service.filter_choices(engine),
+    }
     return templates.TemplateResponse(request, "events.html", context)
 
 

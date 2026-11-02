@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
 from app.config import AuthSettings, Settings
-from app.services import dashboard_service
+from app.services import dashboard_service, event_service
 from app.web.access import SESSION_COOKIE
 from app.web.main import create_app
 from app.web.routes import auth as auth_routes
@@ -35,7 +35,8 @@ def make_client(auth=AUTH):
 def start_page_without_database(monkeypatch):
     """The start page lists events: here it lists none, without a database."""
     empty = dashboard_service.Dashboard("24h", datetime(2026, 10, 31, tzinfo=UTC), [], [], 0, 0, 0)
-    monkeypatch.setattr(dashboard_service, "overview", lambda _engine, _period: empty)
+    monkeypatch.setattr(dashboard_service, "overview", lambda _engine, _period, criteria: empty)
+    monkeypatch.setattr(event_service, "filter_choices", lambda _engine: event_service.FilterChoices([], []))
 
 
 @pytest.fixture

@@ -27,20 +27,24 @@ import logging
 import math
 import re
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
+from urllib.parse import urlencode
+
 from sqlalchemy import Connection, Engine, Row
 
-from app.db.models import AssignmentMethod, CorrectionKind, EventStatus
+from app.db.models import AssignmentMethod, CorrectionKind, EntityKind, EventStatus
 from app.jobs.errors import JobDeferred
+from app.llm.event_schema import Horizon, TargetKind
 from app.llm.limiter import LlmCallLimiter
 from app.llm.ollama import OllamaClient
 from app.repositories import event_correction_repository, event_repository
-from app.services import job_service
-from app.services.extraction_service import EVENT_TYPE_LABELS, STATUS_LABELS, StatementView
+from app.repositories.event_repository import CHANGED, DEVELOPING, NEW, EventFilter
+from app.services import entity_service, job_service
+from app.services.extraction_service import EVENT_TYPE_LABELS, HORIZON_LABELS, STATUS_LABELS, StatementView
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,17 @@ CHOICES = 3
 # Queued per sweep: an assignment without the LLM takes milliseconds, with it a few seconds.
 QUEUE_LIMIT = 200
 LIST_LIMIT = 100
+# The periods to choose from on the start page and in the list: the key in the URL, its label, its length.
+PERIODS = {"24h": ("24 Stunden", timedelta(hours=24)), "3d": ("3 Tage", timedelta(days=3)), "7d": ("7 Tage", timedelta(days=7))}
+DEFAULT_PERIOD = "24h"
+DEVELOPMENT_LABELS = {NEW: "Neu", DEVELOPING: "In Entwicklung", CHANGED: "Mit Zustandswechsel"}
+# Relevance (the admin's decision of 2026-11-02): reported by at least so many sources, and an impact on the economy
+# that a report names - on a company, a sector, a commodity or a market, not a country or anything else.
+MIN_SOURCES = (2, 3, 5)
+ECONOMIC_TARGETS = (TargetKind.COMPANY, TargetKind.SECTOR, TargetKind.COMMODITY, TargetKind.MARKET)
+FILTER_HORIZONS = {key: label for key, label in HORIZON_LABELS.items() if key != Horizon.UNKNOWN}
+COMPANY_MAX_CHARS = 200
+_COUNTRY = re.compile(r"[A-Z]{2}")
 _WORD = re.compile(r"[^\W_]+")
 # Words that say nothing about which incident a report is of, in the English the model writes.
 STOPWORDS = frozenset(
@@ -355,9 +370,88 @@ class EventListItem:
 
 @dataclass(frozen=True)
 class EventOverview:
-    events: list[EventListItem]  # the LIST_LIMIT most recently reported
-    total: int
+    events: list[EventListItem]  # the LIST_LIMIT most recently reported that match the filter
+    total: int  # that match the filter
     waiting: int  # candidates without an event yet
+
+
+@dataclass(frozen=True)
+class EventFilterForm:
+    """A filter as the URL asks for it (story 2 of Dashboard, Recherche und Alerts): `values` each field as the form
+    shows it again - an unknown value left out, so it narrows nothing -, `criteria` what the query narrows to."""
+
+    values: dict[str, str]
+    criteria: EventFilter
+
+    @property
+    def active(self) -> bool:
+        """Anything chosen beyond the period."""
+        return any(value for key, value in self.values.items() if key != "period")
+
+    def query(self, **changes: str) -> str:
+        """The URL's query of this filter, with `changes` in place of its own values; empty ones left out."""
+        return urlencode({key: value for key, value in (self.values | changes).items() if value})
+
+
+@dataclass(frozen=True)
+class FilterChoices:
+    """What the filter offers to choose from."""
+
+    countries: list[str]
+    sectors: list  # entity_service.EntityRef of the sectors
+    types = EVENT_TYPE_LABELS
+    horizons = FILTER_HORIZONS
+    min_sources = MIN_SOURCES
+    periods = {key: label for key, (label, _) in PERIODS.items()}
+    developments = DEVELOPMENT_LABELS
+
+
+def parse_filter(params: Mapping[str, str], now: datetime | None = None, with_period: bool = True) -> EventFilterForm:
+    """The filter of the URL's parameters. The period and the development only `with_period` (the list; the start page
+    has its own period): a development needs one, the shortest by default."""
+    values: dict[str, str] = {}
+    country = (params.get("country") or "").strip().upper()
+    if _COUNTRY.fullmatch(country):
+        values["country"] = country
+    if params.get("type") in EVENT_TYPE_LABELS:
+        values["type"] = params["type"]
+    if (params.get("sector") or "").isdigit():
+        values["sector"] = str(int(params["sector"]))
+    company = " ".join((params.get("company") or "").split())[:COMPANY_MAX_CHARS]
+    if company:
+        values["company"] = company
+    if params.get("sources") in {str(number) for number in MIN_SOURCES}:
+        values["sources"] = params["sources"]
+    if params.get("impact"):
+        values["impact"] = "1"
+    if params.get("horizon") in FILTER_HORIZONS:
+        values["horizon"] = params["horizon"]
+    since = None
+    if with_period:
+        if params.get("development") in DEVELOPMENT_LABELS:
+            values["development"] = params["development"]
+        period = params.get("period")
+        if period in PERIODS or "development" in values:
+            values["period"] = period if period in PERIODS else DEFAULT_PERIOD
+            since = (now or datetime.now(UTC)) - PERIODS[values["period"]][1]
+    criteria = EventFilter(
+        country=values.get("country"),
+        event_type=values.get("type"),
+        sector_id=int(values["sector"]) if "sector" in values else None,
+        company=values.get("company"),
+        min_sources=int(values["sources"]) if "sources" in values else None,
+        impact_kinds=ECONOMIC_TARGETS if "impact" in values else (),
+        horizon=values.get("horizon"),
+        since=since,
+        development=values.get("development"),
+    )
+    return EventFilterForm(values, criteria)
+
+
+def filter_choices(engine: Engine) -> FilterChoices:
+    with engine.connect() as connection:
+        countries = event_repository.countries(connection)
+    return FilterChoices(countries, entity_service.choices(engine, EntityKind.SECTOR))
 
 
 @dataclass(frozen=True)
@@ -518,10 +612,10 @@ class EventDetail:
         return next((correction for correction in self.corrections if correction.id == correction_id), None)
 
 
-def overview(engine: Engine) -> EventOverview:
+def overview(engine: Engine, criteria: EventFilter = event_repository.NO_FILTER) -> EventOverview:
     with engine.connect() as connection:
-        rows = event_repository.latest(connection, LIST_LIMIT)
-        total = event_repository.count(connection)
+        rows = event_repository.latest(connection, LIST_LIMIT, criteria)
+        total = event_repository.count(connection, criteria)
         waiting = event_repository.count_unassigned(connection)
     return EventOverview(events=[_list_item(row) for row in rows], total=total, waiting=waiting)
 

@@ -5,8 +5,10 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from app.repositories.event_repository import EventFilter
 from app.services import entity_service, event_correction_service, event_service, instrument_service
 from app.services.bulk import BulkResult
+from app.services.entity_service import EntityRef
 from app.services.event_correction_service import InvalidReason, SimilarEvent, SplitResult
 from app.services.event_service import (
     CorrectionView,
@@ -14,6 +16,7 @@ from app.services.event_service import (
     EventListItem,
     EventOverview,
     EventRef,
+    FilterChoices,
     ReportView,
     StateEffect,
     StateView,
@@ -21,6 +24,9 @@ from app.services.event_service import (
 from app.services.extraction_service import StatementView
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
+
+
+CHOICES = FilterChoices(["CH", "US"], [EntityRef(7, "Halbleiter"), EntityRef(8, "Öl und Gas")])
 
 
 def event(event_id, **fields):
@@ -46,7 +52,8 @@ def client():
 @pytest.fixture
 def pages(monkeypatch):
     calls = {"overview": EventOverview(events=[event(2), event(1, country=None, report_count=1, source_count=1)], total=2, waiting=0)}
-    monkeypatch.setattr(event_service, "overview", lambda _engine: calls["overview"])
+    monkeypatch.setattr(event_service, "overview", lambda _engine, criteria: calls.update(criteria=criteria) or calls["overview"])
+    monkeypatch.setattr(event_service, "filter_choices", lambda _engine: calls.get("choices", CHOICES))
     monkeypatch.setattr(event_service, "detail", lambda _engine, event_id: calls.get("detail"))
     monkeypatch.setattr(event_correction_service, "similar_events", lambda _engine, event_id: calls.get("similar", []))
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: calls.get("entities", []))
@@ -336,3 +343,49 @@ def test_the_chronicle_traces_every_statement_of_every_report_to_its_quote_and_a
     # Two sources, the one that reported first first.
     assert [re.search(rf'data-testid="source-{index}">\s*<td class="cell-title">([^<]*)<', html).group(1) for index in (1, 2)] == ["Xinhua", "AP"]
     assert re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html)[:5] == ["states", "chronicle", "reports", "sources", "entities"]
+
+
+def test_the_list_passes_the_filter_of_the_url_and_shows_it_again(client, pages):
+    pages["overview"] = EventOverview(events=[event(1)], total=140, waiting=0)
+
+    html = client.get("/events", params={"country": "US", "sector": "8", "company": "Apple", "sources": "3", "impact": "1",
+                                         "horizon": "weeks", "type": "labor", "development": "new", "period": "7d"}).text
+
+    criteria = pages["criteria"]
+    assert (criteria.country, criteria.sector_id, criteria.company, criteria.min_sources) == ("US", 8, "Apple", 3)
+    assert (criteria.horizon, criteria.event_type, criteria.development) == ("weeks", "labor", "new") and criteria.since is not None
+    assert "open" in tag_of(html, "section-filter")
+    assert text_of(html, "event-count").startswith("Angezeigt: die zuletzt berichteten 1 von 140 passenden Ereignissen.")
+    for testid, value in (("filter-period", "7d"), ("filter-development", "new"), ("filter-type", "labor"), ("filter-country", "US"),
+                          ("filter-sector", "8"), ("filter-sources", "3"), ("filter-horizon", "weeks")):
+        select = re.search(rf'data-testid="{testid}">(.*?)</select>', html, re.DOTALL).group(1)
+        assert re.findall(r'<option value="([^"]*)" selected>', select) == [value], testid
+    assert 'value="Apple"' in tag_of(html, "filter-company")
+    assert "checked" in tag_of(html, "filter-impact")
+    assert tag_of(html, "reset-filter") == '<a class="button button-secondary" href="/events" data-testid="reset-filter">'
+
+
+def test_the_filter_offers_the_countries_and_sectors_known(client, pages):
+    html = client.get("/events").text
+
+    country = re.search(r'data-testid="filter-country">(.*?)</select>', html, re.DOTALL).group(1)
+    assert re.findall(r'<option value="([^"]*)"', country) == ["", "CH", "US"]
+    sector = re.search(r'data-testid="filter-sector">(.*?)</select>', html, re.DOTALL).group(1)
+    assert re.findall(r'<option value="([^"]*)">([^<]*)<', sector) == [("", "Alle Branchen"), ("7", "Halbleiter"), ("8", "Öl und Gas")]
+    assert pages["criteria"] == EventFilter() and tag_of(html, "reset-filter") is None
+
+
+def test_no_event_matching_the_filter_says_so(client, pages):
+    pages["overview"] = EventOverview(events=[], total=0, waiting=0)
+
+    html = client.get("/events", params={"type": "labor"}).text
+
+    assert text_of(html, "no-matching-events") == "Kein Ereignis passt zu diesem Filter."
+    assert text_of(html, "no-events") is None
+
+
+@pytest.mark.parametrize(("total", "expected"), [(1, "1 passendes Ereignis."), (3, "3 passende Ereignisse.")])
+def test_the_count_of_a_filtered_list_says_how_many_match(client, pages, total, expected):
+    pages["overview"] = EventOverview(events=[event(each) for each in range(total)], total=total, waiting=0)
+
+    assert text_of(client.get("/events", params={"period": "24h"}).text, "event-count") == expected

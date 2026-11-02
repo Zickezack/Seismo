@@ -473,7 +473,11 @@ def live_by_name(connection: Connection, name: str) -> list[int]:
     return list(connection.execute(statement).scalars())
 
 
-def choices(connection: Connection, limit: int) -> Sequence[Row]:
-    """Names and numbers of the entities, not merged ones, by name: what a form offers to choose from."""
-    statement = select(Entity.id, Entity.name).where(_LIVE).order_by(Entity.name.collate(NAME_COLLATION), Entity.id).limit(limit)
+def choices(connection: Connection, limit: int, kind: str | None = None) -> Sequence[Row]:
+    """Names and numbers of the entities, not merged ones, of one kind or all, by name: what a form offers to choose
+    from."""
+    statement = select(Entity.id, Entity.name).where(_LIVE)
+    if kind is not None:
+        statement = statement.where(Entity.kind == kind)
+    statement = statement.order_by(Entity.name.collate(NAME_COLLATION), Entity.id).limit(limit)
     return connection.execute(statement).all()

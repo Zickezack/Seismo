@@ -1,15 +1,19 @@
 {% extends "base.html" %}
+{% from "_event_filter.html" import event_filter %}
 {% block title %}Ereignisse{% endblock %}
 {% block content %}
 <h1>Ereignisse</h1>
 
 <section class="card stack">
   <p class="hint" data-testid="event-count">
-    {% if overview.total > overview.events|length %}Angezeigt: die zuletzt berichteten {{ overview.events|length }} von {{ overview.total }} Ereignissen.{% else %}{{ overview.total }} {{ "Ereignis" if overview.total == 1 else "Ereignisse" }}.{% endif %}
+    {% set filtered = filter.active or filter.values.period %}
+    {% if overview.total > overview.events|length %}Angezeigt: die zuletzt berichteten {{ overview.events|length }} von {{ overview.total }}{{ " passenden" if filtered }} Ereignissen.{% elif filtered %}{{ overview.total }} {{ "passendes Ereignis" if overview.total == 1 else "passende Ereignisse" }}.{% else %}{{ overview.total }} {{ "Ereignis" if overview.total == 1 else "Ereignisse" }}.{% endif %}
     {% if overview.waiting %}{{ overview.waiting }} {{ "Ereigniskandidat wartet" if overview.waiting == 1 else "Ereigniskandidaten warten" }} auf die Zuordnung.{% endif %}
   </p>
   <p class="hint">Ein Ereignis ist ein Vorfall mit seiner Fortsetzung, nicht ein Thema. Ein neuer Bericht kommt zu einem Ereignis, das bis sieben Tage davor oder danach berichtet wurde: bei ähnlichen Worten von selbst, im Zweifel entscheidet das LLM.</p>
 </section>
+
+{{ event_filter(filter, choices, "/events") }}
 
 {% if overview.events %}
 <div class="table-container">
@@ -42,6 +46,8 @@
     </tbody>
   </table>
 </div>
+{% elif filter.active or filter.values.period %}
+<p data-testid="no-matching-events">Kein Ereignis passt zu diesem Filter.</p>
 {% else %}
 <p data-testid="no-events">Noch keine Ereignisse. Der Worker ordnet extrahierte Ereigniskandidaten einmal pro Minute zu, solange Ollama das Modell bereitstellt.</p>
 {% endif %}

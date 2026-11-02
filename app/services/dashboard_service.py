@@ -8,16 +8,14 @@ earlier report found later, is no change (event_service.mark_repeats). Then by h
 period - the breadth of the coverage -, then by how many reports, then the latest first.
 """
 from dataclasses import dataclass, field, fields
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import Engine, Row
 
 from app.repositories import event_repository
-from app.services.event_service import STATUS_LABELS, EventListItem
+from app.repositories.event_repository import NO_FILTER, EventFilter
+from app.services.event_service import DEFAULT_PERIOD, PERIODS, STATUS_LABELS, EventListItem
 
-# The periods to choose from: the key in the URL, its label, its length.
-PERIODS = {"24h": ("24 Stunden", timedelta(hours=24)), "3d": ("3 Tage", timedelta(days=3)), "7d": ("7 Tage", timedelta(days=7))}
-DEFAULT_PERIOD = "24h"
 # Events shown per list; the event list holds the rest.
 LIST_LIMIT = 25
 
@@ -62,11 +60,13 @@ def parse_period(raw: str | None) -> str:
     return raw if raw in PERIODS else DEFAULT_PERIOD
 
 
-def overview(engine: Engine, period: str, now: datetime | None = None) -> Dashboard:
+def overview(engine: Engine, period: str, now: datetime | None = None, criteria: EventFilter = NO_FILTER) -> Dashboard:
+    """The events new and developing within the period that match `criteria` (event_service.parse_filter, without a
+    period of its own)."""
     period = parse_period(period)
     since = (now or datetime.now(UTC)) - PERIODS[period][1]
     with engine.connect() as connection:
-        rows = event_repository.active_since(connection, since)
+        rows = event_repository.active_since(connection, since, criteria)
         versions = event_repository.versions_of(connection, [row.id for row in rows]) if rows else []
     changes = changes_since(versions, since)
     new, developing = [], []

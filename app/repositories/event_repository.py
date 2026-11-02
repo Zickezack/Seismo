@@ -1,11 +1,26 @@
 """Data access for the events (Ereignisse) and the assignment of event candidates to them."""
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import Connection, Row, exists, func, insert, literal, select, text, update
+from sqlalchemy import Connection, Row, exists, func, insert, literal, or_, select, text, update
 from sqlalchemy.orm import aliased
 
-from app.db.models import Article, Event, EventCandidate, EventState, Evidence, Extraction, Job, Source, Statement
+from app.db.models import (
+    Article,
+    Entity,
+    EntityAlias,
+    EntityKind,
+    EntityMention,
+    Event,
+    EventCandidate,
+    EventState,
+    Evidence,
+    Extraction,
+    Job,
+    Source,
+    Statement,
+)
 
 # Of the two-key advisory lock that serialises the assignments (7301 LLM slots, 7302 duplicate checks).
 EVENT_LOCK_NAMESPACE = 7303
@@ -190,9 +205,30 @@ def states(connection: Connection, event_id: int) -> Sequence[Row]:
     return connection.execute(statement).all()
 
 
-def latest(connection: Connection, limit: int) -> Sequence[Row]:
-    """The most recently reported events with their number of reports and of sources."""
-    statement = _listed().order_by(Event.last_reported_at.desc(), Event.id.desc()).limit(limit)
+@dataclass(frozen=True)
+class EventFilter:
+    """What the event list and the start page are narrowed to; an empty field narrows nothing. An event has a country,
+    a type, a sector, a company, an impact or a horizon when it or one of its reports states it."""
+
+    country: str | None = None
+    event_type: str | None = None
+    sector_id: int | None = None
+    company: str | None = None  # a part of a name form of a company or subsidiary its reports name, any case
+    min_sources: int | None = None
+    impact_kinds: tuple[str, ...] = ()  # a report names an impact on one of these kinds of target
+    horizon: str | None = None  # a report names an impact of this horizon
+    since: datetime | None = None  # a report from then on
+    development: str | None = None  # with `since`: NEW, DEVELOPING or CHANGED
+
+
+# First reported from `since` on; reported before and again from then on; a change of state from then on.
+NEW, DEVELOPING, CHANGED = "new", "developing", "changed"
+NO_FILTER = EventFilter()
+
+
+def latest(connection: Connection, limit: int, criteria: EventFilter = NO_FILTER) -> Sequence[Row]:
+    """The most recently reported events that match, with their number of reports and of sources."""
+    statement = _listed(criteria).order_by(Event.last_reported_at.desc(), Event.id.desc()).limit(limit)
     return connection.execute(statement).all()
 
 
@@ -201,8 +237,9 @@ def listed(connection: Connection, event_ids: Iterable[int]) -> Sequence[Row]:
     return connection.execute(_listed().where(Event.id.in_(list(event_ids)))).all()
 
 
-def _listed():
-    """The events with their state now and their number of reports and of sources; a merged event has none."""
+def _listed(criteria: EventFilter = NO_FILTER):
+    """The events that match with their state now and their number of reports and of sources; a merged event has
+    none."""
     reports = (
         select(
             EventCandidate.event_id,
@@ -218,13 +255,90 @@ def _listed():
     return (
         select(Event.__table__, _CURRENT_STATE, reports.c.report_count, reports.c.source_count)
         .join(reports, reports.c.event_id == Event.id)
-        .where(Event.merged_into_id.is_(None))
+        .where(Event.merged_into_id.is_(None), *_matching(criteria, reports.c.source_count))
     )
 
 
-def active_since(connection: Connection, since: datetime) -> Sequence[Row]:
-    """The events, not merged ones, with a report from `since` on: each with its state now, its reports and sources in
-    all and those from `since` on."""
+def _matching(criteria: EventFilter, source_count) -> list:
+    """The conditions on an event of `criteria`, in the query: the list shows only the latest, so a filter in the
+    browser would miss the rest."""
+    conditions = []
+    if criteria.country:
+        conditions.append(or_(Event.country == criteria.country, _a_report(EventCandidate.country == criteria.country)))
+    if criteria.event_type:
+        conditions.append(or_(Event.event_type == criteria.event_type, _a_report(EventCandidate.event_type == criteria.event_type)))
+    if criteria.sector_id is not None:
+        conditions.append(_a_report(EventCandidate.id.in_(_naming(EntityAlias.entity_id == criteria.sector_id))))
+    if criteria.company:
+        name_form = aliased(EntityAlias)
+        named = exists().where(
+            name_form.entity_id == Entity.id, func.strpos(func.lower(name_form.value), criteria.company.lower()) > 0
+        )
+        companies = Entity.kind.in_((EntityKind.COMPANY, EntityKind.SUBSIDIARY))
+        conditions.append(_a_report(EventCandidate.id.in_(_naming(companies, named))))
+    if criteria.min_sources:
+        conditions.append(source_count >= criteria.min_sources)
+    if criteria.impact_kinds:
+        conditions.append(_a_report(or_(*(EventCandidate.impacts.contains([{"target_kind": kind}]) for kind in criteria.impact_kinds))))
+    if criteria.horizon:
+        conditions.append(_a_report(EventCandidate.impacts.contains([{"horizon": criteria.horizon}])))
+    if criteria.since is not None:
+        recent = select(EventCandidate.id).join(Article, Article.id == EventCandidate.article_id).where(
+            EventCandidate.event_id == Event.id, _MOMENT >= criteria.since
+        )
+        conditions += [Event.last_reported_at >= criteria.since, recent.exists()]
+        if criteria.development == NEW:
+            conditions.append(Event.first_reported_at >= criteria.since)
+        elif criteria.development == DEVELOPING:
+            conditions.append(Event.first_reported_at < criteria.since)
+        elif criteria.development == CHANGED:
+            conditions.append(_changed_since(criteria.since))
+    return conditions
+
+
+def _a_report(*conditions):
+    """One of the event's reports meets the conditions."""
+    return exists().where(EventCandidate.event_id == Event.id, *conditions)
+
+
+def _naming(*conditions):
+    """The reports that name an entity meeting the conditions, by any of its name forms."""
+    return (
+        select(EntityMention.candidate_id)
+        .join(EntityAlias, EntityAlias.id == EntityMention.alias_id)
+        .join(Entity, Entity.id == EntityAlias.entity_id)
+        .where(*conditions)
+    )
+
+
+def _changed_since(since: datetime):
+    """A change of the event's state from `since` on: a version not withdrawn whose status differs from the one
+    before it - the first founds the state and changes none; a repeat is none (dashboard_service.changes_since)."""
+    before = func.lag(EventState.status).over(partition_by=EventState.event_id, order_by=(EventState.valid_from, EventState.id))
+    versions = select(EventState.event_id, EventState.status, EventState.valid_from, before.label("before")).where(
+        _NOT_WITHDRAWN
+    ).subquery()
+    return exists().where(
+        versions.c.event_id == Event.id,
+        versions.c.valid_from >= since,
+        versions.c.before.is_not(None),
+        versions.c.status != versions.c.before,
+    )
+
+
+def countries(connection: Connection) -> list[str]:
+    """The countries the events and their reports state, by code: what the filter offers."""
+    reported = select(EventCandidate.country.label("country")).where(
+        EventCandidate.event_id.is_not(None), EventCandidate.country.is_not(None)
+    )
+    founded = select(Event.country.label("country")).where(Event.merged_into_id.is_(None), Event.country.is_not(None))
+    both = reported.union(founded).subquery()
+    return list(connection.execute(select(both.c.country).order_by(both.c.country)).scalars())
+
+
+def active_since(connection: Connection, since: datetime, criteria: EventFilter = NO_FILTER) -> Sequence[Row]:
+    """The events, not merged ones, with a report from `since` on that match: each with its state now, its reports and
+    sources in all and those from `since` on."""
     source = func.coalesce(Source.name, Article.source_name)
     recent = _MOMENT >= since
     reports = (
@@ -245,7 +359,10 @@ def active_since(connection: Connection, since: datetime) -> Sequence[Row]:
         select(Event.__table__, _CURRENT_STATE, reports.c.report_count, reports.c.source_count, reports.c.recent_reports,
                reports.c.recent_sources)
         .join(reports, reports.c.event_id == Event.id)
-        .where(Event.merged_into_id.is_(None), Event.last_reported_at >= since, reports.c.recent_reports > 0)
+        .where(
+            Event.merged_into_id.is_(None), Event.last_reported_at >= since, reports.c.recent_reports > 0,
+            *_matching(criteria, reports.c.source_count),
+        )
     )
     return connection.execute(statement).all()
 
@@ -276,9 +393,9 @@ def statements_of(connection: Connection, event_id: int) -> Sequence[Row]:
     return connection.execute(statement).all()
 
 
-def count(connection: Connection) -> int:
-    """The events, without the merged ones."""
-    return connection.execute(select(func.count()).select_from(Event).where(Event.merged_into_id.is_(None))).scalar_one()
+def count(connection: Connection, criteria: EventFilter = NO_FILTER) -> int:
+    """The events that match, without the merged ones."""
+    return connection.execute(select(func.count()).select_from(_listed(criteria).subquery())).scalar_one()
 
 
 def titles(connection: Connection, event_ids: Iterable[int]) -> dict[int, str]:

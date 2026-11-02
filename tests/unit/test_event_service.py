@@ -1,12 +1,13 @@
 """The assignment's rules without a database or a model: the words compared, the similarity, what the scores decide
 alone, the question to the LLM and its answer."""
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 from app.db.models import AssignmentMethod
+from app.repositories import event_repository
 from app.services import event_service
 from app.services.event_service import ASSIGN_FROM, NEW_BELOW, Decision, Match, UnusableChoice, chosen_number, matches, settled
 
@@ -154,3 +155,61 @@ def test_a_version_with_the_status_of_the_one_before_it_repeats_it_a_withdrawn_o
     marked = event_service.mark_repeats(states)
 
     assert [state.repeats for state in marked] == [False, True, False, True, False, True]
+
+
+NOW = datetime(2026, 11, 2, 12, tzinfo=UTC)
+
+
+def test_the_filter_keeps_the_known_values_of_the_url_and_leaves_the_others_out():
+    form = event_service.parse_filter({
+        "country": " us ", "type": "trade_policy", "sector": "12", "company": "  Apple   Inc ", "sources": "3", "impact": "on",
+        "horizon": "weeks",
+    }, now=NOW)
+
+    assert form.values == {"country": "US", "type": "trade_policy", "sector": "12", "company": "Apple Inc", "sources": "3",
+                           "impact": "1", "horizon": "weeks"}
+    criteria = form.criteria
+    assert (criteria.country, criteria.event_type, criteria.sector_id, criteria.company) == ("US", "trade_policy", 12, "Apple Inc")
+    assert (criteria.min_sources, criteria.impact_kinds, criteria.horizon) == (3, event_service.ECONOMIC_TARGETS, "weeks")
+    assert (criteria.since, criteria.development) == (None, None) and form.active
+
+
+@pytest.mark.parametrize("params", [
+    {"country": "USA"}, {"country": "1A"}, {"type": "war"}, {"sector": "x"}, {"sector": "-1"}, {"company": "   "}, {"sources": "4"},
+    {"horizon": "unknown"}, {"horizon": "decades"}, {"period": "1y"}, {"development": "old"},
+])
+def test_an_unknown_value_narrows_nothing(params):
+    form = event_service.parse_filter(params, now=NOW)
+
+    assert form.values == {} and form.criteria == event_repository.NO_FILTER and not form.active
+
+
+def test_a_company_is_cut_to_its_maximum():
+    form = event_service.parse_filter({"company": "x" * 500})
+
+    assert form.criteria.company == "x" * event_service.COMPANY_MAX_CHARS
+
+
+def test_a_period_reaches_back_from_now_and_a_development_takes_the_shortest_without_one():
+    assert event_service.parse_filter({"period": "3d"}, now=NOW).criteria.since == NOW - timedelta(days=3)
+
+    form = event_service.parse_filter({"development": "changed"}, now=NOW)
+
+    assert form.values == {"development": "changed", "period": "24h"}
+    assert (form.criteria.since, form.criteria.development) == (NOW - timedelta(hours=24), "changed")
+    # A period alone is no filter of what the events are: the list says so as "passend" by its period.
+    assert not event_service.parse_filter({"period": "7d"}, now=NOW).active
+
+
+def test_the_start_page_has_its_own_period():
+    form = event_service.parse_filter({"period": "7d", "development": "new", "type": "labor"}, now=NOW, with_period=False)
+
+    assert form.values == {"type": "labor"}
+    assert (form.criteria.since, form.criteria.development, form.criteria.event_type) == (None, None, "labor")
+
+
+def test_the_query_of_a_filter_with_changes_leaves_empty_values_out():
+    form = event_service.parse_filter({"country": "CH", "company": "Nestlé SA", "period": "24h"}, now=NOW)
+
+    assert form.query(period="7d", development="new") == "country=CH&company=Nestl%C3%A9+SA&period=7d&development=new"
+    assert form.query(period="") == "country=CH&company=Nestl%C3%A9+SA"

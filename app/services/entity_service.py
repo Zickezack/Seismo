@@ -718,7 +718,7 @@ def _view(view, row):
     return view(**{name: value for name, value in row._mapping.items() if name in names})
 
 
-def choices(engine: Engine) -> list[EntityRef]:
-    """The entities a form offers to choose from, by name, at most CHOICES_LIMIT."""
+def choices(engine: Engine, kind: str | None = None) -> list[EntityRef]:
+    """The entities a form offers to choose from, of one kind or all, by name, at most CHOICES_LIMIT."""
     with engine.connect() as connection:
-        return [EntityRef(row.id, row.name) for row in entity_repository.choices(connection, CHOICES_LIMIT)]
+        return [EntityRef(row.id, row.name) for row in entity_repository.choices(connection, CHOICES_LIMIT, kind)]
