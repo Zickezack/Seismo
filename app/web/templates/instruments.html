@@ -4,19 +4,48 @@
 {% block title %}Wertpapiere{% endblock %}
 {% block content %}
 <h1>Wertpapiere</h1>
-{% if not overview.configured %}
-<p class="message message-warning" role="status" data-testid="key-missing">Kein Schlüssel der Kursquelle: Ohne <code>{{ overview.key_variable }}</code> in der Umgebung von Worker und api ruft der Worker keine Kurse ab (README).</p>
-{% endif %}
+{% set market = overview.market %}
+{% for each in overview.sources if not each.configured %}
+<p class="message message-warning" role="status" data-testid="key-missing-{{ each.name }}">Kein Schlüssel für {{ each.label }}: Ohne {% for variable in each.key_variables %}<code>{{ variable }}</code>{% if not loop.last %} und {% endif %}{% endfor %} in der Umgebung von Worker und api ruft der Worker {% if each.name == "alpaca" %}weder die Liste der US-Wertpapiere noch ihre Tageskurse und Live-Kurse{% else %}keine Live-Kurse von {{ each.label }}{% endif %} ab (README).</p>
+{% endfor %}
 
-<section class="card stack">
-  <p class="hint">Der Worker fragt jede Minute die letzten Kurse aller aktiven Wertpapiere bei EODHD ab, 15 bis 20 Minuten verzögert, und speichert jeden Kurs, wie er kommt. Jeder Abruf zählt je Wertpapier einen Aufruf des Tageskontingents.</p>
+<section class="card stack" data-testid="market-status">
+  <p class="hint">Alpaca liefert die Liste aller US-Aktien und ETFs, gehandelte und nicht mehr gehandelte, ihre Tageskurse seit {{ market.period_start.strftime("%d.%m.%Y") }} unbereinigt, die Kapitalmassnahmen getrennt davon und den Handelskalender; der Worker gleicht sie täglich ab, immer hinter laufender Arbeit. Live-Kurse holt er für die Wertpapiere mit Live-Kurs im Intervall der Plattform-Einstellungen: Schweizer von SIX (15 Minuten verzögert), US-Wertpapiere von Alpaca (Echtzeit über IEX), andere von EODHD (verzögert, mit Schlüssel).</p>
+  {% if market.configured %}
+  <p data-testid="history-progress">
+    Tageskurse: {{ market.done }} von {{ market.total }} Wertpapieren{% if market.closed_day %} bis {{ market.closed_day.strftime("%d.%m.%Y") }}{% endif %}.
+    {% if market.listed_at %}Liste und Kalender zuletzt {{ market.listed_at|local_time }}.{% else %}Liste und Kalender noch nicht abgeglichen.{% endif %}
+    {% if market.actions_through %}Kapitalmassnahmen bis {{ market.actions_through.strftime("%d.%m.%Y") }}.{% endif %}
+    {% if market.running %}<span class="status status-active">Läuft</span>{% endif %}
+  </p>
+  {% endif %}
+  {# A plain GET form: the filter works without JavaScript and the URL can be bookmarked. #}
+  <form class="toolbar" method="get" action="/instruments" data-testid="instrument-filter">
+    <div class="field">
+      <label for="filter-source">Quelle</label>
+      <select id="filter-source" name="source" data-testid="filter-source">
+        <option value="">Alle Quellen</option>
+        {% for code, label in sources.items() %}
+        <option value="{{ code }}"{% if source == code %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="q">Symbol oder Name enthält</label>
+      <input type="search" id="q" name="q" value="{{ q }}" maxlength="200" data-testid="filter-q">
+      <label class="checkbox-label"><input type="checkbox" name="live" value="1"{% if live %} checked{% endif %} data-testid="filter-live"> Nur mit Live-Kurs</label>
+    </div>
+    <button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button>
+  </form>
+  <p class="hint" data-testid="instrument-count">{% if overview.total > overview.instruments|length %}Angezeigt: die ersten {{ overview.instruments|length }} von {{ overview.total }} Wertpapieren nach Name.{% else %}{{ overview.total }} {{ "Wertpapier" if overview.total == 1 else "Wertpapiere" }}.{% endif %}</p>
 </section>
 
 <form class="stack" method="post" action="/instruments/delete" data-bulk-form data-testid="instrument-list">
+  <input type="hidden" name="back" value="{{ back }}">
   <div class="toolbar">
     <div class="actions">
-      <button class="button button-secondary" type="submit" formaction="/instruments/activate" data-bulk-action data-testid="activate" disabled>Aktivieren</button>
-      <button class="button button-secondary" type="submit" formaction="/instruments/deactivate" data-bulk-action data-testid="deactivate" disabled>Deaktivieren</button>
+      <button class="button button-secondary" type="submit" formaction="/instruments/live-on" data-bulk-action data-testid="live-on" disabled>Live-Kurs an</button>
+      <button class="button button-secondary" type="submit" formaction="/instruments/live-off" data-bulk-action data-testid="live-off" disabled>Live-Kurs aus</button>
       <button class="button button-danger" type="submit" formaction="/instruments/delete" data-bulk-action data-confirm="Wertpapier|Wertpapiere" data-testid="delete" disabled>Löschen</button>
     </div>
     <a class="button" href="#new" data-testid="new-instrument">Wertpapier hinzufügen</a>
@@ -31,32 +60,32 @@
           <th>Kurs</th>
           <th>Art</th>
           <th>Entität</th>
-          <th>Status</th>
+          <th>Live-Kurs</th>
         </tr>
       </thead>
       <tbody>
         {% for instrument in overview.instruments %}
         <tr data-testid="instrument-{{ instrument.id }}">
           <td class="cell-select"><input type="checkbox" name="instrument_id" value="{{ instrument.id }}" data-select-row data-name="{{ instrument.name }}" aria-label="{{ instrument.name }} auswählen" data-testid="select-{{ instrument.id }}"></td>
-          <td class="cell-title"><a href="/instruments/{{ instrument.id }}" data-testid="instrument-name-{{ instrument.id }}">{{ instrument.name }}</a><span class="hint">{{ instrument.code }} · {{ instrument.exchange_label }}</span></td>
+          <td class="cell-title"><a href="/instruments/{{ instrument.id }}" data-testid="instrument-name-{{ instrument.id }}">{{ instrument.name }}</a><span class="hint">{{ instrument.code }} · {{ instrument.exchange_label }} · {{ instrument.source_label }}{% if not instrument.traded %} · nicht mehr gehandelt{% if instrument.delisted_on %} seit {{ instrument.delisted_on.strftime("%d.%m.%Y") }}{% endif %}{% endif %}</span></td>
           <td class="cell-wrap">{{ price(instrument.price, "instrument-price-" ~ instrument.id) }}</td>
           <td>{{ instrument.kind_label }}</td>
-          <td class="cell-wrap">{% if instrument.entity_id %}<a href="/entities/{{ instrument.entity_id }}">{{ instrument.entity_name }}</a>{% else %}–{% endif %}</td>
-          <td class="cell-wrap" data-testid="instrument-status-{{ instrument.id }}">{% if not instrument.is_active %}<span class="status status-inactive">Inaktiv</span>{% elif instrument.failing %}<span class="status status-failing">Fehler</span><span class="hint">{{ instrument.last_error }}</span>{% else %}<span class="status status-active">Aktiv</span>{% endif %}</td>
+          <td class="cell-wrap">{% if instrument.entity_id %}<a href="/entities/{{ instrument.entity_id }}">{{ instrument.entity_name }}</a>{% if instrument.entity_uncertain %} <span class="status status-uncertain" data-testid="entity-uncertain-{{ instrument.id }}">unsicher</span>{% endif %}{% else %}–{% endif %}</td>
+          <td class="cell-wrap" data-testid="instrument-status-{{ instrument.id }}">{% if not instrument.live %}<span class="status status-inactive">Aus</span>{% elif instrument.failing %}<span class="status status-failing">Fehler</span><span class="hint">{{ instrument.last_error }}</span>{% else %}<span class="status status-active">An</span>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <p data-testid="no-instruments">Noch keine Wertpapiere. Hier eines erfassen, oder die Starterliste importieren (Plattform-Einstellungen, Starterdaten).</p>
+  <p data-testid="no-instruments">{% if live or source or q %}Keine Wertpapiere für diese Auswahl.{% else %}Noch keine Wertpapiere. Mit den Schlüsseln von Alpaca kommt die Liste der US-Wertpapiere von selbst; Schweizer hier erfassen, oder die Starterliste importieren (Plattform-Einstellungen, Starterdaten).{% endif %}</p>
   {% endif %}
 </form>
 
-<details class="card section" id="new" open data-testid="section-new">
+<details class="card section" id="new" data-testid="section-new">
   <summary><h2>Wertpapier hinzufügen</h2></summary>
   <form class="form-grid" method="post" action="/instruments" data-testid="instrument-form">
-    {{ instrument_fields({"kind": "stock"}, kinds, choices) }}
+    {{ instrument_fields({"kind": "stock", "source": "six"}, kinds, choices, entered_sources, True) }}
     <div class="form-actions">
       <button class="button" type="submit" data-testid="create-instrument">Hinzufügen</button>
     </div>

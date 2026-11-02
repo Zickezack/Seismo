@@ -55,6 +55,9 @@ class PlatformSettings:
     reprocessings_per_hour: int = 30
     # "domain level" per line, level hoch, mittel or niedrig; a domain covers its subdomains (extraction_service).
     source_quality_domains: str = _quality_lines(STARTER_SOURCE_QUALITY)
+    # The Wertpapiere's prices (price_service, history_service).
+    price_interval_minutes: int = 30
+    price_history_years: int = 2
 
     @property
     def blocked_domains(self) -> list[str]:
@@ -229,6 +232,21 @@ FORM_FIELDS = {
             "0 hält die Neuverarbeitung an.",
             0,
             1000,
+        ),
+        NumberField(
+            "price_interval_minutes",
+            "Live-Kurs-Intervall (Minuten)",
+            "So oft holt der Worker den letzten Kurs jedes Wertpapiers mit Live-Kurs, bei jeder Quelle.",
+            5,
+            1440,
+        ),
+        NumberField(
+            "price_history_years",
+            "Tageskurse (Kalenderjahre)",
+            "Das laufende Jahr und die davor: 11 im Jahr 2026 heisst ab 1.1.2016. Eine Erhöhung holt die früheren Jahre nach, "
+            "für jedes Wertpapier noch einmal von vorn; eine Senkung löscht keine gespeicherten Kurse.",
+            1,
+            30,
         ),
         NumberField(
             "succeeded_jobs_retention_days", "Erledigte Jobs aufbewahren (Tage)", "Danach löscht der Worker sie.", 1, 3650

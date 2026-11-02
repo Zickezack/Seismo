@@ -232,6 +232,28 @@ def catalogue(connection: Connection) -> dict[str, int]:
     return {row.key: row.entity_id for row in connection.execute(statement)}
 
 
+def identifiers(connection: Connection, scheme: str) -> dict[str, int]:
+    """The live entities by their identifiers of the scheme."""
+    statement = (
+        select(EntityAlias.key, EntityAlias.entity_id)
+        .join(Entity, Entity.id == EntityAlias.entity_id)
+        .where(EntityAlias.scheme == scheme, _LIVE)
+    )
+    return {row.key: row.entity_id for row in connection.execute(statement)}
+
+
+def unique_names(connection: Connection, kinds: Iterable[str]) -> dict[str, int]:
+    """The live entities of these kinds by the keys of their name forms, each key that names one entity only."""
+    statement = (
+        select(EntityAlias.key, func.min(EntityAlias.entity_id).label("entity_id"))
+        .join(Entity, Entity.id == EntityAlias.entity_id)
+        .where(_IS_NAME, Entity.kind.in_(list(kinds)), _LIVE)
+        .group_by(EntityAlias.key)
+        .having(func.count(func.distinct(EntityAlias.entity_id)) == 1)
+    )
+    return {row.key: row.entity_id for row in connection.execute(statement)}
+
+
 def _aliases():
     """Per entity: its aliases, and the uncertain ones."""
     return (

@@ -13,7 +13,7 @@ A backfill request (story 6) reserves no slot: it goes only while the host is fr
 it is, so live requests always get the next slot.
 """
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -97,7 +97,7 @@ class PoliteHttp:
         self._reserved_slot = reserved_slot
         self._backfill = backfill
 
-    def get(self, url: str, accept: str, permitted: bool = False) -> HttpResponse:
+    def get(self, url: str, accept: str, permitted: bool = False, headers: Mapping[str, str] | None = None) -> HttpResponse:
         """Raises FetchDisallowed, HostBusy, or what HttpClient.get raises.
 
         `permitted`: the publisher approved this access explicitly - the publisher's permission, an allowed route
@@ -114,7 +114,7 @@ class PoliteHttp:
                     raise FetchDisallowed("Durch robots.txt gesperrt")
                 interval = max(interval, rules.crawl_delay())
             self._wait_for_turn(host, interval)
-            return self._http.get(url, accept)
+            return self._http.get(url, accept, headers)
 
     def tdm_rules(self, url: str) -> str | None:
         """The rules of the host's /.well-known/tdmrep.json, asked for once a day like robots.txt (no request slot);

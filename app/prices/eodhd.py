@@ -10,11 +10,10 @@ admin's decision of 2026-10-31).
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
 from app.config import source_credential
-from app.prices.base import Missing, Quote
+from app.prices.base import Missing, Quote, decimal_of
 from app.services.fetch_policy_service import PoliteHttp
 from app.sources.errors import SourceRejected
 
@@ -33,13 +32,13 @@ def configured() -> bool:
     return bool(source_credential(KEY_VARIABLE))
 
 
-def latest(http: PoliteHttp, instruments: Sequence[tuple[str, str]]) -> tuple[list[Quote], list[Missing]]:
-    """The latest prices of up to BATCH Wertpapiere, (symbol, exchange) each, in one request; those it sent none for.
+def latest(http: PoliteHttp, codes: Sequence[str]) -> tuple[list[Quote], list[Missing]]:
+    """The latest prices of up to BATCH Wertpapiere, by their code ("NESN.SW"), in one request; those it sent none for.
     SourceRejected without the key or for an answer that is no list of prices; what PoliteHttp.get raises."""
     key = source_credential(KEY_VARIABLE)
     if not key:
         raise SourceRejected(f"Kein Schlüssel: {KEY_VARIABLE} fehlt in der Umgebung")
-    codes = [f"{symbol}.{exchange}" for symbol, exchange in instruments]
+    codes = list(codes)
     query = {"api_token": key, "fmt": "json"} | ({"s": ",".join(codes[1:])} if len(codes) > 1 else {})
     response = http.get(f"https://{API_HOST}/api/real-time/{codes[0]}?{urlencode(query)}", ACCEPT, permitted=True)
     try:
@@ -51,34 +50,24 @@ def latest(http: PoliteHttp, instruments: Sequence[tuple[str, str]]) -> tuple[li
         raise SourceRejected("Antwort von EODHD ist keine Liste von Kursen")
     by_code = {str(item.get("code", "")).upper(): item for item in items}
     quotes, missing = [], []
-    for (symbol, exchange), code in zip(instruments, codes, strict=True):
+    for code in codes:
         item = by_code.get(code.upper())
-        quote = _quote(symbol, exchange, item) if item else None
+        quote = _quote(code, item) if item else None
         if quote is None:
-            missing.append(Missing(symbol, exchange, "Kein Kurs von EODHD: Symbol oder Börse unbekannt, oder im Abo nicht enthalten"))
+            missing.append(Missing(code, "Kein Kurs von EODHD: Symbol oder Börse unbekannt, oder im Abo nicht enthalten"))
         else:
             quotes.append(quote)
     return quotes, missing
 
 
-def _quote(symbol: str, exchange: str, item: dict) -> Quote | None:
+def _quote(code: str, item: dict) -> Quote | None:
     """A price as EODHD sends it; None when it has none ("NA")."""
-    close, timestamp = _decimal(item.get("close")), item.get("timestamp")
+    close, timestamp = decimal_of(item.get("close")), item.get("timestamp")
     if close is None or not isinstance(timestamp, int | float) or isinstance(timestamp, bool):
         return None
     volume = item.get("volume")
     return Quote(
-        symbol, exchange, datetime.fromtimestamp(timestamp, UTC), close, _decimal(item.get("open")), _decimal(item.get("high")),
-        _decimal(item.get("low")), int(volume) if isinstance(volume, int | float) and not isinstance(volume, bool) else None,
-        _decimal(item.get("previousClose")),
+        code, datetime.fromtimestamp(timestamp, UTC), close, decimal_of(item.get("open")), decimal_of(item.get("high")),
+        decimal_of(item.get("low")), int(volume) if isinstance(volume, int | float) and not isinstance(volume, bool) else None,
+        decimal_of(item.get("previousClose")),
     )
-
-
-def _decimal(value: object) -> Decimal | None:
-    if isinstance(value, bool) or not isinstance(value, int | float | str):
-        return None
-    try:
-        number = Decimal(str(value))
-    except InvalidOperation:
-        return None
-    return number if number.is_finite() else None

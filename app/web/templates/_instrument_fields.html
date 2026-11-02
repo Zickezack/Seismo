@@ -1,14 +1,32 @@
-{# The fields of a Wertpapier, to enter one and to change one. #}
-{% macro instrument_fields(values, kinds, choices) %}
+{# The fields of a Wertpapier, to enter one and to change one. `new`: the source is chosen; else it stays. One from
+   Alpaca's list has its entity only: the list keeps the rest. #}
+{% macro instrument_fields(values, kinds, choices, sources, new=False) %}
+{% if values.source != "alpaca" %}
+{% if new %}
+<div class="field">
+  <label for="source">Quelle</label>
+  <select id="source" name="source" data-testid="field-source">
+    {% for code, label in sources.items() %}<option value="{{ code }}"{% if values.source == code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+</div>
+{% endif %}
 <div class="field">
   <label for="symbol">Symbol</label>
   <input id="symbol" name="symbol" required maxlength="30" value="{{ values.symbol or '' }}" placeholder="z. B. NESN" data-testid="field-symbol">
 </div>
+{% if new or values.source == "six" %}
 <div class="field">
-  <label for="exchange">Börse</label>
-  <input id="exchange" name="exchange" required maxlength="20" value="{{ values.exchange or '' }}" placeholder="z. B. SW" aria-describedby="exchange-hint" data-testid="field-exchange">
+  <label for="valor_id">ValorId (nur SIX)</label>
+  <input id="valor_id" name="valor_id" maxlength="30" value="{{ values.source_ref if values.source == 'six' else '' }}" placeholder="z. B. CH0038863350CHF4" aria-describedby="ref-hint" data-testid="field-valor-id">
 </div>
-<p class="hint field-wide" id="exchange-hint">Symbol und Börse wie EODHD sie nennt: NESN an SW (SIX Swiss Exchange), AAPL an US, SAP an XETRA; ein Index an INDX, z. B. GSPC für den S&amp;P 500.</p>
+{% endif %}
+{% if new or values.source == "eodhd" %}
+<div class="field">
+  <label for="exchange">Börse (nur EODHD)</label>
+  <input id="exchange" name="exchange" maxlength="20" value="{{ values.exchange if values.source == 'eodhd' else '' }}" placeholder="z. B. XETRA" aria-describedby="ref-hint" data-testid="field-exchange">
+</div>
+{% endif %}
+<p class="hint field-wide" id="ref-hint">SIX: die ValorId aus ISIN, Währung und Markt, wie sie die Kursseite von SIX in ihrer Adresse zeigt, z. B. CH0038863350CHF4 für Nestlé, CH0009980894CHF9 für den SMI. EODHD: Symbol und Börse wie EODHD sie nennt, z. B. SAP an XETRA, ein Index an INDX.</p>
 <div class="field field-wide">
   <label for="name">Name</label>
   <input id="name" name="name" required maxlength="200" value="{{ values.name or '' }}" data-testid="field-name">
@@ -25,8 +43,9 @@
 </div>
 <div class="field">
   <label for="isin">ISIN</label>
-  <input id="isin" name="isin" maxlength="12" value="{{ values.isin or '' }}" placeholder="optional" data-testid="field-isin">
+  <input id="isin" name="isin" maxlength="12" value="{{ values.isin or '' }}" placeholder="optional; SIX: aus der ValorId" data-testid="field-isin">
 </div>
+{% endif %}
 <div class="field">
   <label for="entity">Entität</label>
   <input id="entity" name="entity" list="entity-choices" value="{% if values.entity_id %}{{ values.entity_name }} (Nr. {{ values.entity_id }}){% endif %}" placeholder="leer: nach ISIN" data-testid="field-entity">

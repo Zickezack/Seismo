@@ -38,6 +38,9 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Angabe | `relationship_record` | One statement about a relationship: a report's that it holds or ended, with its Beleg, or the analyst's validity and review, with its source. | none |
 | Wertpapier | `instrument` | A tradable security (stock, ETF, index) with symbol, ISIN, exchange and currency, optionally linked to an Entität. Its tracked flag (verfolgt) decides whether its prices are collected continuously. | none |
 | Kurspunkt | `price_point` | One price of a Wertpapier at a point in time or over an interval (open, high, low, close, volume), with UTC timestamp, resolution, source and a real-time or delayed flag. | none |
+| Kapitalmassnahme | `corporate_action` | A split, dividend, change of symbol, merger or delisting of a Wertpapier as its source sends it, kept apart from the unadjusted Kurspunkte. | none |
+| Handelstag | `trading_day` | A trading day of the US exchanges with its opening and closing time: what a gap is, and when a day's prices are known. | none |
+| Marktdaten-Abgleich | `market_data_sync` | How far each sync of the historical market data came (list, corporate actions, period). Not shown as such. | none |
 | Wirkungsannahme | `impact_hypothesis` | An assumed effect of an event on companies, sectors or assets. | none |
 | Prognose | `forecast` | A forecast made by the platform, with creation time, data state, model version and target metric. | none |
 | Ergebnis | `forecast_outcome` | The actual outcome of a forecast. | none |
@@ -122,6 +125,8 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | extraction_max_age_days | integer | yes | 3 | Older articles (publication, else fetch time) are not extracted; check constraint >= 1. UI: Höchstalter (Tage). |
   | extractions_per_hour | integer | yes | 30 | At most this many extraction jobs are queued per hour, newest articles first; 0 holds the extraction; check constraint >= 0. UI: Extraktionen pro Stunde (höchstens). |
   | reprocessings_per_hour | integer | yes | 30 | At most this many jobs of a Neuverarbeitung are queued per hour - extractions and recognitions alike, an article's own counted as well -, apart from the extraction's budget; 0 holds the reprocessing; check constraint >= 0. UI: Verarbeitung - Neuverarbeitungen pro Stunde (höchstens). |
+  | price_interval_minutes | integer | yes | 30 | How often the latest price of each Wertpapier with a Live-Kurs is fetched, 5 to 1440 (`price_service`). UI: Kurse - Live-Kurs-Intervall (Minuten). |
+  | price_history_years | integer | yes | 2 | The daily prices reach back to 1 January of the year this many years before the next one - 11 in 2026: from 2016 on (`history_service`); 1 to 30. A rise fetches every Wertpapier again from the new start; a cut deletes nothing. UI: Kurse - Tageskurse (Kalenderjahre). |
   | source_quality_domains | text | no | the catalogue's suggestions | "domain level" per line, level hoch, mittel or niedrig, sorted by domain; a domain covers its subdomains, the most specific one wins. NULL: the suggestions the code starts with (`platform_settings_service.STARTER_SOURCE_QUALITY`: official bodies hoch, established media mittel, press release portals niedrig - the admin's decision of 2026-10-24). UI: Ereignisextraktion - Quellenqualität nach Domain. |
   | updated_at | timestamptz | yes | now() | |
 
@@ -561,20 +566,28 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | Field | Type | Required | Default | Notes |
   |-------|------|----------|---------|-------|
   | id | bigint identity | yes | | |
-  | symbol | varchar(30) | yes | | As the price source names it, upper case, e.g. `NESN`, `GSPC`. Unique with `exchange`. UI: Symbol (with the exchange: `NESN.SW`). |
-  | exchange | varchar(20) | yes | | The price source's exchange code: `SW` (SIX Swiss Exchange), `US`, `XETRA`, ..., `INDX` for an index. UI: Börse, in words where known. |
+  | source | varchar(20) | yes | | Where its prices come from: `alpaca` (US stocks and ETFs, with their daily history), `six` (SIX Swiss Exchange), `eodhd`; check constraint. UI: Quelle. |
+  | source_ref | varchar(100) | yes | | Its id at the source, kept through a change of symbol: Alpaca's asset id, SIX's ValorId (ISIN, currency, market: `CH0038863350CHF4`), EODHD's code (`NESN.SW`). Unique with `source`. UI: ValorId (SIX). |
+  | symbol | varchar(30) | yes | | As the source names it now, upper case, e.g. `AAPL`, `NESN`, `SMI`; Alpaca's list updates it. Index with `source`. UI: Symbol (EODHD's with the exchange: `SAP.XETRA`). |
+  | exchange | varchar(20) | yes | | Alpaca's exchange (`NASDAQ`, `NYSE`, `ARCA`, `AMEX`, `BATS`), `SIX`, or EODHD's code (`XETRA`, ..., `INDX` for an index). UI: Börse, in words where known. |
   | name | varchar(200) | yes | | Sorted with the ICU collation `de-x-icu`. UI: Name. |
-  | kind | varchar(10) | yes | | `stock`, `etf`, `index`; check constraint. UI: Aktie, ETF, Index. |
-  | currency | varchar(3) | no | | ISO 4217 of its prices; required for a stock or an ETF, empty for an index, which counts in points. UI: Währung, "Punkte". |
-  | isin | varchar(12) | no | | Checked by its check digit. Links it to the Entität with that ISIN among its identifiers. |
-  | entity_id | bigint | no | | The Entität it belongs to: as the form names it ("Name (Nr. 12)"), else the one with its ISIN. Foreign key to `entity`, `ON DELETE SET NULL`. Index. UI: Entität. |
-  | is_active | boolean | yes | true | Only active ones are fetched. UI: Aktiv / Inaktiv. |
-  | last_fetched_at | timestamptz | no | | Its last price received. |
-  | last_error, last_error_at | text, timestamptz | no | | The latest fetch's error for it, at most 2000 characters, e.g. "Kein Kurs von EODHD ..." or "HTTP 401"; kept after a success. Shown to the admin, never logged. UI: Fehler, while newer than the last success. |
+  | kind | varchar(10) | yes | | `stock`, `etf`, `index`; check constraint. Of Alpaca's: an ETF on NYSE Arca or by its name, else a stock. UI: Aktie, ETF, Index. |
+  | currency | varchar(3) | no | | ISO 4217 of its prices; required for a stock or an ETF, empty for an index, which counts in points. Alpaca's: USD. UI: Währung, "Punkte". |
+  | isin | varchar(12) | no | | Checked by its check digit; of SIX's from the ValorId, of Alpaca's from its CUSIP once known (US, CUSIP, check digit). Links it to the Entität with that ISIN among its identifiers. |
+  | cusip | varchar(9) | no | | Alpaca's list sends none: taken from its own corporate actions of the last 365 days, matched by symbol (an older one may be of a company that had the symbol before); then matches its corporate actions and gives the ISIN. |
+  | entity_id | bigint | no | | The Entität it belongs to: as the form names it ("Name (Nr. 12)"); else the one with its ISIN; of Alpaca's also by its ticker (`NASDAQ:AAPL`, a traded one only) or by its company's name (uncertain). Foreign key to `entity`, `ON DELETE SET NULL`. Index. UI: Entität. |
+  | entity_uncertain | boolean | yes | false | Linked by name only; cleared when the admin saves an entity. UI: unsicher. |
+  | live | boolean | yes | true | Its latest price is fetched at the interval of the Plattform-Einstellungen. Alpaca's come without. Index. UI: Live-Kurs An / Aus. |
+  | status | varchar(10) | yes | `active` | `active`, `inactive` (no longer traded, from Alpaca's list); check constraint. UI: "nicht mehr gehandelt". |
+  | delisted_on | date | no | | Its last trading day, from a merger or a worthless removal; an earlier one kept. Its symbol's daily prices after it are not stored - another may carry it since. UI: "seit". |
+  | history | boolean | yes | false | Its daily prices are fetched (Alpaca's). |
+  | history_through | date | no | | They are in up to this trading day. NULL: none fetched yet, or the period grew. |
+  | last_fetched_at | timestamptz | no | | Its last live price received. |
+  | last_error, last_error_at | text, timestamptz | no | | The latest live fetch's error for it, at most 2000 characters, e.g. "Kein Kurs von SIX ..." or "HTTP 401"; kept after a success. Shown to the admin, never logged. UI: Fehler, while newer than the last success. |
   | created_at | timestamptz | yes | now() | |
 
-- Relationships: has Kurspunkte; may belong to an Entität.
-- Rules: entered by the admin on the Wertpapiere page (`/instruments`) or imported with the starter list of indices and broad ETFs (`app/seeds/instruments.json`, Seed-Protokoll `instruments`). The list shows each with its latest price; activates, deactivates and deletes the selected ones, all or nothing - one with Kurspunkte is never deleted, only deactivated (rule 14). Its page shows its latest 100 Kurspunkte and takes changes. An entity's page lists its active Wertpapiere with their latest price, an event's page those of the entities its reports name (UI: Kurse). Not "verfolgt" yet: that flag comes with story 2.
+- Relationships: has Kurspunkte and Kapitalmassnahmen; may belong to an Entität.
+- Rules: Alpaca's come with its list - every US stock and ETF, traded or not - once a day (`history_service`); its id keeps a Wertpapier through a change of symbol. SIX's and EODHD's are entered by the admin on the Wertpapiere page (`/instruments`) or imported with the starter list (`app/seeds/instruments.json`, Seed-Protokoll `instruments`: Swiss indices and an ETF from SIX; broad US ETFs from Alpaca's list, given a Live-Kurs once it has them). The list filters by source, Live-Kurs and symbol or name, shows at most 200 with their latest price, and switches the Live-Kurs of the selected ones on or off or deletes them, all or nothing - one with Kurspunkte or from Alpaca's list is never deleted (rule 14). Its page shows its daily prices as known on a day (rule 11), their coverage and gaps, its Kapitalmassnahmen and its latest 100 live prices, and takes changes - of Alpaca's the entity only. An entity's page lists its traded Wertpapiere with their latest price, an event's page those of the entities its reports name (UI: Kurse). Not "verfolgt" yet: that flag comes with Live-Kurse und Kursdatenspeicher, story 2.
 - Privacy: none
 
 ### Kurspunkt (`price_point`)
@@ -585,18 +598,70 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   |-------|------|----------|---------|-------|
   | id | bigint identity | yes | | |
   | instrument_id | bigint | yes | | Foreign key to `instrument`, `ON DELETE CASCADE` (a Wertpapier with Kurspunkte is not deleted). Unique with `resolution` and `at`. |
-  | resolution | varchar(10) | yes | | `quote`: the last price at its time (story 2 adds intervals); check constraint. |
-  | at | timestamptz | yes | | The price's own time as the source states it, in UTC. UI: Zeit. |
+  | resolution | varchar(10) | yes | | `quote`: the last price at its time; `day`: a trading day's prices; check constraint. |
+  | at | timestamptz | yes | | The price's own time as the source states it, in UTC; of a day, its start in New York. UI: Zeit, Handelstag. |
   | open, high, low | numeric(20,6) | no | | Of a quote: the day's so far. |
-  | close | numeric(20,6) | yes | | Of a quote: the price. UI: Kurs, with the currency and the change against `previous_close`. |
+  | close | numeric(20,6) | yes | | Of a quote: the price. UI: Kurs, with the currency and the change against `previous_close`; Schluss. |
   | volume | bigint | no | | Of a quote: the day's so far. |
   | previous_close | numeric(20,6) | no | | Of a quote: the last trading day's close. |
-  | source | varchar(20) | yes | | `eodhd`. UI: EODHD. |
-  | delayed | boolean | yes | | The source delays it (EODHD: 15 to 20 minutes); else real time. UI: "verzögert, 15 bis 20 Minuten" / "Echtzeit". |
+  | source | varchar(20) | yes | | `alpaca`, `six`, `eodhd`. UI: Alpaca, SIX, EODHD. |
+  | delayed | boolean | yes | | The source delays it (SIX: 15 minutes, EODHD: 15 to 20 minutes); else real time (Alpaca: IEX). UI: "verzögert, 15 Minuten" / "Echtzeit". |
   | received_at | timestamptz | yes | now() | When Seismo received it: when it became available (rule 11). UI: Erhalten. |
 
 - Relationships: belongs to one Wertpapier.
-- Rules: as received, unadjusted (rule 14), each price once - one sent again with the same time, the market closed, is not stored again. The worker queues the job "Kurse abrufen" once a minute for the active Wertpapiere (the admin's decision of 2026-10-31), a job per 20, one request each, only while `EODHD_API_KEY` is set (`price_service`); no retry - the next comes a minute later. Every price shown names its time, exchange, currency, source and delay (`templates/_price.html`; requirements.md, Live-Kurse und Kursdatenspeicher, criterion 1). The Datenbestand page shows what they take.
+- Rules: as received, unadjusted (rule 14), each price once - one sent again with the same time, the market closed, is not stored again. Live: the worker queues the job "Kurse abrufen" once a minute for the Wertpapiere with a Live-Kurs whose interval is over (`price_interval_minutes`), a job per batch of one source's (Alpaca 200, SIX and EODHD 20), one request each, only from a source that can be asked - Alpaca and EODHD while their keys are set (`price_service`); no retry - the next comes at the interval. Daily: the job chain "Tageskurse abrufen" (`history_service`), up to 200 Wertpapiere at a time, of all US exchanges (SIP), from the period's start to the last closed trading day; a day's prices count as known from its close (`trading_day.closes_at`), whenever received. Every price shown names its time, exchange, currency, source and delay (`templates/_price.html`; requirements.md, Live-Kurse und Kursdatenspeicher, criterion 1). The Datenbestand page shows what they take, their number as PostgreSQL estimates it.
+- Privacy: none
+
+### Kapitalmassnahme (`corporate_action`)
+- Store: SQL table `corporate_action`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | instrument_id | bigint | yes | | Foreign key to `instrument`, `ON DELETE CASCADE`. Index. |
+  | source | varchar(20) | yes | | `alpaca`. |
+  | source_ref | varchar(100) | yes | | Its id at the source; unique with `source` and `instrument_id` - a merger's names both Wertpapiere. |
+  | kind | varchar(30) | yes | | As the source names it: `forward_split`, `reverse_split`, `unit_split`, `cash_dividend`, `stock_dividend`, `spin_off`, `cash_merger`, `stock_merger`, `stock_and_cash_merger`, `name_change`, `worthless_removal`. UI: Aktiensplit, Zusammenlegung, Dividende, Symbolwechsel, Übernahme, Wertlos ausgebucht, ... |
+  | ex_date | date | no | | From when the price trades without it. UI: Tag. |
+  | effective_date | date | no | | Of a merger. |
+  | process_date | date | no | | When the source processed it: it counts as known from that day. UI: Bekannt seit. |
+  | old_rate, new_rate | numeric(24,12) | no | | Of a split: 1 and 4 for one share into four. |
+  | rate | numeric(24,12) | no | | A dividend per share, a merger's ratio or price. |
+  | old_symbol, new_symbol | varchar(30) | no | | Of a change of symbol. UI: FB → META. |
+  | currency | varchar(3) | no | | Of a dividend. |
+  | details | jsonb | yes | | The record as sent. |
+  | received_at | timestamptz | yes | now() | |
+
+- Relationships: belongs to one Wertpapier.
+- Rules: fetched by the job chain "Kapitalmassnahmen abrufen", 90 days of processing at a time from the period's start, then each new day (`history_service`); matched to the Wertpapier by CUSIP, else by its symbol now - one of an unknown Wertpapier is left out. A merger ends the acquired Wertpapier and a worthless removal its own (`delisted_on`). Never applied to the stored Kurspunkte: a split adjusts the prices before its ex_date only in what a point in time sees, and only when known by then (rule 14).
+- Privacy: none
+
+### Handelstag (`trading_day`)
+- Store: SQL table `trading_day`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | day | date | yes | | Primary key. UI: Handelstag. |
+  | opens_at, closes_at | timestamptz | yes | | Its opening and close in UTC; a short day closes early. |
+
+- Relationships: none
+- Rules: Alpaca's calendar of the US exchanges, from the period's start to the end of next year, with each daily sync. A day without a Wertpapier's price between its first and last is a gap (UI: "ohne Kurs"), never filled. A day's prices are fetched 20 minutes after its close and known from it.
+- Privacy: none
+
+### Marktdaten-Abgleich (`market_data_sync`)
+- Store: SQL table `market_data_sync`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | name | varchar(30) | yes | | Primary key: `assets` (the list and calendar), `actions` (the corporate actions), `period` (the first day the daily prices were fetched from). |
+  | through | date | no | | `assets`: the day of the last complete sync; `actions`: every day up to and including this one is in; `period`: that first day. |
+  | synced_at | timestamptz | yes | now() | |
+
+- Relationships: none
+- Rules: written by `history_service` only. The Wertpapiere page shows how far the sync came (Tageskurse: done of all, the last list, the corporate actions up to).
 - Privacy: none
 
 ### Domain (`fetch_host`)

@@ -56,8 +56,10 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       # Only to warn on the source list when it is missing; the worker sends it.
       FETCH_CONTACT: ${FETCH_CONTACT:-}
-      # Only to say on the Wertpapiere page whether prices are fetched; the worker sends it.
+      # Only to say on the Wertpapiere page whether prices are fetched; the worker sends them.
       EODHD_API_KEY: ${EODHD_API_KEY:-}
+      ALPACA_API_KEY_ID: ${ALPACA_API_KEY_ID:-}
+      ALPACA_API_SECRET_KEY: ${ALPACA_API_SECRET_KEY:-}
       # Only shown in the Plattform-Einstellungen; the worker extracts with them.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}
@@ -93,8 +95,11 @@ services:
       RELIEFWEB_APPNAME: ${RELIEFWEB_APPNAME:-}
       # The key of the EIA Open Data API; without it an EIA Quelle fails (README.md).
       EIA_API_KEY: ${EIA_API_KEY:-}
-      # The key of EODHD's price API; without it no prices are fetched (README.md).
+      # The key of EODHD's price API; without it no prices from EODHD (README.md).
       EODHD_API_KEY: ${EODHD_API_KEY:-}
+      # The keys of Alpaca's market data API; without them no US Wertpapiere, daily or live prices (README.md).
+      ALPACA_API_KEY_ID: ${ALPACA_API_KEY_ID:-}
+      ALPACA_API_SECRET_KEY: ${ALPACA_API_SECRET_KEY:-}
       # The LLM server in the LAN (architecture.md, "Environments and LLM"); empty: no event extraction.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}

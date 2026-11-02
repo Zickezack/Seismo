@@ -82,7 +82,7 @@ def current(engine: Engine, backup_dir: Path) -> Storage:
     with engine.connect() as connection:
         values = _measure(connection, backup_dir)
         by_source = storage_repository.raw_texts_by_source(connection)
-        price_count = price_repository.count(connection)
+        price_count = price_repository.estimated_count(connection)
     total = values["database_bytes"] or 1
     return Storage(
         values["database_bytes"],

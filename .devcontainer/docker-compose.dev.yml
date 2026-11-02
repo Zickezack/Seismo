@@ -49,6 +49,8 @@ services:
       RELIEFWEB_APPNAME: ${RELIEFWEB_APPNAME:-}
       EIA_API_KEY: ${EIA_API_KEY:-}
       EODHD_API_KEY: ${EODHD_API_KEY:-}
+      ALPACA_API_KEY_ID: ${ALPACA_API_KEY_ID:-}
+      ALPACA_API_SECRET_KEY: ${ALPACA_API_SECRET_KEY:-}
       # For an api started from the terminal (skill verify).
       ADMIN_USERNAME: ${ADMIN_USERNAME:?set ADMIN_USERNAME in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}

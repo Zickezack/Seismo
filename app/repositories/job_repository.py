@@ -156,6 +156,12 @@ def lock_jobs(connection: Connection, job_ids: Iterable[int]) -> Sequence[Row]:
     return connection.execute(statement.with_for_update()).all()
 
 
+def any_active(connection: Connection, kinds: Iterable[str]) -> bool:
+    """Whether a job of these kinds is waiting or running."""
+    statement = select(Job.id).where(Job.kind.in_(list(kinds)), Job.status.in_(ACTIVE_JOB_STATUSES)).limit(1)
+    return connection.execute(statement).first() is not None
+
+
 def active_dedupe_keys(connection: Connection, dedupe_keys: Iterable[str]) -> set[str]:
     statement = select(Job.dedupe_key).where(Job.dedupe_key.in_(list(dedupe_keys)), Job.status.in_(ACTIVE_JOB_STATUSES))
     return set(connection.execute(statement).scalars())

@@ -50,6 +50,7 @@
   ("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls", "reprocessings_per_hour"]),
   ("abruf", "Abruf", ["article_max_age_days", "domain_min_interval_seconds", "tdm_blocked_domains"]),
   ("extraktion", "Ereignisextraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour", "source_quality_domains"]),
+  ("kurse", "Kurse", ["price_interval_minutes", "price_history_years"]),
   ("aufbewahrung", "Aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
   ("backups", "Backups", ["backup_interval_hours", "backups_to_keep"]),
 ] %}
@@ -177,7 +178,7 @@
     <div class="field field-wide">
       <span class="field-label">Starterliste Wertpapiere</span>
       <p class="hint" data-testid="seed-instruments-status">{{ instruments_seed.imported }} von {{ instruments_seed.total }} Wertpapieren importiert.</p>
-      <p class="hint">Grosse Indizes (S&amp;P 500, Dow Jones, Nasdaq 100, SMI, DAX, Euro Stoxx 50, FTSE 100, CAC 40, Nikkei 225) und breite ETFs (S&amp;P 500, Nasdaq 100, US-Gesamtmarkt, SMI, Schweiz, Gold, Öl), aktiv angelegt; ihre Kurse ruft der Worker ab, sobald EODHD_API_KEY gesetzt ist. Jeder Eintrag kommt nur einmal.</p>
+      <p class="hint">Die Schweizer Indizes SMI, SPI und SMI Mid und ein SMI-ETF von SIX, dazu breite ETFs aus der Liste von Alpaca (S&amp;P 500, Nasdaq 100, Dow Jones, US-Gesamtmarkt, Schweiz, Deutschland, Eurozone, Japan, Grossbritannien, Gold, Öl), alle mit Live-Kurs. Die ETFs von Alpaca kommen erst, wenn der Worker dessen Liste abgeglichen hat (Schlüssel gesetzt); bis dahin einfach später nochmals importieren. Jeder Eintrag kommt nur einmal.</p>
     </div>
     <div class="form-actions">
       <button class="button" type="submit" data-testid="import-instruments"{% if instruments_seed.imported == instruments_seed.total %} disabled title="Alle Wertpapiere der Starterliste sind schon importiert"{% endif %}>Starterliste importieren</button>

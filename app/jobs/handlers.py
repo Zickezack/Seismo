@@ -19,6 +19,7 @@ from app.services import (
     entity_service,
     event_service,
     extraction_service,
+    history_service,
     ingestion_service,
     normalization_service,
     price_service,
@@ -28,13 +29,16 @@ from app.services.job_service import (
     BACKFILL_JOB_KIND,
     BACKUP_JOB_KIND,
     EXTRACT_EVENTS_JOB_KIND,
+    FETCH_ACTIONS_JOB_KIND,
     FETCH_ARTICLE_JOB_KIND,
+    FETCH_BARS_JOB_KIND,
     FETCH_PRICES_JOB_KIND,
     FETCH_SOURCE_JOB_KIND,
     NORMALIZE_JOB_KIND,
     RECOGNISE_ENTITIES_JOB_KIND,
     REEXTRACT_EVENTS_JOB_KIND,
     RERECOGNISE_ENTITIES_JOB_KIND,
+    SYNC_MARKET_JOB_KIND,
     TEST_JOB_KIND,
 )
 from app.sources.errors import HostBusy, SourceRejected
@@ -63,6 +67,13 @@ def build_handlers(
         FETCH_ARTICLE_JOB_KIND: lambda job: run_full_text_job(engine, job, fetch_contact),
         BACKFILL_JOB_KIND: lambda job: run_backfill_job(engine, job, fetch_contact),
         FETCH_PRICES_JOB_KIND: lambda job: run_price_job(engine, job, fetch_contact),
+        SYNC_MARKET_JOB_KIND: lambda job: run_market_job(
+            job, lambda: history_service.sync_step(engine, job.payload["step"], fetch_contact)
+        ),
+        FETCH_ACTIONS_JOB_KIND: lambda job: run_market_job(
+            job, lambda: history_service.fetch_actions(engine, job.payload, fetch_contact)
+        ),
+        FETCH_BARS_JOB_KIND: lambda job: run_market_job(job, lambda: history_service.fetch_bars(engine, job.payload, fetch_contact)),
         # Reads only the raw text: no request, no slot.
         NORMALIZE_JOB_KIND: lambda job: normalization_service.normalize(engine, job.payload["article_id"]),
         EXTRACT_EVENTS_JOB_KIND: lambda job: run_extraction_job(engine, job, llm, limiter, stop_event),
@@ -161,7 +172,20 @@ def run_backfill_job(engine: Engine, job: ClaimedJob, fetch_contact: str) -> Eff
 def run_price_job(engine: Engine, job: ClaimedJob, fetch_contact: str) -> Effect | None:
     """The latest prices of a batch of Wertpapiere; a source that answers with nothing usable fails at once."""
     try:
-        return price_service.fetch(engine, job.payload["instrument_ids"], fetch_contact, _reserved_slot(job))
+        # A job queued before there were several sources: EODHD's.
+        source = job.payload.get("source", "eodhd")
+        return price_service.fetch(engine, source, job.payload["instrument_ids"], fetch_contact, _reserved_slot(job))
+    except SourceRejected as error:
+        raise PermanentJobError(str(error)) from None
+    except HostBusy as busy:
+        raise _deferral(busy, job) from None
+
+
+def run_market_job(job: ClaimedJob, work: Callable[[], Effect | None]) -> Effect | None:
+    """A step of a chain of the historical market data; an answer with nothing usable fails it at once, and the worker
+    starts the chain again later from where it came (history_service)."""
+    try:
+        return work()
     except SourceRejected as error:
         raise PermanentJobError(str(error)) from None
     except HostBusy as busy:

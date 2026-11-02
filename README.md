@@ -59,13 +59,27 @@ never into the log. After setting it, recreate the worker. An EIA Quelle's URL i
 browser (https://www.eia.gov/opendata/browser) shows for a data set, e.g.
 `https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value`.
 
-`EODHD_API_KEY` (optional) is the key of EODHD's price API (https://eodhd.com): the latest prices of the Wertpapiere,
-delayed 15 to 20 minutes, under EODHD's personal licence. Live prices are in every plan; the free one allows 20 calls a
-day, too few - the worker asks once a minute for every active Wertpapier, each counting as one call (16 Wertpapiere of
-the starter list: about 23,000 calls a day; "Historian" and "Active trader" allow 100,000). It is a secret: worker and
-api get it (the api only to say on the Wertpapiere page whether prices are fetched), never a page or the log. After
-setting it, recreate both (`docker compose up -d api worker`). The starter list of indices and ETFs comes with
-Plattform-Einstellungen, Starterdaten.
+`ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY` (optional) are the keys of Alpaca's market data API
+(https://alpaca.markets), free with an account (sign up, then "Paper Trading", "API Keys", "Generate"; no money, no
+brokerage account needed). With them the worker brings every US stock and ETF - traded ones and those no longer
+traded - into the Wertpapiere, once a day, with its daily prices of all US exchanges back to 1 January of the first
+year of "Tageskurse (Kalenderjahre)" in the Plattform-Einstellungen (2 by default, 11 for 2016 on in 2026), the
+corporate actions and the exchanges' calendar; and fetches the live prices of the US Wertpapiere with a Live-Kurs,
+real time from IEX. The first fetch of eleven years takes several hours, always behind the other work. Keys and
+secret go only in headers, never in a URL or the log. After setting them, recreate worker and api
+(`docker compose up -d api worker`).
+
+Swiss Wertpapiere get their live prices from SIX Swiss Exchange's website, 15 minutes delayed, without a key - the
+same requests its own pages make, under its terms and its robots.txt.
+
+`EODHD_API_KEY` (optional) is the key of EODHD's price API (https://eodhd.com), for live prices of Wertpapiere beyond
+the US and SIX, delayed 15 to 20 minutes, under EODHD's personal licence; each Wertpapier asked for counts as one call
+of the plan's daily quota (the free plan: 20 a day). A secret like the others: worker and api get it, never a page or
+the log.
+
+The live prices come at "Live-Kurs-Intervall (Minuten)" of the Plattform-Einstellungen (30 by default), for each
+Wertpapier with a Live-Kurs. The starter list of Swiss indices and broad ETFs comes with Plattform-Einstellungen,
+Starterdaten; its US ETFs once Alpaca's list is in.
 
 The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
 show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):

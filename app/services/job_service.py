@@ -46,6 +46,10 @@ RECOGNISE_ENTITIES_JOB_KIND = "recognise_entities"
 # The latest prices of a batch of Wertpapiere (price_service); no retry: the next fetch comes a minute later anyway.
 FETCH_PRICES_JOB_KIND = "fetch_prices"
 FETCH_PRICES_MAX_ATTEMPTS = 1
+# The chains of the historical market data (history_service), behind live work.
+SYNC_MARKET_JOB_KIND = "sync_market"
+FETCH_ACTIONS_JOB_KIND = "fetch_actions"
+FETCH_BARS_JOB_KIND = "fetch_bars"
 # A reprocessing's (reprocessing_service): behind live work, labelled without "(Backfill)".
 REEXTRACT_EVENTS_JOB_KIND = "reextract_events"
 RERECOGNISE_ENTITIES_JOB_KIND = "rerecognise_entities"
@@ -65,11 +69,17 @@ KIND_LABELS = {
     ASSIGN_EVENT_JOB_KIND: "Ereignis zuordnen",
     RECOGNISE_ENTITIES_JOB_KIND: "Entitäten erkennen",
     FETCH_PRICES_JOB_KIND: "Kurse abrufen",
+    SYNC_MARKET_JOB_KIND: "Wertpapiere abgleichen",
+    FETCH_ACTIONS_JOB_KIND: "Kapitalmassnahmen abrufen",
+    FETCH_BARS_JOB_KIND: "Tageskurse abrufen",
     REEXTRACT_EVENTS_JOB_KIND: "Ereignisse neu extrahieren",
     RERECOGNISE_ENTITIES_JOB_KIND: "Entitäten neu erkennen",
 }
 # Kinds that are behind live work by their nature: their label needs no "(Backfill)".
-_OWN_PRIORITY_KINDS = frozenset({BACKFILL_JOB_KIND, REEXTRACT_EVENTS_JOB_KIND, RERECOGNISE_ENTITIES_JOB_KIND})
+_OWN_PRIORITY_KINDS = frozenset({
+    BACKFILL_JOB_KIND, REEXTRACT_EVENTS_JOB_KIND, RERECOGNISE_ENTITIES_JOB_KIND, SYNC_MARKET_JOB_KIND, FETCH_ACTIONS_JOB_KIND,
+    FETCH_BARS_JOB_KIND,
+})
 
 
 @dataclass(frozen=True)

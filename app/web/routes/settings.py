@@ -179,7 +179,11 @@ def import_instrument_catalogue(request: Request) -> Response:
     result = seed_service.import_instruments(request.app.state.engine)
     text = f"Starterliste Wertpapiere: {result.imported} importiert, {result.skipped} schon früher importiert."
     if result.name_taken:
-        flash(request, f"{text} Nicht importiert, schon erfasst: {name_list(result.name_taken)}.", "error")
+        text += f" Nicht importiert, schon erfasst: {name_list(result.name_taken)}."
+    if result.waiting:
+        text += f" Noch nicht in der Liste von Alpaca, später nochmals importieren: {name_list(result.waiting)}."
+    if result.name_taken or result.waiting:
+        flash(request, text, "error")
     else:
         flash(request, text)
     return RedirectResponse("/settings/platform#starterdaten", status_code=303)

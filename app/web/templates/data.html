@@ -22,7 +22,7 @@
         <tbody>
           <tr><th scope="row">Datenbank</th><td data-testid="storage-database">{{ storage.database_bytes|size }}</td></tr>
           <tr><th scope="row">Rohtexte</th><td data-testid="storage-raw-texts">{{ storage.raw_text_bytes|size }} <span class="hint">{{ storage.raw_text_count }} von {{ storage.article_count }} Artikeln, komprimiert gespeichert</span></td></tr>
-          <tr><th scope="row">Kurspunkte</th><td data-testid="storage-prices">{{ storage.price_bytes|size }} <span class="hint">{{ storage.price_count }} Kurse von Wertpapieren, wie empfangen</span></td></tr>
+          <tr><th scope="row">Kurspunkte</th><td data-testid="storage-prices">{{ storage.price_bytes|size }} <span class="hint">etwa {{ storage.price_count }} Kurse von Wertpapieren, wie empfangen</span></td></tr>
           <tr><th scope="row">Backups</th><td data-testid="storage-backups">{{ storage.backup_bytes|size }} <span class="hint">{{ storage.backup_count }} {{ "Datei" if storage.backup_count == 1 else "Dateien" }}</span></td></tr>
           <tr><th scope="row">Frei</th><td data-testid="storage-free">{{ storage.backup_free_bytes|size }} <span class="hint">auf dem Datenträger der Backups; den der Datenbank sieht Seismo nicht</span></td></tr>
         </tbody>

@@ -239,9 +239,23 @@ class InstrumentKind(StrEnum):
 
 
 class PriceResolution(StrEnum):
-    """What a Kurspunkt covers: one price at its time, or an interval (story 2)."""
+    """What a Kurspunkt covers: one price at its time, or an interval."""
 
     QUOTE = "quote"  # the last price at its time, with the day's open, high, low and volume so far
+    DAY = "day"  # a trading day: open, high, low, close and volume, `at` its start as the source gives it
+
+
+class PriceSource(StrEnum):
+    """Where a Wertpapier's prices come from (app/prices/)."""
+
+    ALPACA = "alpaca"  # US stocks and ETFs: live prices and the daily history
+    SIX = "six"  # SIX Swiss Exchange: live prices
+    EODHD = "eodhd"  # worldwide, with a paid plan: live prices
+
+
+class InstrumentStatus(StrEnum):
+    ACTIVE = "active"  # traded
+    INACTIVE = "inactive"  # no longer traded: delisted, merged away
 
 
 class TdmrepStatus(StrEnum):
@@ -328,6 +342,9 @@ class PlatformSettingsRecord(Base):
     extractions_per_hour: Mapped[int] = mapped_column(server_default="30")
     # The reprocessing's budget (reprocessing_service), apart from the extraction's.
     reprocessings_per_hour: Mapped[int] = mapped_column(server_default="30")
+    # Live prices (price_service) and the daily history (history_service).
+    price_interval_minutes: Mapped[int] = mapped_column(server_default="30")
+    price_history_years: Mapped[int] = mapped_column(server_default="2")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -345,6 +362,8 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(extractions_per_hour >= 0, name="extractions_per_hour"),
         # 0 holds the reprocessing.
         CheckConstraint(reprocessings_per_hour >= 0, name="reprocessings_per_hour"),
+        CheckConstraint(price_interval_minutes.between(5, 1440), name="price_interval_minutes"),
+        CheckConstraint(price_history_years.between(1, 30), name="price_history_years"),
     )
 
 
@@ -897,16 +916,28 @@ class Instrument(Base):
     __tablename__ = "instrument"
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    # As the price source names it: the symbol and the source's exchange code (EODHD: "NESN" at "SW").
+    source: Mapped[str] = mapped_column(String(20))
+    # Its id at the source, stable where the source keeps one through a change of symbol: Alpaca's asset id, SIX's
+    # ValorId (ISIN, currency, market), EODHD's code ("NESN.SW").
+    source_ref: Mapped[str] = mapped_column(String(100))
+    # As the source names it now: the symbol, and the exchange (Alpaca: NASDAQ, NYSE, ...; EODHD's code).
     symbol: Mapped[str] = mapped_column(String(30))
     exchange: Mapped[str] = mapped_column(String(20))
     name: Mapped[str] = mapped_column(String(200))
     kind: Mapped[str] = mapped_column(String(10))
     currency: Mapped[str | None] = mapped_column(String(3))  # ISO 4217; empty for an index, in points
     isin: Mapped[str | None] = mapped_column(String(12))
-    # The Entität it belongs to: found by its ISIN among the name forms, or chosen.
+    cusip: Mapped[str | None] = mapped_column(String(9))
+    # The Entität it belongs to: by its ISIN or ticker among the name forms, by its name - then uncertain -, or chosen.
     entity_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity.id", ondelete="SET NULL"), index=True)
-    is_active: Mapped[bool] = mapped_column(server_default=true())
+    entity_uncertain: Mapped[bool] = mapped_column(server_default=false())
+    # Its latest price is fetched at the interval of the Plattform-Einstellungen (UI: Live-Kurs).
+    live: Mapped[bool] = mapped_column(server_default=true())
+    status: Mapped[str] = mapped_column(String(10), server_default=InstrumentStatus.ACTIVE.value)
+    delisted_on: Mapped[date | None] = mapped_column(Date)
+    # Its daily prices are fetched (history_service), each trading day up to and including history_through.
+    history: Mapped[bool] = mapped_column(server_default=false())
+    history_through: Mapped[date | None] = mapped_column(Date)
     # The fetch's outcome for it: shown to the admin, never logged (datamodel.md, rule 13).
     last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
@@ -915,7 +946,11 @@ class Instrument(Base):
 
     __table_args__ = (
         CheckConstraint(kind.in_([s.value for s in InstrumentKind]), name="kind"),
-        UniqueConstraint(symbol, exchange),
+        CheckConstraint(source.in_([s.value for s in PriceSource]), name="source"),
+        CheckConstraint(status.in_([s.value for s in InstrumentStatus]), name="status"),
+        UniqueConstraint(source, source_ref),
+        Index("ix_instrument_live", live),
+        Index("ix_instrument_symbol", source, symbol),
     )
 
 
@@ -944,6 +979,54 @@ class PricePoint(Base):
         # A price asked for again unchanged - the market closed - is stored once.
         UniqueConstraint(instrument_id, resolution, at),
     )
+
+
+class CorporateAction(Base):
+    """A split, dividend, change of symbol, delisting or merger of a Wertpapier (UI term: Kapitalmassnahme), as its
+    source sends it: kept apart from the unadjusted prices (datamodel.md, rule 14)."""
+
+    __tablename__ = "corporate_action"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instrument.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(20))
+    source_ref: Mapped[str] = mapped_column(String(100))  # its id at the source; a merger's names both Wertpapiere
+    kind: Mapped[str] = mapped_column(String(30))  # as the source names it: forward_split, cash_dividend, name_change, ...
+    ex_date: Mapped[date | None] = mapped_column(Date)
+    effective_date: Mapped[date | None] = mapped_column(Date)  # of a merger
+    process_date: Mapped[date | None] = mapped_column(Date)  # when the source processed it: when it was known
+    old_rate: Mapped[float | None] = mapped_column(Numeric(24, 12))
+    new_rate: Mapped[float | None] = mapped_column(Numeric(24, 12))
+    rate: Mapped[float | None] = mapped_column(Numeric(24, 12))  # a dividend per share, a merger's ratio
+    old_symbol: Mapped[str | None] = mapped_column(String(30))
+    new_symbol: Mapped[str | None] = mapped_column(String(30))
+    currency: Mapped[str | None] = mapped_column(String(3))
+    details: Mapped[dict] = mapped_column(JSONB)  # the record as sent
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint(source, source_ref, instrument_id),)
+
+
+class TradingDay(Base):
+    """A trading day of the US exchanges (UI term: Handelstag), from the price source's calendar: what a gap is, and when
+    a day's prices are final."""
+
+    __tablename__ = "trading_day"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    opens_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    closes_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MarketDataSync(Base):
+    """How far a sync of market data came (history_service): the list of Wertpapiere, the calendar, the corporate
+    actions. Not shown as such."""
+
+    __tablename__ = "market_data_sync"
+
+    name: Mapped[str] = mapped_column(String(30), primary_key=True)
+    through: Mapped[date | None] = mapped_column(Date)  # every day up to and including this one
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class RawText(Base):

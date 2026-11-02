@@ -19,7 +19,7 @@ The platform first provides research support, not autonomous trading decisions.
 1. No autonomous stock trading.
 2. No claim that news reliably predicts price gains.
 3. No complete global source coverage from the start.
-4. No mandatory graph database or distributed infrastructure.
+4. No mandatory graph database (but may be implemented if wished) or distributed infrastructure.
 5. No permanent full-text archiving without checking the data rights.
 6. No uncontrolled processing of every article by a large LLM.
 

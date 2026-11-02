@@ -66,9 +66,10 @@ class HttpClient:
     def __exit__(self, *_exc_info: object) -> None:
         self._client.close()
 
-    def get(self, url: str, accept: str) -> HttpResponse:
-        """A successful answer; any other raises SourceRejected or SourceUnavailable."""
-        response = self.fetch(url, accept)
+    def get(self, url: str, accept: str, headers: Mapping[str, str] | None = None) -> HttpResponse:
+        """A successful answer; any other raises SourceRejected or SourceUnavailable. `headers`: further ones, e.g. an
+        API's key - never logged, like the URL."""
+        response = self.fetch(url, accept, headers=headers)
         if response.status >= 500 or response.status in RETRYABLE_STATUS:
             raise unavailable(response)
         if response.status in REFUSED_STATUS:
@@ -77,14 +78,16 @@ class HttpClient:
             raise SourceRejected(f"HTTP {response.status}")
         return response
 
-    def fetch(self, url: str, accept: str, max_bytes: int | None = None, cut: bool = False) -> HttpResponse:
+    def fetch(
+        self, url: str, accept: str, max_bytes: int | None = None, cut: bool = False, headers: Mapping[str, str] | None = None
+    ) -> HttpResponse:
         """The answer whatever its status; only a failed connection, an answer above `max_bytes` or one not complete
         within TOTAL_TIMEOUT_SECONDS raises. With `cut`, an answer above `max_bytes` is read that far and returned
         marked `cut` - for a file of which the beginning is enough, or whose size alone tells (robots.txt, tdmrep.json)."""
         max_bytes = max_bytes or MAX_RESPONSE_BYTES
         try:
             with self._watchdog.armed(TOTAL_TIMEOUT_SECONDS):
-                response = self._receive(url, accept, max_bytes, cut)
+                response = self._receive(url, accept, max_bytes, cut, headers)
         except (httpx2.InvalidURL, httpx2.UnsupportedProtocol):
             raise SourceRejected("Ungültige URL") from None
         except httpx2.TooManyRedirects:
@@ -100,9 +103,9 @@ class HttpClient:
             raise _incomplete()
         return response
 
-    def _receive(self, url: str, accept: str, max_bytes: int, cut: bool) -> HttpResponse:
+    def _receive(self, url: str, accept: str, max_bytes: int, cut: bool, headers: Mapping[str, str] | None = None) -> HttpResponse:
         extensions = {"trace": self._watchdog.trace}
-        with self._client.stream("GET", url, headers={"Accept": accept}, extensions=extensions) as response:
+        with self._client.stream("GET", url, headers={"Accept": accept, **(headers or {})}, extensions=extensions) as response:
             content, was_cut = bytearray(), False
             for chunk in response.iter_bytes():
                 content += chunk

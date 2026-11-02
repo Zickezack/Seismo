@@ -1,11 +1,11 @@
 """Seed data: imported only by an explicit admin action, each item once (architecture.md, "Seed Data")."""
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sqlalchemy import Engine
 
-from app.db.models import AliasMatch, AliasScheme
+from app.db.models import AliasMatch, AliasScheme, InstrumentStatus, PriceSource
 from app.repositories import entity_repository, instrument_repository, seed_log_repository, source_repository
 from app.repositories.source_repository import NameTaken
 from app.services import source_service
@@ -17,7 +17,7 @@ SEEDS_DIR = Path(__file__).resolve().parents[1] / "seeds"
 SOURCES_SEED = "sources"
 # The same of the starter list of sectors and commodities (Entitäten).
 ENTITIES_SEED = "entities"
-# The same of the starter list of Wertpapiere: indices and broad ETFs.
+# The same of the starter list of Wertpapiere: Swiss indices and an ETF from SIX, broad US-listed ETFs from Alpaca's list.
 INSTRUMENTS_SEED = "instruments"
 
 
@@ -32,6 +32,7 @@ class SeedResult:
     imported: int
     skipped: int  # imported by an earlier run; whether renamed or deleted since, they stay as they are
     name_taken: list[str]  # names another source already has; a later run imports them once the name is free
+    waiting: list[str] = field(default_factory=list)  # not there yet to take; a later run takes them
 
 
 @dataclass(frozen=True)
@@ -112,7 +113,8 @@ def import_entities(engine: Engine) -> SeedResult:
 
 
 def instrument_catalogue() -> list[dict]:
-    """The starter list of Wertpapiere: key, symbol and exchange as EODHD names them, name, kind, currency, ISIN."""
+    """The starter list of Wertpapiere: of SIX's, key, ValorId, symbol, name, kind, currency, ISIN; of Alpaca's, key and
+    symbol - Alpaca's list brings the rest."""
     return json.loads((SEEDS_DIR / f"{INSTRUMENTS_SEED}.json").read_text(encoding="utf-8"))
 
 
@@ -125,23 +127,34 @@ def instruments_status(engine: Engine) -> SeedStatus:
 
 def import_instruments(engine: Engine) -> SeedResult:
     """Import every Wertpapier of the starter list not imported before, each in one transaction with its log entry,
-    active, linked to the entity with its ISIN if there is one. One whose symbol and exchange another has already is
-    neither imported nor logged."""
-    imported, skipped, name_taken = 0, 0, []
+    with a Live-Kurs. One of SIX's comes in linked to the entity with its ISIN if there is one; one whose ValorId another
+    has already is neither imported nor logged. One of Alpaca's is taken from Alpaca's list and given a Live-Kurs;
+    while the list does not have it yet, it is neither taken nor logged."""
+    imported, skipped, name_taken, waiting = 0, 0, [], []
     for item in instrument_catalogue():
         with engine.begin() as connection:
             if not seed_log_repository.record(connection, INSTRUMENTS_SEED, item["key"]):
                 skipped += 1
                 continue
-            if instrument_repository.find(connection, item["symbol"], item["exchange"]) is not None:
+            if item["source"] == PriceSource.ALPACA:
+                listed = instrument_repository.by_symbol(connection, item["source"], item["symbol"])
+                if listed is None or listed.status != InstrumentStatus.ACTIVE:
+                    seed_log_repository.forget(connection, INSTRUMENTS_SEED, item["key"])
+                    waiting.append(item["symbol"])
+                    continue
+                instrument_repository.set_live(connection, [listed.id], True)
+                imported += 1
+                continue
+            if instrument_repository.find(connection, item["source"], item["source_ref"]) is not None:
                 seed_log_repository.forget(connection, INSTRUMENTS_SEED, item["key"])
-                name_taken.append(f"{item['symbol']}.{item['exchange']}")
+                name_taken.append(f"{item['symbol']} ({item['source_ref']})")
                 continue
             alias = entity_repository.find_identifier(connection, AliasScheme.ISIN, item["isin"]) if item["isin"] else None
-            values = {key: item[key] for key in ("symbol", "exchange", "name", "kind", "currency", "isin")}
-            instrument_repository.insert_instrument(connection, values | {"entity_id": alias.entity_id if alias else None})
+            values = {key: item[key] for key in ("source", "source_ref", "symbol", "name", "kind", "currency", "isin")}
+            values |= {"exchange": "SIX", "entity_id": alias.entity_id if alias else None}
+            instrument_repository.insert_instrument(connection, values)
             imported += 1
-    return SeedResult(imported=imported, skipped=skipped, name_taken=name_taken)
+    return SeedResult(imported=imported, skipped=skipped, name_taken=name_taken, waiting=waiting)
 
 
 def take_catalogue_regions(engine: Engine) -> int:

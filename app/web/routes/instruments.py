@@ -1,6 +1,8 @@
-"""Wertpapiere: the stocks, ETFs and indices whose latest prices the worker fetches, each with its latest price; one
-Wertpapier with its latest Kurspunkte (Live-Kurse und Kursdatenspeicher, story 1)."""
+"""Wertpapiere: the stocks, ETFs and indices Seismo keeps prices of, each with its latest price; one Wertpapier with
+its latest Kurspunkte, its daily prices as known at a day, and its corporate actions (Live-Kurse und
+Kursdatenspeicher, story 1; Historische Markt- und Ereignisdaten, story 1)."""
 from typing import Annotated
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
@@ -16,13 +18,23 @@ router = APIRouter(prefix="/instruments", tags=["instruments"])
 NOT_FOUND = "Wertpapier nicht gefunden."
 FormValues = Annotated[dict[str, str], Depends(form_values)]
 InstrumentIds = Annotated[list[int], Form(alias="instrument_id")]
+Back = Annotated[str, Form()]
+# The list's filters, kept through a bulk action.
+FILTERS = ("live", "source", "q")
 
 
 @router.get("")
-def instrument_list(request: Request) -> Response:
+def instrument_list(request: Request, live: str = "", source: str = "", q: str = "") -> Response:
+    """Filtered by a plain GET form: works without JavaScript, and the URL can be bookmarked."""
     engine = request.app.state.engine
     context = {
-        "overview": instrument_service.overview(engine),
+        "overview": instrument_service.overview(engine, bool(live), source, q),
+        "live": bool(live),
+        "source": source,
+        "q": q,
+        "back": urlencode({"live": "1" if live else "", "source": source, "q": q}),
+        "sources": instrument_service.SOURCE_LABELS,
+        "entered_sources": instrument_service.ENTERED_SOURCES,
         "kinds": instrument_service.KIND_LABELS,
         "choices": entity_service.choices(engine),
         "form": {},
@@ -41,29 +53,36 @@ def create_instrument(request: Request, form: FormValues) -> Response:
     return RedirectResponse(f"/instruments/{instrument.id}", status_code=303)
 
 
-@router.post("/activate")
-def activate(request: Request, instrument_ids: InstrumentIds = []) -> Response:
-    return _bulk(request, instrument_service.set_active(request.app.state.engine, instrument_ids, True), "aktiviert")
+@router.post("/live-on")
+def live_on(request: Request, instrument_ids: InstrumentIds = [], back: Back = "") -> Response:
+    return _bulk(request, instrument_service.set_live(request.app.state.engine, instrument_ids, True), "mit Live-Kurs", back)
 
 
-@router.post("/deactivate")
-def deactivate(request: Request, instrument_ids: InstrumentIds = []) -> Response:
-    return _bulk(request, instrument_service.set_active(request.app.state.engine, instrument_ids, False), "deaktiviert")
+@router.post("/live-off")
+def live_off(request: Request, instrument_ids: InstrumentIds = [], back: Back = "") -> Response:
+    return _bulk(request, instrument_service.set_live(request.app.state.engine, instrument_ids, False), "ohne Live-Kurs", back)
 
 
 @router.post("/delete")
-def delete(request: Request, instrument_ids: InstrumentIds = []) -> Response:
-    return _bulk(request, instrument_service.delete(request.app.state.engine, instrument_ids), "gelöscht")
+def delete(request: Request, instrument_ids: InstrumentIds = [], back: Back = "") -> Response:
+    return _bulk(request, instrument_service.delete(request.app.state.engine, instrument_ids), "gelöscht", back)
 
 
 @router.get("/{instrument_id}")
-def instrument_page(request: Request, instrument_id: int) -> Response:
+def instrument_page(request: Request, instrument_id: int, as_of: str = "") -> Response:
     engine = request.app.state.engine
-    detail = instrument_service.detail(engine, instrument_id)
+    detail = instrument_service.detail(engine, instrument_id, instrument_service.parse_as_of(as_of))
     if detail is None:
         flash(request, NOT_FOUND, "error")
         return RedirectResponse("/instruments", status_code=303)
-    context = {"detail": detail, "kinds": instrument_service.KIND_LABELS, "choices": entity_service.choices(engine)}
+    context = {
+        "detail": detail,
+        "as_of": as_of if detail.as_of else "",
+        "number": instrument_service.number_label,
+        "kinds": instrument_service.KIND_LABELS,
+        "entered_sources": instrument_service.ENTERED_SOURCES,
+        "choices": entity_service.choices(engine),
+    }
     return templates.TemplateResponse(request, "instrument.html", context)
 
 
@@ -81,11 +100,13 @@ def save_instrument(request: Request, instrument_id: int, form: FormValues) -> R
     return RedirectResponse(f"/instruments/{instrument_id}", status_code=303)
 
 
-def _bulk(request: Request, result: BulkResult, verb: str) -> Response:
+def _bulk(request: Request, result: BulkResult, verb: str, back: str) -> Response:
     if result.blocked:
         flash(request, f"Nichts {verb}, blockiert: {name_list(result.blocked)}.", "error")
     elif result.processed:
         flash(request, f"{result.processed} {'Wertpapier' if result.processed == 1 else 'Wertpapiere'} {verb}.")
     else:
         flash(request, "Keine Wertpapiere ausgewählt.", "error")
-    return RedirectResponse("/instruments", status_code=303)
+    # Back to the list as it was filtered: only its own filters, nothing else the form carried.
+    query = urlencode([(key, value) for key, value in parse_qsl(back) if key in FILTERS and value])
+    return RedirectResponse(f"/instruments?{query}" if query else "/instruments", status_code=303)

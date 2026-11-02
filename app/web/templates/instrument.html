@@ -13,18 +13,85 @@
         <tr><th scope="row">Kurs</th><td>{{ price(instrument.price, "meta-price") }}</td></tr>
         <tr><th scope="row">Symbol</th><td data-testid="meta-code">{{ instrument.code }}</td></tr>
         <tr><th scope="row">Börse</th><td data-testid="meta-exchange">{{ instrument.exchange_label }}</td></tr>
+        <tr><th scope="row">Quelle</th><td data-testid="meta-source">{{ instrument.source_label }}{% if instrument.source == "six" %} <span class="hint">ValorId {{ instrument.source_ref }}</span>{% endif %}</td></tr>
         <tr><th scope="row">Art</th><td>{{ instrument.kind_label }}</td></tr>
         <tr><th scope="row">Währung</th><td data-testid="meta-currency">{{ instrument.currency or "Punkte (Index)" }}</td></tr>
         <tr><th scope="row">ISIN</th><td>{{ instrument.isin or "–" }}</td></tr>
-        <tr><th scope="row">Entität</th><td data-testid="meta-entity">{% if instrument.entity_id %}<a href="/entities/{{ instrument.entity_id }}">{{ instrument.entity_name }}</a>{% else %}–{% endif %}</td></tr>
-        <tr><th scope="row">Abruf</th><td data-testid="meta-status">{% if not instrument.is_active %}Inaktiv{% elif instrument.failing %}<span class="status status-failing">Fehler</span> <span class="hint">{{ instrument.last_error }}, {{ instrument.last_error_at|local_time }}</span>{% else %}Aktiv{% if instrument.last_fetched_at %} <span class="hint">zuletzt {{ instrument.last_fetched_at|local_time }}</span>{% endif %}{% endif %}</td></tr>
+        <tr><th scope="row">Handel</th><td data-testid="meta-traded">{% if instrument.traded %}Gehandelt{% else %}Nicht mehr gehandelt{% if instrument.delisted_on %} seit {{ instrument.delisted_on.strftime("%d.%m.%Y") }}{% endif %}{% endif %}</td></tr>
+        <tr><th scope="row">Entität</th><td data-testid="meta-entity">{% if instrument.entity_id %}<a href="/entities/{{ instrument.entity_id }}">{{ instrument.entity_name }}</a>{% if instrument.entity_uncertain %} <span class="status status-uncertain">unsicher</span> <span class="hint">nach dem Namen zugeordnet; hier bestätigen oder ändern</span>{% endif %}{% else %}–{% endif %}</td></tr>
+        <tr><th scope="row">Live-Kurs</th><td data-testid="meta-status">{% if not instrument.live %}Aus{% elif instrument.failing %}<span class="status status-failing">Fehler</span> <span class="hint">{{ instrument.last_error }}, {{ instrument.last_error_at|local_time }}</span>{% else %}An{% if instrument.last_fetched_at %} <span class="hint">zuletzt {{ instrument.last_fetched_at|local_time }}</span>{% endif %}{% endif %}</td></tr>
       </tbody>
     </table>
   </div>
 </section>
 
-<details class="card section" id="prices" open data-testid="section-prices">
-  <summary><h2>Kurse ({{ detail.price_count }})</h2></summary>
+{% if instrument.history %}
+<details class="card section" id="history" open data-testid="section-history">
+  <summary><h2>Tageskurse</h2></summary>
+  <div class="stack">
+    {% set coverage = detail.coverage %}
+    <p data-testid="coverage">{% if coverage.bars %}{{ coverage.bars }} Handelstage vom {{ coverage.first_day.strftime("%d.%m.%Y") }} bis {{ coverage.last_day.strftime("%d.%m.%Y") }}{% if coverage.missing %}, {{ coverage.missing }} ohne Kurs{% if coverage.gaps %}, zuletzt {% for day in coverage.gaps %}{{ day.strftime("%d.%m.%Y") }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% else %}, ohne Lücke{% endif %}.{% else %}Noch keine Tageskurse.{% endif %}</p>
+    <form class="toolbar" method="get" action="/instruments/{{ instrument.id }}#history" data-testid="as-of-form">
+      <div class="field">
+        <label for="as_of">Stand am</label>
+        <input type="date" id="as_of" name="as_of" value="{{ as_of }}" data-testid="field-as-of">
+      </div>
+      <button class="button button-secondary" type="submit" data-testid="apply-as-of">Anzeigen</button>
+    </form>
+    <p class="hint">Was am Ende des gewählten Tages (New York) bekannt war: die Kurse der bis dahin geschlossenen Handelstage, wie empfangen, und bereinigt um die Splits, die bis dahin bekannt (von der Quelle verarbeitet) und in Kraft waren. Ohne Datum: jetzt.</p>
+    {% if detail.bars %}
+    <div class="table-container">
+      <table class="table" data-testid="bar-table">
+        <thead><tr><th>Handelstag</th><th>Eröffnung</th><th>Hoch</th><th>Tief</th><th>Schluss</th><th>Schluss bereinigt</th><th>Volumen</th></tr></thead>
+        <tbody>
+          {% for bar in detail.bars %}
+          <tr data-testid="bar-{{ loop.index }}">
+            <td>{{ bar.day.strftime("%d.%m.%Y") }}</td>
+            <td>{{ number(bar.open) }}</td>
+            <td>{{ number(bar.high) }}</td>
+            <td>{{ number(bar.low) }}</td>
+            <td>{{ number(bar.close) }}</td>
+            <td data-testid="bar-adjusted-{{ loop.index }}">{{ number(bar.adjusted_close) }}{% if bar.factor != 1 %} <span class="hint">× {{ number(bar.factor) }}</span>{% endif %}</td>
+            <td>{{ "{:,}".format(bar.volume).replace(",", " ") if bar.volume is not none else "–" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-bars">Zu diesem Stand kein Tageskurs.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="card section" id="actions" open data-testid="section-actions">
+  <summary><h2>Kapitalmassnahmen ({{ detail.actions|length }})</h2></summary>
+  <div class="stack">
+    {% if detail.actions %}
+    <div class="table-container">
+      <table class="table" data-testid="action-table">
+        <thead><tr><th>Tag</th><th>Massnahme</th><th>Angaben</th><th>Bekannt seit</th></tr></thead>
+        <tbody>
+          {% for action in detail.actions %}
+          <tr data-testid="action-{{ loop.index }}">
+            <td>{{ action.day.strftime("%d.%m.%Y") if action.day else "–" }}</td>
+            <td>{{ action.label }}</td>
+            <td>{{ action.summary or "–" }}</td>
+            <td>{{ action.process_date.strftime("%d.%m.%Y") if action.process_date else "–" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-actions">Keine Kapitalmassnahmen bekannt.</p>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
+
+<details class="card section" id="prices"{% if detail.prices or not instrument.history %} open{% endif %} data-testid="section-prices">
+  <summary><h2>Live-Kurse ({{ detail.price_count }})</h2></summary>
   <div class="stack">
     {% if detail.prices %}
     <p class="hint">Die letzten {{ detail.prices|length }}, jeder wie die Quelle ihn sandte, unbereinigt; ein Kurs mit derselben Zeit kommt nur einmal.</p>
@@ -43,7 +110,7 @@
       </table>
     </div>
     {% else %}
-    <p data-testid="no-prices">Noch kein Kurs.</p>
+    <p data-testid="no-prices">Noch kein Live-Kurs.</p>
     {% endif %}
   </div>
 </details>
@@ -51,7 +118,8 @@
 <details class="card section" id="settings" open data-testid="section-settings">
   <summary><h2>Angaben</h2></summary>
   <form class="form-grid" method="post" action="/instruments/{{ instrument.id }}" data-testid="instrument-form">
-    {{ instrument_fields(instrument, kinds, choices) }}
+    {% if instrument.listed %}<p class="hint field-wide">Symbol, Name und Börse kommen mit der Liste von Alpaca; hier nur die Entität.</p>{% endif %}
+    {{ instrument_fields(instrument, kinds, choices, entered_sources) }}
     <div class="form-actions">
       <button class="button" type="submit" data-testid="save-instrument">Speichern</button>
     </div>
