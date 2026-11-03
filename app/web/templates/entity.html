@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_watch.html" import watch_form %}
 {% from "_price.html" import price %}
 {% block title %}Entität{% endblock %}
 {% block content %}
@@ -26,6 +27,7 @@
     </table>
   </div>
   <p class="hint">Der Name stammt von der ersten Erkennung: der übliche englische Name, bei Branchen und Rohstoffen der deutsche der Starterliste.</p>
+  {% if not merged %}{{ watch_form("entity", entity.id, watch.watchlists, watch.following, request.url.path) }}{% endif %}
 </section>
 
 {# Quick navigation once there are several sections (requirements.md, "Basic UI Requirements / Styleguide", items 4

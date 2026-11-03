@@ -258,6 +258,24 @@ class InstrumentStatus(StrEnum):
     INACTIVE = "inactive"  # no longer traded: delisted, merged away
 
 
+class WatchItemKind(StrEnum):
+    """What a watchlist item follows (UI term: Watchlist): an event matches when it, or one of its reports, has it."""
+
+    ENTITY = "entity"  # a report names it
+    EVENT_TYPE = "event_type"
+    COUNTRY = "country"
+    EVENT = "event"  # the event itself
+    INSTRUMENT = "instrument"  # a report names the Entität it is linked to
+
+
+class AlertTrigger(StrEnum):
+    """What a hit of an alert rule is (alert_service)."""
+
+    NEW = "new"  # the event matches for the first time, first reported while the rule is active
+    CHANGE = "change"  # a change of its state: an escalation, a closure, a resumption
+    REPORT = "report"  # a new report of it
+
+
 class TdmrepStatus(StrEnum):
     RULES = "rules"  # tdmrep_rules holds the rules of a valid file
     NONE = "none"  # no file, or none that could be read: the host does not use the protocol
@@ -1066,4 +1084,131 @@ class FetchHost(Base):
     __table_args__ = (
         CheckConstraint(robots_status.in_([s.value for s in RobotsStatus]), name="robots_status"),
         CheckConstraint(tdmrep_status.in_([s.value for s in TdmrepStatus]), name="tdmrep_status"),
+    )
+
+
+class Watchlist(Base):
+    """What an analyst follows (UI term: Watchlist): entities, event types, countries, events and Wertpapiere."""
+
+    __tablename__ = "watchlist"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("uq_watchlist_name", func.lower(name), unique=True),)
+
+
+class WatchlistItem(Base):
+    """One thing a watchlist follows, by its kind: an entity, an event or a Wertpapier by id, a type or a country by
+    its code."""
+
+    __tablename__ = "watchlist_item"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    watchlist_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("watchlist.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20))
+    # As chosen, a merged one too: the match follows it to the entity or event it went into.
+    entity_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity.id", ondelete="CASCADE"), index=True)
+    event_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    instrument_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("instrument.id", ondelete="CASCADE"), index=True)
+    value: Mapped[str | None] = mapped_column(String(40))  # an event type, or an ISO 3166-1 alpha-2 code
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(kind.in_([s.value for s in WatchItemKind]), name="kind"),
+        CheckConstraint(
+            "num_nonnulls(entity_id, event_id, instrument_id, value) = 1 AND CASE kind"
+            " WHEN 'entity' THEN entity_id IS NOT NULL WHEN 'event' THEN event_id IS NOT NULL"
+            " WHEN 'instrument' THEN instrument_id IS NOT NULL ELSE value IS NOT NULL END",
+            name="target",
+        ),
+        # Each thing once per watchlist.
+        Index(
+            "uq_watchlist_item_target", watchlist_id, kind,
+            func.coalesce(value, func.cast(func.coalesce(entity_id, event_id, instrument_id), Text)), unique=True,
+        ),
+    )
+
+
+class AlertRule(Base):
+    """A rule that notifies about the events that match it (UI term: Alert-Regel): new ones, changes of their state,
+    new reports - at most a number per hour, an event again only after a quiet period (alert_service)."""
+
+    __tablename__ = "alert_rule"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    is_active: Mapped[bool] = mapped_column(server_default=true())
+    # The events it covers: those its watchlist follows, if it has one, and that match its filter.
+    watchlist_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("watchlist.id"), index=True)
+    # The filter as the event list's URL states it, without period (event_service.parse_filter).
+    criteria: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    on_new: Mapped[bool] = mapped_column(server_default=true())
+    on_change: Mapped[bool] = mapped_column(server_default=true())
+    on_report: Mapped[bool] = mapped_column(server_default=false())
+    max_per_hour: Mapped[int] = mapped_column(server_default="5")
+    cooldown_hours: Mapped[int] = mapped_column(server_default="6")
+    # What happens from then on counts: set when it is created, saved or activated again.
+    active_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(max_per_hour.between(1, 100), name="max_per_hour"),
+        CheckConstraint(cooldown_hours.between(0, 168), name="cooldown_hours"),
+        CheckConstraint(on_new | on_change | on_report, name="trigger"),
+        Index("uq_alert_rule_name", func.lower(name), unique=True),
+    )
+
+
+class Alert(Base):
+    """A notification of an alert rule (UI term: Alert): one event's hits, or a Sammel-Alert of several once the
+    rule's hourly limit is reached."""
+
+    __tablename__ = "alert"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    rule_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("alert_rule.id", ondelete="CASCADE"), index=True)
+    digest: Mapped[bool] = mapped_column(server_default=false())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_alert_unread", created_at, postgresql_where=read_at.is_(None)),)
+
+
+class AlertHit(Base):
+    """What an alert rule found (UI term: Treffer), each once: an event new to it, a change of state, a report. Waits
+    while the rule is throttled, then goes out with an Alert."""
+
+    __tablename__ = "alert_hit"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    rule_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("alert_rule.id", ondelete="CASCADE"))
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    trigger: Mapped[str] = mapped_column(String(10))
+    state_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("event_state.id", ondelete="CASCADE"), index=True)
+    candidate_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("event_candidate.id", ondelete="CASCADE"), index=True
+    )
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The Alert it went out with; empty while it waits.
+    alert_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("alert.id", ondelete="CASCADE"), index=True)
+
+    __table_args__ = (
+        CheckConstraint(trigger.in_([s.value for s in AlertTrigger]), name="trigger"),
+        CheckConstraint(
+            "CASE trigger WHEN 'change' THEN state_id IS NOT NULL WHEN 'report' THEN candidate_id IS NOT NULL"
+            " ELSE true END",
+            name="target",
+        ),
+        Index("ix_alert_hit_rule_id_event_id", rule_id, event_id),
+        Index("ix_alert_hit_waiting", rule_id, postgresql_where=alert_id.is_(None)),
+        # Each found once.
+        Index("uq_alert_hit_new", rule_id, event_id, unique=True, postgresql_where=trigger == AlertTrigger.NEW.value),
+        Index("uq_alert_hit_change", rule_id, state_id, unique=True, postgresql_where=trigger == AlertTrigger.CHANGE.value),
+        Index(
+            "uq_alert_hit_report", rule_id, candidate_id, unique=True, postgresql_where=trigger == AlertTrigger.REPORT.value
+        ),
     )

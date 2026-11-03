@@ -509,3 +509,26 @@ def test_full_texts_failed_on_an_oversized_lookup_are_fetched_again_behind_live_
         ("a", "pending", None), ("b", "pending", None), ("c", "failed", "HTTP 404"), ("d", "stored", None),
     ]
     assert [tuple(row) for row in queued] == [("a", 31, 1, True), ("b", 31, 1, True)]
+
+
+def test_watchlists_and_alerts_go_with_a_downgrade_and_the_entities_stay(engine):
+    upgrade(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO entity (kind, name) VALUES ('company', 'Adif')"))
+        connection.execute(text("INSERT INTO watchlist (name) VALUES ('Häfen')"))
+        connection.execute(text(
+            "INSERT INTO watchlist_item (watchlist_id, kind, entity_id) SELECT w.id, 'entity', e.id FROM watchlist w, entity e"
+        ))
+        connection.execute(text("INSERT INTO watchlist_item (watchlist_id, kind, value) SELECT id, 'country', 'ES' FROM watchlist"))
+        connection.execute(text("INSERT INTO alert_rule (name, watchlist_id) SELECT 'Hafen', id FROM watchlist"))
+        connection.execute(text("INSERT INTO alert (rule_id) SELECT id FROM alert_rule"))
+
+    downgrade(engine, "55bbb214a90b")
+
+    with engine.connect() as connection:
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+        entities = connection.execute(text("SELECT count(*) FROM entity")).scalar_one()
+    assert not tables & {"watchlist", "watchlist_item", "alert_rule", "alert", "alert_hit"} and entities == 1
+
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

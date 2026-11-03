@@ -1,0 +1,24 @@
+{# Zur Watchlist hinzufügen, on the page of an entity, an event or a Wertpapier (watchlist_service.add): the watchlists
+   that follow it already are named, the others offered. #}
+{% macro watch_form(kind, target_id, watchlists, following, back) %}
+<form class="toolbar" method="post" action="/watchlists/follow" data-testid="watch-form">
+  <input type="hidden" name="kind" value="{{ kind }}">
+  <input type="hidden" name="target" value="{{ target_id }}">
+  <input type="hidden" name="back" value="{{ back }}">
+  {% set others = watchlists|rejectattr("id", "in", following)|list %}
+  {% if following %}
+  <p class="hint" data-testid="watched-in">In {{ "der Watchlist" if following|length == 1 else "den Watchlists" }} {% for watchlist in watchlists if watchlist.id in following %}<a href="/watchlists/{{ watchlist.id }}">{{ watchlist.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+  {% endif %}
+  {% if others %}
+  <div class="field">
+    <label for="watch-watchlist">Watchlist</label>
+    <select id="watch-watchlist" name="watchlist" data-testid="watch-watchlist">
+      {% for watchlist in others %}<option value="{{ watchlist.id }}">{{ watchlist.name }}</option>{% endfor %}
+    </select>
+  </div>
+  <button class="button button-secondary" type="submit" data-testid="watch">Zur Watchlist hinzufügen</button>
+  {% elif not watchlists %}
+  <p class="hint" data-testid="no-watchlists">Noch keine Watchlist: <a href="/watchlists#new">eine anlegen</a>.</p>
+  {% endif %}
+</form>
+{% endmacro %}

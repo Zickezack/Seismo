@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Watchlists{% endblock %}
+{% block content %}
+<h1>Watchlists</h1>
+
+<section class="card stack">
+  <p class="hint">Eine Watchlist verfolgt Entitäten, Wertpapiere, einzelne Ereignisse, Ereignistypen und Länder. Ein Ereignis passt zu ihr, wenn es eines ihrer Ereignisse ist, es selbst oder einer seiner Berichte einen ihrer Typen oder eines ihrer Länder hat, oder ein Bericht eine ihrer Entitäten nennt (bei einem Wertpapier die Entität, mit der es verknüpft ist). Entitäten, Ereignisse und Wertpapiere kommen von ihrer eigenen Seite dazu. Die Ereignisliste und das Dashboard filtern danach, eine <a href="/alerts/rules">Alert-Regel</a> meldet, was mit ihren Ereignissen geschieht.</p>
+</section>
+
+<form class="stack" method="post" action="/watchlists/delete" data-bulk-form data-testid="watchlist-list">
+  <div class="toolbar">
+    <div class="actions">
+      <button class="button button-danger" type="submit" formaction="/watchlists/delete" data-bulk-action data-confirm="Watchlist|Watchlists" data-testid="delete" disabled>Löschen</button>
+    </div>
+    <a class="button" href="#new" data-testid="new-watchlist">Watchlist anlegen</a>
+  </div>
+  {% if watchlists %}
+  <div class="table-container">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Watchlists auswählen" data-testid="select-all"></th>
+          <th>Name</th>
+          <th>Einträge</th>
+          <th>Alert-Regeln</th>
+          <th>Geändert</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for watchlist in watchlists %}
+        <tr data-testid="watchlist-{{ watchlist.id }}">
+          <td class="cell-select"><input type="checkbox" name="watchlist_id" value="{{ watchlist.id }}" data-select-row data-name="{{ watchlist.name }}" aria-label="{{ watchlist.name }} auswählen" data-testid="select-{{ watchlist.id }}"></td>
+          <td class="cell-title"><a href="/watchlists/{{ watchlist.id }}" data-testid="name-{{ watchlist.id }}">{{ watchlist.name }}</a><span class="hint"><a href="/events?watchlist={{ watchlist.id }}">Ihre Ereignisse</a></span></td>
+          <td data-testid="items-{{ watchlist.id }}">{{ watchlist.item_count }}</td>
+          <td data-testid="rules-{{ watchlist.id }}">{{ watchlist.rule_count }}</td>
+          <td class="cell-wrap">{{ watchlist.updated_at|local_time }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p data-testid="no-watchlists">Noch keine Watchlists.</p>
+  {% endif %}
+</form>
+
+<details class="card section" id="new" open data-testid="section-new">
+  <summary><h2>Watchlist anlegen</h2></summary>
+  <form class="form-grid" method="post" action="/watchlists" data-testid="watchlist-form">
+    <div class="field">
+      <label for="watchlist-name">Name</label>
+      <input id="watchlist-name" name="name" maxlength="200" required data-testid="watchlist-name">
+    </div>
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="create-watchlist">Anlegen</button>
+    </div>
+  </form>
+</details>
+{% endblock %}

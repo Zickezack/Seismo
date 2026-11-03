@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<h1>Alerts</h1>
+
+<section class="card stack">
+  <p class="hint">Eine <a href="/alerts/rules">Alert-Regel</a> meldet hier, was mit den Ereignissen ihrer <a href="/watchlists">Watchlist</a> und ihres Filters geschieht, solange sie aktiv ist: neue Ereignisse, Zustandswechsel, neue Berichte. Der Worker schaut jede Minute nach. Ein Ereignis kommt erst nach der Ruhezeit der Regel wieder, ausser es wechselt seinen Zustand; über dem Limit pro Stunde kommen die übrigen gesammelt als ein Sammel-Alert. Es geht nichts verloren.</p>
+  <nav class="filters" aria-label="Anzeigen">
+    <a class="filter" href="/alerts"{% if inbox.unread_only %} aria-current="true"{% endif %} data-testid="show-unread">Ungelesen <span class="count">{{ inbox.unread }}</span></a>
+    <a class="filter" href="/alerts?show=all"{% if not inbox.unread_only %} aria-current="true"{% endif %} data-testid="show-all">Alle</a>
+  </nav>
+</section>
+
+<form class="stack" method="post" action="/alerts/read" data-bulk-form data-testid="alert-list">
+  <input type="hidden" name="back" value="{{ '' if inbox.unread_only else 'all' }}">
+  <div class="toolbar">
+    <div class="actions">
+      <button class="button button-secondary" type="submit" formaction="/alerts/read" data-bulk-action data-testid="mark-read" disabled>Als gelesen markieren</button>
+      {% if inbox.unread %}<button class="button button-secondary" type="submit" formaction="/alerts/read-all" data-testid="mark-all-read">Alle als gelesen markieren</button>{% endif %}
+    </div>
+    <a class="button" href="/alerts/rules" data-testid="rules-link">Alert-Regeln</a>
+  </div>
+  {% if inbox.alerts %}
+  <p class="hint" data-testid="alert-count">{% if inbox.total > inbox.alerts|length %}Angezeigt: die neuesten {{ inbox.alerts|length }} von {{ inbox.total }} Alerts.{% else %}{{ inbox.total }} {{ "Alert" if inbox.total == 1 else "Alerts" }}.{% endif %}</p>
+  <div class="table-container">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Alerts auswählen" data-testid="select-all"></th>
+          <th>Zeit</th>
+          <th>Alert-Regel</th>
+          <th>Was</th>
+          <th>Ereignisse</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for alert in inbox.alerts %}
+        <tr data-testid="alert-{{ alert.id }}">
+          <td class="cell-select"><input type="checkbox" name="alert_id" value="{{ alert.id }}" data-select-row data-name="{{ alert.rule_name }}: {{ alert.summary }}" aria-label="Alert {{ alert.id }} auswählen" data-testid="select-{{ alert.id }}"></td>
+          <td class="cell-wrap">{{ alert.created_at|local_time }}{% if not alert.read_at %}<span class="hint"><span class="status status-running" data-testid="unread-{{ alert.id }}">ungelesen</span></span>{% endif %}</td>
+          <td class="cell-wrap"><a href="/alerts/rules/{{ alert.rule_id }}">{{ alert.rule_name }}</a></td>
+          <td class="cell-wrap" data-testid="summary-{{ alert.id }}">{% if alert.digest %}<span class="status status-change" data-testid="digest-{{ alert.id }}">Sammel-Alert</span> {% endif %}{{ alert.summary }}</td>
+          <td class="cell-title">
+            <ul class="plain-list">
+              {% for event in alert.events %}
+              <li data-testid="alert-{{ alert.id }}-event-{{ event.event_id }}">
+                <a href="/events/{{ event.merged_into_id or event.event_id }}">{{ event.title }}</a>
+                <span class="hint">{% if event.new %}Neues Ereignis{% if event.changes or event.reports %} · {% endif %}{% endif %}{% for status in event.changes %}Zustand: {{ status }}{% if not loop.last or event.reports %} · {% endif %}{% endfor %}{% if event.reports %}{{ event.reports|length }} {{ "neuer Bericht" if event.reports|length == 1 else "neue Berichte" }}: {% for report in event.reports[:3] %}<a href="/articles/{{ report.article_id }}">{{ report.source or report.title }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if event.reports|length > 3 %} und {{ event.reports|length - 3 }} weitere{% endif %}{% endif %}{% if event.merged_into_id %} · zusammengeführt in Ereignis {{ event.merged_into_id }}{% endif %}</span>
+              </li>
+              {% endfor %}
+            </ul>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p data-testid="no-alerts">{% if inbox.unread_only %}Keine ungelesenen Alerts.{% else %}Noch keine Alerts.{% endif %}</p>
+  {% endif %}
+</form>
+{% endblock %}

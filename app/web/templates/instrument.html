@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_watch.html" import watch_form %}
 {% from "_price.html" import price %}
 {% from "_instrument_fields.html" import instrument_fields %}
 {% block title %}Wertpapier{% endblock %}
@@ -23,6 +24,7 @@
       </tbody>
     </table>
   </div>
+  {{ watch_form("instrument", instrument.id, watch.watchlists, watch.following, request.url.path) }}
 </section>
 
 {% if instrument.history %}

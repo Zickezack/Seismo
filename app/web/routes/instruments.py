@@ -7,7 +7,8 @@ from urllib.parse import parse_qsl, urlencode
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app.services import entity_service, instrument_service
+from app.db.models import WatchItemKind
+from app.services import entity_service, instrument_service, watchlist_service
 from app.services.bulk import BulkResult
 from app.services.instrument_service import InvalidInstrument
 from app.web.forms import form_values
@@ -82,6 +83,7 @@ def instrument_page(request: Request, instrument_id: int, as_of: str = "") -> Re
         "kinds": instrument_service.KIND_LABELS,
         "entered_sources": instrument_service.ENTERED_SOURCES,
         "choices": entity_service.choices(engine),
+        "watch": watchlist_service.watching(engine, WatchItemKind.INSTRUMENT, instrument_id),
     }
     return templates.TemplateResponse(request, "instrument.html", context)
 

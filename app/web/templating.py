@@ -6,6 +6,7 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
+from app.services import alert_service
 from app.web.access import current_admin
 
 WEB_DIR = Path(__file__).parent
@@ -30,6 +31,13 @@ def name_list(names: list[str]) -> str:
 def _admin(request: Request) -> dict:
     # Every page shows who is logged in and the logout button (templates/base.html).
     return {"admin": current_admin(request)}
+
+
+def _unread_alerts(request: Request) -> dict:
+    # The navigation shows how many alerts are unread (templates/base.html).
+    if current_admin(request) is None:
+        return {}
+    return {"unread_alerts": alert_service.unread_count(request.app.state.engine)}
 
 
 def _flash(request: Request) -> dict:
@@ -60,6 +68,6 @@ def _size(value: float | None) -> str:
     return f"{'-' if value < 0 and number.strip('0,') else ''}{number} {_SIZE_UNITS[unit]}"
 
 
-templates = Jinja2Templates(directory=WEB_DIR / "templates", context_processors=[_admin, _flash])
+templates = Jinja2Templates(directory=WEB_DIR / "templates", context_processors=[_admin, _unread_alerts, _flash])
 templates.env.filters["local_time"] = _local_time
 templates.env.filters["size"] = _size

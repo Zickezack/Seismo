@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "_event_filter.html" import filter_fields %}
+{% block title %}{{ rule.name if rule else "Neue Alert-Regel" }}{% endblock %}
+{% block content %}
+<h1 data-testid="rule-title">{{ rule.name if rule else "Neue Alert-Regel" }}</h1>
+
+{% if rule %}
+<section class="card stack">
+  <p data-testid="rule-state">{% if rule.is_active %}Aktiv seit {{ rule.active_since|local_time }}.{% else %}Inaktiv.{% endif %} {{ rule.alert_count }} {{ "Alert" if rule.alert_count == 1 else "Alerts" }}{% if rule.waiting_count %}, {{ rule.waiting_count }} {{ "Treffer wartet" if rule.waiting_count == 1 else "Treffer warten" }}{% endif %}. <a href="/events?{{ rule.filter_query }}">Ihre Ereignisse</a></p>
+  <p class="hint">Speichern startet die Regel neu: Sie zählt dann, was ab jetzt geschieht.</p>
+</section>
+{% endif %}
+
+<form class="stack" method="post" action="{{ '/alerts/rules/%d' % rule.id if rule else '/alerts/rules' }}" data-testid="rule-form">
+  <details class="card section" id="rule" open data-testid="section-rule">
+    <summary><h2>Regel</h2></summary>
+    <div class="form-grid">
+      <div class="field">
+        <label for="rule-name">Name</label>
+        <input id="rule-name" name="name" value="{{ values.name or '' }}" maxlength="200" required data-testid="rule-name">
+      </div>
+      <div class="field">
+        <span class="field-label">Status</span>
+        <label class="checkbox-label"><input type="checkbox" name="is_active" value="1"{% if values.is_active %} checked{% endif %} data-testid="rule-active"> Aktiv</label>
+      </div>
+      <div class="field field-wide" role="group" aria-labelledby="rule-triggers">
+        <span class="field-label" id="rule-triggers">Melden bei</span>
+        <label class="checkbox-label"><input type="checkbox" name="on_new" value="1"{% if values.on_new %} checked{% endif %} data-testid="rule-on-new"> Neues Ereignis – es passt zum ersten Mal, zuerst berichtet, seit die Regel aktiv ist (auch wenn es die Relevanz erst später erreicht)</label>
+        <label class="checkbox-label"><input type="checkbox" name="on_change" value="1"{% if values.on_change %} checked{% endif %} data-testid="rule-on-change"> Zustandswechsel – Eskalation, Abschluss, Wiederaufnahme</label>
+        <label class="checkbox-label"><input type="checkbox" name="on_report" value="1"{% if values.on_report %} checked{% endif %} data-testid="rule-on-report"> Neuer Bericht – jeder weitere Bericht zu einem passenden Ereignis</label>
+      </div>
+    </div>
+  </details>
+
+  <details class="card section" id="events" open data-testid="section-events">
+    <summary><h2>Ereignisse</h2></summary>
+    <div class="form-grid">
+      {{ filter_fields(filter, choices) }}
+      <p class="hint field-wide">Ohne Watchlist und Filter umfasst die Regel jedes Ereignis.</p>
+    </div>
+  </details>
+
+  <details class="card section" id="throttle" open data-testid="section-throttle">
+    <summary><h2>Drosselung</h2></summary>
+    <div class="form-grid">
+      <div class="field">
+        <label for="rule-max">Höchstens pro Stunde</label>
+        <input id="rule-max" name="max_per_hour" type="number" min="{{ limits.max_per_hour[0] }}" max="{{ limits.max_per_hour[1] }}" value="{{ values.max_per_hour }}" required data-testid="rule-max-per-hour">
+      </div>
+      <div class="field">
+        <label for="rule-cooldown">Ruhezeit pro Ereignis (Stunden)</label>
+        <input id="rule-cooldown" name="cooldown_hours" type="number" min="{{ limits.cooldown_hours[0] }}" max="{{ limits.cooldown_hours[1] }}" value="{{ values.cooldown_hours }}" required data-testid="rule-cooldown">
+      </div>
+      <p class="hint field-wide">Die Treffer eines Ereignisses kommen zusammen in einem Alert. Danach kommt dasselbe Ereignis erst nach der Ruhezeit wieder, ausser es wechselt seinen Zustand. Über dem Limit pro Stunde kommen die übrigen gesammelt als ein Sammel-Alert, sobald die Stunde es zulässt.</p>
+    </div>
+  </details>
+
+  <div class="form-actions actions">
+    <button class="button" type="submit" data-testid="save-rule">{{ "Speichern" if rule else "Anlegen" }}</button>
+    <a class="button button-secondary" href="/alerts/rules">Abbrechen</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Alert-Regeln{% endblock %}
+{% block content %}
+<h1>Alert-Regeln</h1>
+
+<section class="card stack">
+  <p class="hint">Eine Regel umfasst die Ereignisse ihrer Watchlist, wenn sie eine hat, die zu ihrem Filter passen. Sie zählt, was ab ihrer Aktivierung oder ihrer letzten Änderung geschieht; was davor war, meldet sie nicht. Treffer, die wegen der Drosselung warten, kommen später, sobald die Ruhezeit oder das Limit pro Stunde es zulässt.</p>
+</section>
+
+<form class="stack" method="post" action="/alerts/rules/delete" data-bulk-form data-testid="rule-list">
+  <div class="toolbar">
+    <div class="actions">
+      <button class="button button-secondary" type="submit" formaction="/alerts/rules/activate" data-bulk-action data-testid="activate" disabled>Aktivieren</button>
+      <button class="button button-secondary" type="submit" formaction="/alerts/rules/deactivate" data-bulk-action data-testid="deactivate" disabled>Deaktivieren</button>
+      <button class="button button-danger" type="submit" formaction="/alerts/rules/delete" data-bulk-action data-confirm="Alert-Regel mit ihren Alerts|Alert-Regeln mit ihren Alerts" data-testid="delete" disabled>Löschen</button>
+    </div>
+    <a class="button" href="/alerts/rules/new" data-testid="new-rule">Alert-Regel anlegen</a>
+  </div>
+  {% if rules %}
+  <div class="table-container">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Alert-Regeln auswählen" data-testid="select-all"></th>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Watchlist</th>
+          <th>Melden bei</th>
+          <th>Drosselung</th>
+          <th>Alerts</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rule in rules %}
+        <tr data-testid="rule-{{ rule.id }}">
+          <td class="cell-select"><input type="checkbox" name="rule_id" value="{{ rule.id }}" data-select-row data-name="{{ rule.name }}" aria-label="{{ rule.name }} auswählen" data-testid="select-{{ rule.id }}"></td>
+          <td class="cell-title"><a href="/alerts/rules/{{ rule.id }}" data-testid="name-{{ rule.id }}">{{ rule.name }}</a><span class="hint"><a href="/events?{{ rule.filter_query }}" data-testid="events-{{ rule.id }}">Ihre Ereignisse</a></span></td>
+          <td class="cell-wrap" data-testid="status-{{ rule.id }}">{% if rule.is_active %}<span class="status status-active">Aktiv</span><span class="hint">seit {{ rule.active_since|local_time }}</span>{% else %}<span class="status status-inactive">Inaktiv</span>{% endif %}</td>
+          <td class="cell-wrap">{% if rule.watchlist_id %}<a href="/watchlists/{{ rule.watchlist_id }}">{{ rule.watchlist_name }}</a>{% else %}–{% endif %}</td>
+          <td class="cell-wrap">{{ rule.trigger_labels|join(", ") }}</td>
+          <td class="cell-wrap">{{ rule.throttle_label }}{% if rule.waiting_count %}<span class="hint" data-testid="waiting-{{ rule.id }}">{{ rule.waiting_count }} {{ "Treffer wartet" if rule.waiting_count == 1 else "Treffer warten" }}</span>{% endif %}</td>
+          <td class="cell-wrap" data-testid="alerts-{{ rule.id }}">{{ rule.alert_count }}{% if rule.last_alert_at %}<span class="hint">zuletzt {{ rule.last_alert_at|local_time }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p data-testid="no-rules">Noch keine Alert-Regeln. Eine Regel lässt sich hier anlegen oder aus einem Filter der Ereignisliste („Als Alert-Regel speichern“).</p>
+  {% endif %}
+</form>
+{% endblock %}

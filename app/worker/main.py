@@ -15,7 +15,8 @@ leave their events once the new ones have theirs; once an hour it measures the s
 (app/services/raw_text_service.py). Once a minute, too, it queues the fetch of the latest prices of the Wertpapiere
 with a Live-Kurs whose interval is over, from each source that can be asked (app/services/price_service.py); every ten
 minutes it starts the chains of the historical market data that are due and not under way
-(app/services/history_service.py).
+(app/services/history_service.py). Once a minute, too, every active alert rule looks for what is new to it and sends
+what its throttle lets go (app/services/alert_service.py).
 """
 import logging
 import os
@@ -40,6 +41,7 @@ from app.llm.limiter import LlmCallLimiter
 from app.logging_config import configure_logging
 from app.llm.ollama import OllamaClient
 from app.services import (
+    alert_service,
     backup_service,
     entity_service,
     event_service,
@@ -81,6 +83,8 @@ RAW_TEXT_CHECK_INTERVAL_SECONDS = 60 * 60
 PRICE_CHECK_INTERVAL_SECONDS = 60
 # The chains of the historical market data run for hours; a failed one starts again at most this late.
 HISTORY_CHECK_INTERVAL_SECONDS = 10 * 60
+# An alert goes out at most this late after its event's report was assigned or its entities recognised.
+ALERT_CHECK_INTERVAL_SECONDS = 60
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:
@@ -114,7 +118,7 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
     was_ready = llm_served = None
     next_purge = next_backup_check = next_fetch_check = next_normalize_check = next_llm_check = time.monotonic()
     next_retire_check = next_storage_check = next_raw_text_check = next_price_check = time.monotonic()
-    next_history_check = time.monotonic()
+    next_history_check = next_alert_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -152,6 +156,9 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and time.monotonic() >= next_history_check:
                 next_history_check = time.monotonic() + HISTORY_CHECK_INTERVAL_SECONDS
                 _enqueue_due_market_data(engine)
+            if report.ready and time.monotonic() >= next_alert_check:
+                next_alert_check = time.monotonic() + ALERT_CHECK_INTERVAL_SECONDS
+                _sweep_alerts(engine)
             # After a job, take the next one at once; wait only while the queue is empty.
             claimable = _claimable(handlers, llm_served)
             if report.ready and _run_next_job(engine, claimable, owner, renew_interval, heartbeat_file):
@@ -268,6 +275,14 @@ def _enqueue_due_market_data(engine: Engine) -> None:
         return
     if job_ids:
         logger.info("Market data jobs queued", extra={"jobs": len(job_ids)})
+
+
+def _sweep_alerts(engine: Engine) -> None:
+    try:
+        alert_service.sweep(engine)
+    except SQLAlchemyError as error:
+        # Tried again at the next interval; nothing found is lost, it goes out a minute later.
+        logger.warning("Alert sweep failed: %s", getattr(error, "orig", None) or error)
 
 
 def _delete_due_raw_texts(engine: Engine) -> None:

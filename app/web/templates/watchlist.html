@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Watchlist{% endblock %}
+{% block content %}
+{% set watchlist = detail.watchlist %}
+<h1 data-testid="watchlist-title">{{ watchlist.name }}</h1>
+
+<section class="card stack">
+  <p>{{ detail.items|length }} {{ "Eintrag" if detail.items|length == 1 else "Einträge" }}{% if watchlist.rule_count %}, von {{ watchlist.rule_count }} {{ "Alert-Regel" if watchlist.rule_count == 1 else "Alert-Regeln" }} verwendet{% endif %}. <a href="/events?watchlist={{ watchlist.id }}" data-testid="watchlist-events">Ihre Ereignisse</a></p>
+  {# Saved in place, without a page reload (static/app.js). #}
+  <form class="toolbar" method="post" action="/watchlists/{{ watchlist.id }}/rename" data-inline-save data-testid="rename-form">
+    <div class="field">
+      <label for="rename">Name</label>
+      <input id="rename" name="name" value="{{ watchlist.name }}" maxlength="200" required data-testid="rename-name">
+    </div>
+    <div class="actions">
+      <button class="button button-secondary" type="submit" data-testid="rename">Umbenennen</button>
+      <span class="save-status" data-save-status role="status" data-testid="save-status"></span>
+    </div>
+  </form>
+  <p class="hint">Entitäten, Wertpapiere und Ereignisse kommen auf ihrer eigenen Seite dazu („Zur Watchlist hinzufügen“). Eine Entität oder ein Ereignis, das seither zusammengeführt wurde, steht für das, in das es aufging.</p>
+</section>
+
+<form class="stack" method="post" action="/watchlists/{{ watchlist.id }}/remove" data-bulk-form data-testid="item-list">
+  <div class="toolbar">
+    <div class="actions">
+      <button class="button button-danger" type="submit" formaction="/watchlists/{{ watchlist.id }}/remove" data-bulk-action data-confirm="Eintrag|Einträge" data-confirm-verb="entfernen" data-testid="remove" disabled>Entfernen</button>
+    </div>
+  </div>
+  {% if detail.items %}
+  <div class="table-container">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Einträge auswählen" data-testid="select-all"></th>
+          <th>Art</th>
+          <th>Eintrag</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in detail.items %}
+        <tr data-testid="item-{{ item.id }}">
+          <td class="cell-select"><input type="checkbox" name="item_id" value="{{ item.id }}" data-select-row data-name="{{ item.label }}" aria-label="{{ item.label }} auswählen" data-testid="select-{{ item.id }}"></td>
+          <td>{{ item.kind_label }}</td>
+          <td class="cell-title">{% if item.href %}<a href="{{ item.href }}" data-testid="item-label-{{ item.id }}">{{ item.label }}</a>{% else %}<span data-testid="item-label-{{ item.id }}">{{ item.label }}</span>{% endif %}{% if item.note %}<span class="hint">{{ item.note }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p data-testid="no-items">Die Watchlist verfolgt noch nichts; zu ihr passt kein Ereignis.</p>
+  {% endif %}
+</form>
+
+<details class="card section" id="add" open data-testid="section-add">
+  <summary><h2>Ereignistyp oder Land hinzufügen</h2></summary>
+  <div class="stack">
+    <form class="toolbar" method="post" action="/watchlists/follow" data-testid="add-type-form">
+      <input type="hidden" name="watchlist" value="{{ watchlist.id }}">
+      <input type="hidden" name="kind" value="event_type">
+      <input type="hidden" name="back" value="/watchlists/{{ watchlist.id }}">
+      <div class="field">
+        <label for="add-type">Ereignistyp</label>
+        <select id="add-type" name="target" data-testid="add-type">
+          {% for key, label in types.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <button class="button button-secondary" type="submit" data-testid="add-type-submit">Hinzufügen</button>
+    </form>
+    <form class="toolbar" method="post" action="/watchlists/follow" data-testid="add-country-form">
+      <input type="hidden" name="watchlist" value="{{ watchlist.id }}">
+      <input type="hidden" name="kind" value="country">
+      <input type="hidden" name="back" value="/watchlists/{{ watchlist.id }}">
+      <div class="field">
+        <label for="add-country">Land (ISO-Code, z. B. CH)</label>
+        <input id="add-country" name="target" maxlength="2" required pattern="[A-Za-z]{2}" data-testid="add-country">
+      </div>
+      <button class="button button-secondary" type="submit" data-testid="add-country-submit">Hinzufügen</button>
+    </form>
+  </div>
+</details>
+{% endblock %}

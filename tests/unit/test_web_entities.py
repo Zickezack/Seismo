@@ -1,4 +1,5 @@
 """Entitäten pages in the web layer, without a database: the services are replaced."""
+import re
 from datetime import date
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ from app.services import (
     instrument_service,
     relationship_service,
     seed_service,
+    watchlist_service,
 )
 from app.services.bulk import BulkResult
 from app.services.entity_correction_service import SimilarEntity, SplitResult
@@ -20,6 +22,7 @@ from app.services.entity_service import AliasView, EntityDetail, EntityListItem,
 from app.services.event_service import EventDetail
 from app.services.relationship_service import InvalidRelationship, RecordView, RelationshipDetail, RelationshipView, State
 from app.services.seed_service import SeedResult
+from app.services.watchlist_service import Watching, WatchlistRef
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
 from tests.unit.test_web_events import event
@@ -139,6 +142,19 @@ def test_the_entity_page_shows_its_parent_and_children(client, pages):
     assert text_of(html, "no-mentions") == "Kein Bericht nennt diese Entität."
 
 
+def test_the_entity_page_offers_the_watchlists_that_do_not_follow_it_yet(client, pages, monkeypatch):
+    pages["detail"] = EntityDetail(entity(7), [alias(1)], [], 0)
+    watching = Watching([WatchlistRef(1, "Asien"), WatchlistRef(2, "Europa")], [2])
+    monkeypatch.setattr(watchlist_service, "watching", lambda _engine, kind, entity_id: watching if (kind, entity_id) == ("entity", 7) else None)
+
+    html = client.get("/entities/7").text
+
+    assert re.search(r'data-testid="watched-in">In der Watchlist <a href="/watchlists/2">Europa</a>\.', html)
+    offered = re.search(r'data-testid="watch-watchlist">(.*?)</select>', html, re.DOTALL).group(1)
+    assert re.findall(r'<option value="(\d+)">', offered) == ["1"]
+    assert 'name="back" value="/entities/7"' in html
+
+
 def test_a_merged_entity_leads_to_the_one_it_went_into_and_offers_nothing_to_correct(client, pages):
     pages["detail"] = EntityDetail(entity(7, alias_count=0), [], [], 0, merged_into=EntityRef(3, "Volodymyr Zelenskyy", "person"))
 
@@ -146,6 +162,7 @@ def test_a_merged_entity_leads_to_the_one_it_went_into_and_offers_nothing_to_cor
 
     assert '<a href="/entities/3">Volodymyr Zelenskyy</a>' in html
     assert tag_of(html, "confirm") is None and tag_of(html, "similar-section") is None
+    assert tag_of(html, "watch-form") is None
 
 
 def test_the_entity_page_lists_similar_entities_to_merge_into_it(client, pages):

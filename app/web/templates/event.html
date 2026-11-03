@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_watch.html" import watch_form %}
 {% from "_price.html" import price %}
 {% block title %}Ereignis{% endblock %}
 {% block content %}
@@ -30,6 +31,7 @@
     </table>
   </div>
   <p class="hint">Name, Typ und Land stammen vom Bericht, der das Ereignis gegründet hat. Die Ähnlichkeit vergleicht die englischen Wörter von Titel, Zusammenfassung, Ort und Akteuren (TF-IDF-Kosinus, 0 bis 1).</p>
+  {% if not merged %}{{ watch_form("event", event.id, watch.watchlists, watch.following, request.url.path) }}{% endif %}
 </section>
 
 {# Quick navigation once there are several sections, not for two (requirements.md, "Basic UI Requirements /

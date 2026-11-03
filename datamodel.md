@@ -44,8 +44,10 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Wirkungsannahme | `impact_hypothesis` | An assumed effect of an event on companies, sectors or assets. | none |
 | Prognose | `forecast` | A forecast made by the platform, with creation time, data state, model version and target metric. | none |
 | Ergebnis | `forecast_outcome` | The actual outcome of a forecast. | none |
-| Watchlist | `watchlist` | Entities, sectors or event types an analyst follows. | none |
-| Alert | `alert_rule` | A rule that notifies about new events or material changes. | none |
+| Watchlist | `watchlist` | What an analyst follows - entities, Wertpapiere, single events, event types and countries -, each as a Watchlist-Eintrag (`watchlist_item`). | none |
+| Alert-Regel | `alert_rule` | A rule that notifies about the events of its watchlist and filter: new ones, changes of state, new reports - throttled. | none |
+| Alert | `alert` | A notification of an alert rule in the app: one event's hits, or a Sammel-Alert of several. | none |
+| Treffer | `alert_hit` | What an alert rule found, each once: an event new to it, a change of its state, a report. | none |
 | Job | `job` | A unit of work in the PostgreSQL job queue, with status, lease and retry count. | none |
 | Plattform-Einstellungen | `platform_settings` | Settings that apply to the whole instance, edited by the admin (`requirements.md`, "Settings"). | none |
 | Backfill | `backfill` | A past period of a Quelle fetched after the fact, page by page, always behind live work. | none |
@@ -309,7 +311,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | merged_into_id | bigint | no | | Set by a merge, never cleared: the event its reports went to; or by a Neuverarbeitung that left it without reports: the event its article's new reading's first report went to. Foreign key to `event`, `ON DELETE SET NULL`. UI: Zusammengeführt in. |
 
 - Relationships: has one or more Ereigniskandidaten, its reports - none once merged; has Ereigniszustände, its versions; is named after one of its reports; takes part in Korrekturen; a merged one points to the event it was merged into.
-- Rules: one incident with its direct continuation - an attack and its death toll, a quake and its aftershocks - never a topic (the admin's decision of 2026-10-24). The job "Ereignis zuordnen" (`event_service`) assigns every Ereigniskandidat without one, the earliest report first, so the first report founds the event: compared with the events reported from 7 days before to 7 days after it - from 0.5 similarity it joins the most similar, below 0.2 it founds a new one, in between the LLM chooses among the up to 3 most similar or none. Never an event that has a report of the same article - but for its replaced reading's (see Ereigniskandidat). The assignment runs under an advisory lock, after comparing again: two workers never found two events for one incident. The list (UI: Ereignisse, `/events`) shows the 100 most recently reported that match its filter (UI: Filter, the admin's decision of 2026-11-02; in the query, `event_repository.EventFilter`, kept in the URL): a country or a type the event or one of its reports states; a sector or a company - a part of a name form of a company or subsidiary - one of its reports names (Nennung); relevance as at least 2, 3 or 5 sources and as an economic impact a report names - on a company, sector, commodity or market -; the horizon of an impact a report names; and a period - the last 24 hours, 3 or 7 days - with what an event did within it: new, developing or a change of state (as on the start page). The start page takes the same filter but for period and development, its own; its period links and its links to the list keep it. the event page (`/events/<id>`) its reports, the earliest first, each with its article and how it came to the event. Its state is its latest Ereigniszustand not withdrawn (UI: Zustand, in the list and on the page); the page shows the versions (UI: Verlauf) and what each report does to the state in effect at its time (UI: Zum Zustand - Zustandswechsel, bestätigt, widerspricht with the state it contradicts). The analyst corrects the grouping on the page (`event_correction_service`), each correction recorded as a Korrektur (rule 3, the admin's decision of 2026-10-30): merging the selected of its similar events into it (UI: Ähnliche Ereignisse - those reported from 7 days before its first to 7 days after its last report, by the similarity of the assignment, an event scoring its report most similar to any of this one's, at most 10; UI: In dieses Ereignis zusammenführen), and splitting off selected reports into one new event, named after the earliest of them (UI: Als neues Ereignis abspalten); the report it is named after stays. A merged event keeps its id and page, without reports, its versions as they were; it is no longer listed, counted, compared or corrected. Both all or nothing, with an optional reason, under the assignment's advisory lock. The start page (UI: Dashboard, `/`, the admin's decision of 2026-10-31) shows the events with a report within a period - the last 24 hours, 3 or 7 days, a plain link -: new ones (first reported within it), the most sources within it first, and developing ones (reported before and again within it), those with a change of state within it first - a version not withdrawn whose status differs from the one before (an escalation, a closure, a resumption; a repeat is none) -, each with its reports and sources within the period, at most 25 per list. The event page adds the Chronik - every report the earliest first with its statements, each with its kind, its two levels and its quote, linked to its article - and the Quellen with their reports, first and last.
+- Rules: one incident with its direct continuation - an attack and its death toll, a quake and its aftershocks - never a topic (the admin's decision of 2026-10-24). The job "Ereignis zuordnen" (`event_service`) assigns every Ereigniskandidat without one, the earliest report first, so the first report founds the event: compared with the events reported from 7 days before to 7 days after it - from 0.5 similarity it joins the most similar, below 0.2 it founds a new one, in between the LLM chooses among the up to 3 most similar or none. Never an event that has a report of the same article - but for its replaced reading's (see Ereigniskandidat). The assignment runs under an advisory lock, after comparing again: two workers never found two events for one incident. The list (UI: Ereignisse, `/events`) shows the 100 most recently reported that match its filter (UI: Filter, the admin's decision of 2026-11-02; in the query, `event_repository.EventFilter`, kept in the URL): a country or a type the event or one of its reports states; a sector or a company - a part of a name form of a company or subsidiary - one of its reports names (Nennung); relevance as at least 2, 3 or 5 sources and as an economic impact a report names - on a company, sector, commodity or market -; the horizon of an impact a report names; a watchlist - the event has something it follows (see Watchlist); and a period - the last 24 hours, 3 or 7 days - with what an event did within it: new, developing or a change of state (as on the start page). The start page takes the same filter but for period and development, its own; its period links and its links to the list keep it. the event page (`/events/<id>`) its reports, the earliest first, each with its article and how it came to the event. Its state is its latest Ereigniszustand not withdrawn (UI: Zustand, in the list and on the page); the page shows the versions (UI: Verlauf) and what each report does to the state in effect at its time (UI: Zum Zustand - Zustandswechsel, bestätigt, widerspricht with the state it contradicts). The analyst corrects the grouping on the page (`event_correction_service`), each correction recorded as a Korrektur (rule 3, the admin's decision of 2026-10-30): merging the selected of its similar events into it (UI: Ähnliche Ereignisse - those reported from 7 days before its first to 7 days after its last report, by the similarity of the assignment, an event scoring its report most similar to any of this one's, at most 10; UI: In dieses Ereignis zusammenführen), and splitting off selected reports into one new event, named after the earliest of them (UI: Als neues Ereignis abspalten); the report it is named after stays. A merged event keeps its id and page, without reports, its versions as they were; it is no longer listed, counted, compared or corrected. Both all or nothing, with an optional reason, under the assignment's advisory lock. The start page (UI: Dashboard, `/`, the admin's decision of 2026-10-31) shows the events with a report within a period - the last 24 hours, 3 or 7 days, a plain link -: new ones (first reported within it), the most sources within it first, and developing ones (reported before and again within it), those with a change of state within it first - a version not withdrawn whose status differs from the one before (an escalation, a closure, a resumption; a repeat is none) -, each with its reports and sources within the period, at most 25 per list. The event page adds the Chronik - every report the earliest first with its statements, each with its kind, its two levels and its quote, linked to its article - and the Quellen with their reports, first and last.
 - Privacy: none
 
 ### Ereigniszustand (`event_state`)
@@ -700,6 +702,99 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 - Privacy: none
 
 <!-- Template - copy once per entity:
+
+### Watchlist (`watchlist`)
+- Store: SQL table `watchlist`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | name | varchar(200) | yes | | Unique regardless of case (unique index `uq_watchlist_name` on `lower(name)`). Sorted with the ICU collation `de-x-icu`. Renamed in place on its page. UI: Name. |
+  | created_at | timestamptz | yes | now() | |
+  | updated_at | timestamptz | yes | now() | Last rename, or an item added or removed. UI: Geändert. |
+
+- Relationships: has Watchlist-Einträge; used by any number of Alert-Regeln.
+- Rules: the list (UI: Watchlists, `/watchlists`) by name with its items and rules; deleted all or nothing, with its items - blocked while an alert rule uses it, the message naming the rule. An event matches a watchlist (`event_repository._watched`, the admin's decision of 2026-11-03) when it is one of its events, or it or one of its reports has one of its types or countries, or a report names one of its entities or the entity one of its Wertpapiere is linked to; an entity or event merged since stands for the one it went into, and so on; an empty watchlist matches nothing. The event list and the start page filter by it (UI: Filter - Watchlist).
+- Privacy: none
+
+### Watchlist-Eintrag (`watchlist_item`)
+- Store: SQL table `watchlist_item`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | watchlist_id | bigint | yes | | Foreign key to `watchlist`, `ON DELETE CASCADE`. |
+  | kind | varchar(20) | yes | | `entity`, `event_type`, `country`, `event`, `instrument`; check constraint. UI: Entität, Ereignistyp, Land, Ereignis, Wertpapier. |
+  | entity_id | bigint | no | | Of `entity`: foreign key to `entity`, `ON DELETE CASCADE`. Index. As chosen, kept after a merge. |
+  | event_id | bigint | no | | Of `event`: foreign key to `event`, `ON DELETE CASCADE`. Index. As chosen, kept after a merge. |
+  | instrument_id | bigint | no | | Of `instrument`: foreign key to `instrument`, `ON DELETE CASCADE` (a Wertpapier deleted leaves the watchlist). Index. Counts through the entity it is linked to; without one, nothing matches it. |
+  | value | varchar(40) | no | | Of `event_type` a type of Ereignis, of `country` an ISO 3166-1 alpha-2 code in upper case. |
+  | created_at | timestamptz | yes | now() | The page lists the items by kind, then in the order added. |
+
+- Relationships: belongs to one Watchlist; names one Entität, Ereignis or Wertpapier, or a type or country.
+- Rules: exactly the target of its kind is filled (check constraint `target`); each target once per watchlist (unique index `uq_watchlist_item_target`). Entities, events and Wertpapiere are added on their own page (UI: Zur Watchlist hinzufügen, the watchlists that follow it already named), types and countries on the watchlist's page; removed selected, all or nothing.
+- Privacy: none (it names a person by reference only)
+
+### Alert-Regel (`alert_rule`)
+- Store: SQL table `alert_rule`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | name | varchar(200) | yes | | Unique regardless of case (unique index `uq_alert_rule_name`). Sorted with `de-x-icu`. UI: Name. |
+  | is_active | boolean | yes | true | Only an active rule finds and sends. UI: Aktiv / Inaktiv. |
+  | watchlist_id | bigint | no | | The watchlist whose events it covers; empty: every event of its filter. Foreign key to `watchlist` (no action: a watchlist in use is not deleted). Index. UI: Watchlist. |
+  | criteria | jsonb | yes | `{}` | Its filter as the event list's URL states it, without period and development (`type`, `country`, `sector`, `company`, `sources`, `impact`, `horizon`; `event_service.parse_filter`); an unknown value narrows nothing. UI: Ereignisse. |
+  | on_new | boolean | yes | true | Melden bei: Neues Ereignis. |
+  | on_change | boolean | yes | true | Melden bei: Zustandswechsel. |
+  | on_report | boolean | yes | false | Melden bei: Neuer Bericht. At least one of the three (check constraint `trigger`). |
+  | max_per_hour | integer | yes | 5 | Alerts at most per hour, 1 to 100. UI: Höchstens pro Stunde. |
+  | cooldown_hours | integer | yes | 6 | An event alerted comes again only after this, but for a change of its state; 0 to 168, 0: no quiet period. UI: Ruhezeit pro Ereignis (Stunden). |
+  | active_since | timestamptz | yes | now() | What happens from then on counts; set when it is created, saved or activated again. UI: Aktiv seit. |
+  | created_at | timestamptz | yes | now() | |
+  | updated_at | timestamptz | yes | now() | |
+
+- Relationships: may use one Watchlist; has Treffer and Alerts.
+- Rules: the worker looks once a minute (`alert_service.sweep`, one sweep at a time across workers under an advisory lock, namespace 7305): every active rule finds, among the events not merged that match it and were reported within the last 14 days, what is new to it since `active_since` - Neues Ereignis: first reported since then, matching for the first time (also when it reaches the relevance asked for later), not one a split made; Zustandswechsel: a version not withdrawn, appended by its report's assignment (not a correction's), whose status differs from the one before it; Neuer Bericht: a report of its article's first reading (not of a reprocessing). Each found once, as a Treffer; then throttled (the admin's decision of 2026-11-03): an event's hits go out together as one Alert, an event alerted within the quiet period waits for its end unless it changed its state, changes first, then the earliest found; at most `max_per_hour` alerts within the last hour, the last one allowed taking all the rest as a Sammel-Alert; nothing is dropped. The list (UI: Alert-Regeln, `/alerts/rules`) by name with watchlist, triggers, throttle, waiting hits and alerts; activated, deactivated and deleted all or nothing, deleted with its hits and alerts; the form on its page (`/alerts/rules/<id>`), a new one also from the event list's filter (UI: Als Alert-Regel speichern).
+- Privacy: none
+
+### Alert (`alert`)
+- Store: SQL table `alert`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | rule_id | bigint | yes | | Foreign key to `alert_rule`, `ON DELETE CASCADE`. Index. UI: Alert-Regel. |
+  | digest | boolean | yes | false | Several events' hits, beyond the rule's hourly limit. UI: Sammel-Alert. |
+  | created_at | timestamptz | yes | now() | When it went out; what the hourly limit and the quiet period count. UI: Zeit. |
+  | read_at | timestamptz | no | | Empty while unread (partial index `ix_alert_unread`). UI: ungelesen. |
+
+- Relationships: belongs to one Alert-Regel; has one or more Treffer.
+- Rules: in the app only (the admin's decision of 2026-11-03: no mail or push yet). The inbox (UI: Alerts, `/alerts`) shows the latest 100, unread by default or all, each with its rule and per event what happened - Neues Ereignis, Zustand: the status it changed to, the new reports with their sources -, linked to the event (a merged one to the one it went into); read selected or all; the navigation counts the unread ones. Never changed but for being read; deleted only with its rule.
+- Privacy: none
+
+### Treffer (`alert_hit`)
+- Store: SQL table `alert_hit`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | rule_id | bigint | yes | | Foreign key to `alert_rule`, `ON DELETE CASCADE`. Index with `event_id`; partial index `ix_alert_hit_waiting` on those without an alert. |
+  | event_id | bigint | yes | | Foreign key to `event`, `ON DELETE CASCADE`. Index. |
+  | trigger | varchar(10) | yes | | `new`, `change`, `report`; check constraint. UI: Neues Ereignis, Zustandswechsel, Neuer Bericht. |
+  | state_id | bigint | no | | Of `change`: the version, foreign key to `event_state`, `ON DELETE CASCADE`. Index. |
+  | candidate_id | bigint | no | | Of `report`: the report, foreign key to `event_candidate`, `ON DELETE CASCADE`. Index. |
+  | detected_at | timestamptz | yes | now() | |
+  | alert_id | bigint | no | | The Alert it went out with; empty while it waits. Foreign key to `alert`, `ON DELETE CASCADE`. Index. UI: Treffer warten. |
+
+- Relationships: belongs to one Alert-Regel and one Ereignis; names a version or a report; goes out with one Alert.
+- Rules: found once per rule - an event's `new` once, a version's `change` once, a report's `report` once (partial unique indexes `uq_alert_hit_new`, `uq_alert_hit_change`, `uq_alert_hit_report`) -, so a sweep that runs again finds nothing twice. Written by the sweep only, never changed but for its alert.
+- Privacy: none
 
 ### <German UI term> (`technical_name`)
 - Store: SQL table `name` | MongoDB collection `name`

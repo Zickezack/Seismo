@@ -8,18 +8,23 @@ from sqlalchemy.orm import aliased
 
 from app.db.models import (
     Article,
+    CorrectionKind,
     Entity,
     EntityAlias,
     EntityKind,
     EntityMention,
     Event,
     EventCandidate,
+    EventCorrection,
     EventState,
     Evidence,
     Extraction,
+    Instrument,
     Job,
     Source,
     Statement,
+    WatchItemKind,
+    WatchlistItem,
 )
 
 # Of the two-key advisory lock that serialises the assignments (7301 LLM slots, 7302 duplicate checks).
@@ -219,6 +224,7 @@ class EventFilter:
     horizon: str | None = None  # a report names an impact of this horizon
     since: datetime | None = None  # a report from then on
     development: str | None = None  # with `since`: NEW, DEVELOPING or CHANGED
+    watchlist_id: int | None = None  # it has one of the things the watchlist follows (_watched)
 
 
 # First reported from `since` on; reported before and again from then on; a change of state from then on.
@@ -293,7 +299,69 @@ def _matching(criteria: EventFilter, source_count) -> list:
             conditions.append(Event.first_reported_at < criteria.since)
         elif criteria.development == CHANGED:
             conditions.append(_changed_since(criteria.since))
+    if criteria.watchlist_id is not None:
+        conditions.append(_watched(criteria.watchlist_id))
     return conditions
+
+
+def _watched(watchlist_id: int):
+    """The event has one of the things the watchlist follows: it is one of its events, has one of its types or
+    countries - it or one of its reports -, or a report names one of its entities, or the one a Wertpapier of it is
+    linked to. An entity or event merged since stands for the one it went into; an empty watchlist matches nothing."""
+    item = WatchlistItem.watchlist_id == watchlist_id
+
+    def values(kind: str):
+        return select(WatchlistItem.value).where(item, WatchlistItem.kind == kind)
+
+    chosen = select(WatchlistItem.entity_id.label("id")).where(item, WatchlistItem.kind == WatchItemKind.ENTITY).union(
+        select(Instrument.entity_id).join(WatchlistItem, WatchlistItem.instrument_id == Instrument.id).where(
+            item, WatchlistItem.kind == WatchItemKind.INSTRUMENT, Instrument.entity_id.is_not(None)
+        )
+    )
+    entities = _followed(Entity, select(Entity.id, Entity.merged_into_id).where(Entity.id.in_(chosen)))
+    events = _followed(Event, select(Event.id, Event.merged_into_id).where(
+        Event.id.in_(select(WatchlistItem.event_id).where(item, WatchlistItem.kind == WatchItemKind.EVENT))
+    ))
+    types, countries = values(WatchItemKind.EVENT_TYPE), values(WatchItemKind.COUNTRY)
+    return or_(
+        Event.id.in_(events),
+        Event.event_type.in_(types),
+        Event.country.in_(countries),
+        _a_report(or_(
+            EventCandidate.event_type.in_(types),
+            EventCandidate.country.in_(countries),
+            EventCandidate.id.in_(_naming(EntityAlias.entity_id.in_(entities))),
+        )),
+    )
+
+
+def _followed(model, chosen):
+    """The ids of the chosen rows and of those they were merged into, and so on: the mentions of a merged entity name
+    the one it went into, the reports of a merged event are in the one it went into."""
+    chain = chosen.cte(recursive=True)
+    chain = chain.union(select(model.id, model.merged_into_id).join(chain, model.id == chain.c.merged_into_id))
+    return select(chain.c.id)
+
+
+def matching_ids(criteria: EventFilter, reported_since: datetime):
+    """The ids of the events, not merged ones, reported from `reported_since` on that match: what the alert rules
+    look at (alert_repository)."""
+    source_count = (
+        select(func.count(func.distinct(func.coalesce(Source.name, Article.source_name))))
+        .select_from(EventCandidate)
+        .join(Article, Article.id == EventCandidate.article_id)
+        .outerjoin(Source, Source.id == Article.source_id)
+        .where(EventCandidate.event_id == Event.id)
+        .scalar_subquery()
+    )
+    return select(Event.id).where(
+        Event.merged_into_id.is_(None), Event.last_reported_at >= reported_since, *_matching(criteria, source_count)
+    )
+
+
+def split_off(event_id_column):
+    """The event was made by a split of the analyst: no new incident of the world."""
+    return exists().where(EventCorrection.event_id == event_id_column, EventCorrection.kind == CorrectionKind.SPLIT)
 
 
 def _a_report(*conditions):
