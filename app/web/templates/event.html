@@ -26,12 +26,27 @@
         <tr><th scope="row">Land</th><td>{{ event.country or "–" }}</td></tr>
         <tr><th scope="row">Zuerst berichtet</th><td>{{ event.first_reported_at|local_time }}</td></tr>
         <tr><th scope="row">Zuletzt berichtet</th><td>{{ event.last_reported_at|local_time }}</td></tr>
+        <tr id="situations"><th scope="row">Lagen</th><td data-testid="meta-situations">{% for each in situations.situations %}<a href="/situations/{{ each.situation.id }}">{{ each.situation.name }}</a>{% if each.status != "confirmed" or each.situation_status != "confirmed" %} <span class="status status-uncertain">{{ each.status_label }}</span>{% endif %}{% if not loop.last %}, {% endif %}{% else %}keine{% endfor %}</td></tr>
         <tr><th scope="row">Berichte</th><td data-testid="meta-reports">{{ event.report_count }} aus {{ event.source_count }} {{ "Quelle" if event.source_count == 1 else "Quellen" }}</td></tr>
       </tbody>
     </table>
   </div>
   <p class="hint">Name, Typ und Land stammen vom Bericht, der das Ereignis gegründet hat. Die Ähnlichkeit vergleicht die englischen Wörter von Titel, Zusammenfassung, Ort und Akteuren (TF-IDF-Kosinus, 0 bis 1).</p>
-  {% if not merged %}{{ watch_form("event", event.id, watch.watchlists, watch.following, request.url.path) }}{% endif %}
+  {% if not merged %}
+  {{ watch_form("event", event.id, watch.watchlists, watch.following, request.url.path) }}
+  {% if situations.choices %}
+  <form class="toolbar" method="post" action="/situations/add" data-testid="situation-form">
+    <input type="hidden" name="event" value="{{ event.id }}">
+    <div class="field">
+      <label for="add-situation">Lage</label>
+      <select id="add-situation" name="situation" data-testid="add-situation">
+        {% for choice in situations.choices %}<option value="{{ choice.id }}">{{ choice.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <button class="button button-secondary" type="submit" data-testid="add-to-situation">Zu Lage hinzufügen</button>
+  </form>
+  {% endif %}
+  {% endif %}
 </section>
 
 {# Quick navigation once there are several sections, not for two (requirements.md, "Basic UI Requirements /

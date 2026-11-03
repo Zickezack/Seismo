@@ -86,6 +86,7 @@ def no_database(monkeypatch):
     engine.price_checks = 0
     engine.history_checks = 0
     engine.alert_sweeps = 0
+    engine.situation_sweeps = []
 
     def purge(_engine):
         engine.purges += 1
@@ -126,6 +127,9 @@ def no_database(monkeypatch):
         engine.alert_sweeps += 1
         return 0
 
+    def sweep_situations(_engine, llm_available):
+        engine.situation_sweeps.append(llm_available)
+
     monkeypatch.setattr(worker, "create_db_engine", lambda _settings: engine)
     monkeypatch.setattr(worker, "purge_finished_jobs", purge)
     monkeypatch.setattr(worker.backup_service, "enqueue_if_due", enqueue_backup_if_due)
@@ -137,6 +141,7 @@ def no_database(monkeypatch):
     monkeypatch.setattr(worker.price_service, "enqueue_due", enqueue_due_prices)
     monkeypatch.setattr(worker.history_service, "enqueue_due", enqueue_due_market_data)
     monkeypatch.setattr(worker.alert_service, "sweep", sweep)
+    monkeypatch.setattr(worker.situation_service, "sweep", sweep_situations)
     monkeypatch.setattr(worker, "head_revision", lambda: "head")
     return engine
 
@@ -295,6 +300,8 @@ def test_fetch_check_runs_once_ready_and_then_only_every_minute(readiness, queue
     assert no_database.price_checks == 1
     assert no_database.history_checks == 1
     assert no_database.alert_sweeps == 1
+    # Once an hour; SETTINGS name no Ollama, so without the LLM's questions.
+    assert no_database.situation_sweeps == [False]
 
 
 def test_failed_normalization_check_is_logged_and_the_worker_keeps_running(
@@ -395,6 +402,7 @@ def test_a_failing_extraction_check_does_not_keep_the_assignments_from_being_que
     ("enqueue_due", "price_service", "Price fetch check failed: connection lost"),
     ("enqueue_due", "history_service", "Market data check failed: connection lost"),
     ("sweep", "alert_service", "Alert sweep failed: connection lost"),
+    ("sweep", "situation_service", "Situation sweep failed: connection lost"),
 ])
 def test_a_failed_retire_or_storage_check_is_logged_and_the_worker_keeps_running(
     readiness, queue, no_database, tmp_path, caplog, monkeypatch, check, name, message

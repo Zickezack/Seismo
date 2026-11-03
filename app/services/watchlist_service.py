@@ -1,10 +1,11 @@
 """Watchlisten (userstories.md, Dashboard, Recherche und Alerts, story 3): what an analyst follows - entities, event
-types, countries, single events and Wertpapiere. An event matches a watchlist when it is one of its events, or it or
+types, countries, single events, Wertpapiere and Lagen. An event matches a watchlist when it is one of its events or
+belongs to one of its Lagen, or it or
 one of its reports has one of its types or countries, or a report names one of its entities or the one a Wertpapier of
 it is linked to (event_repository._watched). The event list and the start page filter by a watchlist; an alert rule
 covers the events of its watchlist (alert_service).
 
-Entities, events and Wertpapiere are added from their own pages, types and countries on the watchlist's page.
+Entities, events, Wertpapiere and Lagen are added from their own pages, types and countries on the watchlist's page.
 """
 import re
 from collections.abc import Iterable
@@ -14,7 +15,7 @@ from datetime import datetime
 from sqlalchemy import Engine, Row
 
 from app.db.models import WatchItemKind
-from app.repositories import entity_repository, event_repository, instrument_repository, watchlist_repository
+from app.repositories import entity_repository, event_repository, instrument_repository, situation_repository, watchlist_repository
 from app.repositories.watchlist_repository import NameTaken
 from app.services.bulk import BulkResult
 from app.services.entity_service import KIND_LABELS as ENTITY_KIND_LABELS
@@ -24,17 +25,19 @@ MAX_NAME_CHARS = 200
 _COUNTRY = re.compile(r"[A-Z]{2}")
 KIND_LABELS = {
     WatchItemKind.ENTITY: "Entität", WatchItemKind.EVENT_TYPE: "Ereignistyp", WatchItemKind.COUNTRY: "Land",
-    WatchItemKind.EVENT: "Ereignis", WatchItemKind.INSTRUMENT: "Wertpapier",
+    WatchItemKind.EVENT: "Ereignis", WatchItemKind.INSTRUMENT: "Wertpapier", WatchItemKind.SITUATION: "Lage",
 }
 # The order of the watchlist page's groups.
 KIND_ORDER = (
-    WatchItemKind.ENTITY, WatchItemKind.INSTRUMENT, WatchItemKind.EVENT, WatchItemKind.EVENT_TYPE, WatchItemKind.COUNTRY,
+    WatchItemKind.SITUATION, WatchItemKind.ENTITY, WatchItemKind.INSTRUMENT, WatchItemKind.EVENT, WatchItemKind.EVENT_TYPE,
+    WatchItemKind.COUNTRY,
 )
 # Added from their own pages, by id.
 _BY_ID = {
     WatchItemKind.ENTITY: (entity_repository.get, "Entität"),
     WatchItemKind.EVENT: (event_repository.get, "Ereignis"),
     WatchItemKind.INSTRUMENT: (instrument_repository.get, "Wertpapier"),
+    WatchItemKind.SITUATION: (situation_repository.get, "Lage"),
 }
 
 
@@ -229,6 +232,9 @@ def _item(row: Row) -> WatchItemView:
             else "ohne Entität: kein Ereignis passt dazu"
         )
         return WatchItemView(row.id, row.kind, f"{row.instrument_name} ({row.instrument_symbol})", f"/instruments/{row.instrument_id}", note)
+    if row.kind == WatchItemKind.SITUATION:
+        note = f"zusammengeführt in {row.situation_merged_into_name}" if row.situation_merged_into_id else ""
+        return WatchItemView(row.id, row.kind, row.situation_name, f"/situations/{row.situation_id}", note)
     if row.kind == WatchItemKind.EVENT_TYPE:
         return WatchItemView(row.id, row.kind, EVENT_TYPE_LABELS.get(row.value, row.value), None)
     return WatchItemView(row.id, row.kind, row.value, None)

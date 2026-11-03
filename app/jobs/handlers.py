@@ -23,9 +23,11 @@ from app.services import (
     ingestion_service,
     normalization_service,
     price_service,
+    situation_service,
 )
 from app.services.job_service import (
     ASSIGN_EVENT_JOB_KIND,
+    ASSIGN_SITUATION_JOB_KIND,
     BACKFILL_JOB_KIND,
     BACKUP_JOB_KIND,
     EXTRACT_EVENTS_JOB_KIND,
@@ -35,6 +37,7 @@ from app.services.job_service import (
     FETCH_PRICES_JOB_KIND,
     FETCH_SOURCE_JOB_KIND,
     NORMALIZE_JOB_KIND,
+    PROPOSE_SITUATION_JOB_KIND,
     RECOGNISE_ENTITIES_JOB_KIND,
     REEXTRACT_EVENTS_JOB_KIND,
     RERECOGNISE_ENTITIES_JOB_KIND,
@@ -79,6 +82,12 @@ def build_handlers(
         EXTRACT_EVENTS_JOB_KIND: lambda job: run_extraction_job(engine, job, llm, limiter, stop_event),
         ASSIGN_EVENT_JOB_KIND: lambda job: run_llm_job(
             llm, lambda client: event_service.assign(engine, job.payload["candidate_id"], client, limiter)
+        ),
+        ASSIGN_SITUATION_JOB_KIND: lambda job: run_llm_job(
+            llm, lambda client: situation_service.assign(engine, job.payload, client, limiter)
+        ),
+        PROPOSE_SITUATION_JOB_KIND: lambda job: run_llm_job(
+            llm, lambda client: situation_service.propose(engine, job.payload, client, limiter)
         ),
         RECOGNISE_ENTITIES_JOB_KIND: lambda job: run_llm_job(
             llm, lambda client: entity_service.recognise(engine, job.payload["extraction_id"], client, limiter)

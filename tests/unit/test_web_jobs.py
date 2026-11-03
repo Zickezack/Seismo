@@ -195,6 +195,7 @@ def test_settings_page_shows_every_setting_in_its_section(client, services):
         ("abruf", ["article_max_age_days", "domain_min_interval_seconds", "tdm_blocked_domains"]),
         ("extraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour", "source_quality_domains"]),
         ("kurse", ["price_interval_minutes", "price_history_years"]),
+        ("lagen", ["situation_open_days", "situation_llm_calls_per_hour"]),
         ("aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
         ("backups", ["backup_interval_hours", "backups_to_keep"]),
     ]
@@ -205,7 +206,7 @@ def test_settings_page_links_every_section_from_its_quick_navigation(client, ser
 
     links = re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html)
     assert links == re.findall(r'<details class="card section" id="(\w+)"', html)
-    assert links == ["verarbeitung", "abruf", "extraktion", "kurse", "aufbewahrung", "backups", "starterdaten"]
+    assert links == ["verarbeitung", "abruf", "extraktion", "kurse", "lagen", "aufbewahrung", "backups", "starterdaten"]
 
 
 def test_settings_save_in_place_answers_json(client, services):

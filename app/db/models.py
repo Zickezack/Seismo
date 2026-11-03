@@ -266,6 +266,7 @@ class WatchItemKind(StrEnum):
     COUNTRY = "country"
     EVENT = "event"  # the event itself
     INSTRUMENT = "instrument"  # a report names the Entität it is linked to
+    SITUATION = "situation"  # it belongs to the Lage
 
 
 class AlertTrigger(StrEnum):
@@ -274,6 +275,32 @@ class AlertTrigger(StrEnum):
     NEW = "new"  # the event matches for the first time, first reported while the rule is active
     CHANGE = "change"  # a change of its state: an escalation, a closure, a resumption
     REPORT = "report"  # a new report of it
+
+
+class SituationStatus(StrEnum):
+    """Where a Lage stands (situation_service)."""
+
+    PROPOSED = "proposed"  # proposed by the LLM, waiting for the analyst
+    CONFIRMED = "confirmed"  # in effect
+    REJECTED = "rejected"  # by the analyst
+    DISMISSED = "dismissed"  # the LLM judged the events no Lage: kept, so it is not asked again
+    MERGED = "merged"  # into another one by the analyst
+
+
+class MemberStatus(StrEnum):
+    """Where an event's belonging to a Lage stands."""
+
+    PROPOSED = "proposed"  # with a proposed Lage, or to a dormant one: not in effect until the analyst confirms it
+    AUTOMATIC = "automatic"  # assigned by the system: in effect, flagged until the analyst confirms it
+    CONFIRMED = "confirmed"  # by the analyst
+    REMOVED = "removed"  # by the analyst, or moved by a merge or split: never assigned again by the system
+
+
+class MemberOrigin(StrEnum):
+    PROPOSAL = "proposal"  # one of the events the LLM proposed a Lage with
+    SCORE = "score"  # similar enough by its words and entities
+    LLM = "llm"  # in between, the LLM judged it part of the Lage
+    ANALYST = "analyst"  # added, split off or merged by the analyst
 
 
 class TdmrepStatus(StrEnum):
@@ -363,6 +390,9 @@ class PlatformSettingsRecord(Base):
     # Live prices (price_service) and the daily history (history_service).
     price_interval_minutes: Mapped[int] = mapped_column(server_default="30")
     price_history_years: Mapped[int] = mapped_column(server_default="2")
+    # The Lagen (situation_service): open this long after their latest event; LLM calls per hour for them.
+    situation_open_days: Mapped[int] = mapped_column(server_default="30")
+    situation_llm_calls_per_hour: Mapped[int] = mapped_column(server_default="20")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -382,6 +412,9 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(reprocessings_per_hour >= 0, name="reprocessings_per_hour"),
         CheckConstraint(price_interval_minutes.between(5, 1440), name="price_interval_minutes"),
         CheckConstraint(price_history_years.between(1, 30), name="price_history_years"),
+        CheckConstraint(situation_open_days.between(1, 365), name="situation_open_days"),
+        # 0 holds the forming of Lagen.
+        CheckConstraint(situation_llm_calls_per_hour >= 0, name="situation_llm_calls_per_hour"),
     )
 
 
@@ -1113,21 +1146,24 @@ class WatchlistItem(Base):
     entity_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity.id", ondelete="CASCADE"), index=True)
     event_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), index=True)
     instrument_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("instrument.id", ondelete="CASCADE"), index=True)
+    # As chosen, a merged one too: the match follows it to the Lage it went into.
+    situation_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("situation.id", ondelete="CASCADE"), index=True)
     value: Mapped[str | None] = mapped_column(String(40))  # an event type, or an ISO 3166-1 alpha-2 code
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         CheckConstraint(kind.in_([s.value for s in WatchItemKind]), name="kind"),
         CheckConstraint(
-            "num_nonnulls(entity_id, event_id, instrument_id, value) = 1 AND CASE kind"
+            "num_nonnulls(entity_id, event_id, instrument_id, situation_id, value) = 1 AND CASE kind"
             " WHEN 'entity' THEN entity_id IS NOT NULL WHEN 'event' THEN event_id IS NOT NULL"
-            " WHEN 'instrument' THEN instrument_id IS NOT NULL ELSE value IS NOT NULL END",
+            " WHEN 'instrument' THEN instrument_id IS NOT NULL WHEN 'situation' THEN situation_id IS NOT NULL"
+            " ELSE value IS NOT NULL END",
             name="target",
         ),
         # Each thing once per watchlist.
         Index(
             "uq_watchlist_item_target", watchlist_id, kind,
-            func.coalesce(value, func.cast(func.coalesce(entity_id, event_id, instrument_id), Text)), unique=True,
+            func.coalesce(value, func.cast(func.coalesce(entity_id, event_id, instrument_id, situation_id), Text)), unique=True,
         ),
     )
 
@@ -1212,3 +1248,63 @@ class AlertHit(Base):
             "uq_alert_hit_report", rule_id, candidate_id, unique=True, postgresql_where=trigger == AlertTrigger.REPORT.value
         ),
     )
+
+
+class Situation(Base):
+    """Related events over weeks (UI term: Lage) - a war, a trade conflict, a series of attacks -: a level above the
+    Ereignis, which stays one incident. Proposed by the LLM, in effect once the analyst confirms it (situation_service)."""
+
+    __tablename__ = "situation"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    # In English, like the events' titles; the analyst may rename it.
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), server_default=SituationStatus.PROPOSED.value)
+    # Set by a merge, never cleared: the Lage its events went to.
+    merged_into_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("situation.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # When the analyst confirmed, rejected or merged it, or the LLM dismissed it.
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(status.in_([s.value for s in SituationStatus]), name="status"),
+        Index("ix_situation_status", status),
+    )
+
+
+class SituationMember(Base):
+    """An event's belonging to a Lage (UI term: Lage-Zuordnung); an event may belong to several. One row per pair:
+    a removed one stays, so the system never assigns the event to that Lage again."""
+
+    __tablename__ = "situation_member"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    situation_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("situation.id", ondelete="CASCADE"))
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(20))
+    origin: Mapped[str] = mapped_column(String(20))
+    # Its similarity to the Lage when assigned, 0 to 1; empty for one the analyst added.
+    score: Mapped[float | None] = mapped_column(Float)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # When the analyst confirmed or removed it, or a merge or split moved it.
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Of one moved by a merge or split: the Lage it went to.
+    moved_to_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("situation.id", ondelete="SET NULL"))
+
+    __table_args__ = (
+        CheckConstraint(status.in_([s.value for s in MemberStatus]), name="status"),
+        CheckConstraint(origin.in_([s.value for s in MemberOrigin]), name="origin"),
+        UniqueConstraint(situation_id, event_id),
+    )
+
+
+class SituationCheck(Base):
+    """When an event was last weighed against the Lagen (situation_service): again once it has a new report or a Lage
+    was confirmed since. Not shown in the UI."""
+
+    __tablename__ = "situation_check"
+
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), primary_key=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

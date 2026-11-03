@@ -53,10 +53,13 @@ FETCH_BARS_JOB_KIND = "fetch_bars"
 # A reprocessing's (reprocessing_service): behind live work, labelled without "(Backfill)".
 REEXTRACT_EVENTS_JOB_KIND = "reextract_events"
 RERECOGNISE_ENTITIES_JOB_KIND = "rerecognise_entities"
+# The Lagen (situation_service): an event in doubt weighed by the LLM, a group of events proposed as a Lage.
+ASSIGN_SITUATION_JOB_KIND = "assign_situation"
+PROPOSE_SITUATION_JOB_KIND = "propose_situation"
 # The kinds that need Ollama: the worker claims them only while it serves the model (app/worker/main.py).
 LLM_JOB_KINDS = frozenset({
     EXTRACT_EVENTS_JOB_KIND, ASSIGN_EVENT_JOB_KIND, RECOGNISE_ENTITIES_JOB_KIND, REEXTRACT_EVENTS_JOB_KIND,
-    RERECOGNISE_ENTITIES_JOB_KIND,
+    RERECOGNISE_ENTITIES_JOB_KIND, ASSIGN_SITUATION_JOB_KIND, PROPOSE_SITUATION_JOB_KIND,
 })
 KIND_LABELS = {
     TEST_JOB_KIND: "Testjob",
@@ -74,11 +77,13 @@ KIND_LABELS = {
     FETCH_BARS_JOB_KIND: "Tageskurse abrufen",
     REEXTRACT_EVENTS_JOB_KIND: "Ereignisse neu extrahieren",
     RERECOGNISE_ENTITIES_JOB_KIND: "Entitäten neu erkennen",
+    ASSIGN_SITUATION_JOB_KIND: "Lage zuordnen",
+    PROPOSE_SITUATION_JOB_KIND: "Lage vorschlagen",
 }
 # Kinds that are behind live work by their nature: their label needs no "(Backfill)".
 _OWN_PRIORITY_KINDS = frozenset({
     BACKFILL_JOB_KIND, REEXTRACT_EVENTS_JOB_KIND, RERECOGNISE_ENTITIES_JOB_KIND, SYNC_MARKET_JOB_KIND, FETCH_ACTIONS_JOB_KIND,
-    FETCH_BARS_JOB_KIND,
+    FETCH_BARS_JOB_KIND, ASSIGN_SITUATION_JOB_KIND, PROPOSE_SITUATION_JOB_KIND,
 })
 
 

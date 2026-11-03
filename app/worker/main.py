@@ -16,7 +16,8 @@ leave their events once the new ones have theirs; once an hour it measures the s
 with a Live-Kurs whose interval is over, from each source that can be asked (app/services/price_service.py); every ten
 minutes it starts the chains of the historical market data that are due and not under way
 (app/services/history_service.py). Once a minute, too, every active alert rule looks for what is new to it and sends
-what its throttle lets go (app/services/alert_service.py).
+what its throttle lets go (app/services/alert_service.py). Once an hour it weighs the events due against the Lagen and
+looks for new ones, queuing the LLM's questions while Ollama serves the model (app/services/situation_service.py).
 """
 import logging
 import os
@@ -52,6 +53,7 @@ from app.services import (
     price_service,
     raw_text_service,
     reprocessing_service,
+    situation_service,
     storage_service,
 )
 from app.services.health_service import HealthReport, check_readiness
@@ -85,6 +87,8 @@ PRICE_CHECK_INTERVAL_SECONDS = 60
 HISTORY_CHECK_INTERVAL_SECONDS = 10 * 60
 # An alert goes out at most this late after its event's report was assigned or its entities recognised.
 ALERT_CHECK_INTERVAL_SECONDS = 60
+# Lagen develop over weeks; an hour's delay costs nothing, and the LLM's budget counts per hour.
+SITUATION_CHECK_INTERVAL_SECONDS = 60 * 60
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:
@@ -118,7 +122,7 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
     was_ready = llm_served = None
     next_purge = next_backup_check = next_fetch_check = next_normalize_check = next_llm_check = time.monotonic()
     next_retire_check = next_storage_check = next_raw_text_check = next_price_check = time.monotonic()
-    next_history_check = next_alert_check = time.monotonic()
+    next_history_check = next_alert_check = next_situation_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -156,6 +160,9 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and time.monotonic() >= next_history_check:
                 next_history_check = time.monotonic() + HISTORY_CHECK_INTERVAL_SECONDS
                 _enqueue_due_market_data(engine)
+            if report.ready and time.monotonic() >= next_situation_check:
+                next_situation_check = time.monotonic() + SITUATION_CHECK_INTERVAL_SECONDS
+                _sweep_situations(engine, llm_served is True)
             if report.ready and time.monotonic() >= next_alert_check:
                 next_alert_check = time.monotonic() + ALERT_CHECK_INTERVAL_SECONDS
                 _sweep_alerts(engine)
@@ -275,6 +282,14 @@ def _enqueue_due_market_data(engine: Engine) -> None:
         return
     if job_ids:
         logger.info("Market data jobs queued", extra={"jobs": len(job_ids)})
+
+
+def _sweep_situations(engine: Engine, llm_available: bool) -> None:
+    try:
+        situation_service.sweep(engine, llm_available)
+    except SQLAlchemyError as error:
+        # Tried again at the next interval; the events wait for their Lagen an hour longer.
+        logger.warning("Situation sweep failed: %s", getattr(error, "orig", None) or error)
 
 
 def _sweep_alerts(engine: Engine) -> None:

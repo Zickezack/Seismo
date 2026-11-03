@@ -6,7 +6,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app.db.models import WatchItemKind
-from app.services import entity_service, event_correction_service, event_service, instrument_service, watchlist_service
+from app.services import entity_service, event_correction_service, event_service, instrument_service, situation_service, watchlist_service
 from app.services.event_correction_service import InvalidReason
 from app.web.templating import flash, name_list, templates
 
@@ -45,6 +45,7 @@ def event_page(request: Request, event_id: int) -> Response:
         "entities": entities,
         "instruments": instrument_service.of_entities(engine, [entity.id for entity in entities]),
         "watch": watchlist_service.watching(engine, WatchItemKind.EVENT, event_id),
+        "situations": situation_service.of_event(engine, event_id),
     }
     return templates.TemplateResponse(request, "event.html", context)
 

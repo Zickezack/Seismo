@@ -6,7 +6,7 @@ from sqlalchemy import Connection, Row, delete, func, insert, literal, select, u
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import AlertRule, Entity, Event, Instrument, WatchItemKind, Watchlist, WatchlistItem
+from app.db.models import AlertRule, Entity, Event, Instrument, Situation, WatchItemKind, Watchlist, WatchlistItem
 from app.repositories.source_repository import NAME_COLLATION
 
 UNIQUE_NAME_INDEX = "uq_watchlist_name"
@@ -65,6 +65,7 @@ def add_item(connection: Connection, watchlist_id: int, kind: str, target: int |
     """False when the watchlist follows it already."""
     column = {
         WatchItemKind.ENTITY: "entity_id", WatchItemKind.EVENT: "event_id", WatchItemKind.INSTRUMENT: "instrument_id",
+        WatchItemKind.SITUATION: "situation_id",
     }.get(kind, "value")
     # RETURNING, not rowcount: psycopg reports -1 for an INSERT ... ON CONFLICT here.
     statement = (
@@ -78,13 +79,15 @@ def add_item(connection: Connection, watchlist_id: int, kind: str, target: int |
 
 
 def items(connection: Connection, watchlist_id: int) -> Sequence[Row]:
-    """What the watchlist follows, each with the name of its entity, event or Wertpapier; an entity or event merged
-    since with the one it went into, a Wertpapier with the entity it is linked to."""
+    """What the watchlist follows, each with the name of its entity, event, Wertpapier or Lage; an entity, event or Lage
+    merged since with the one it went into, a Wertpapier with the entity it is linked to."""
     own_entity = Entity.__table__.alias("own_entity")
     into_entity = Entity.__table__.alias("into_entity")
     linked_entity = Entity.__table__.alias("linked_entity")
     own_event = Event.__table__.alias("own_event")
     into_event = Event.__table__.alias("into_event")
+    own_situation = Situation.__table__.alias("own_situation")
+    into_situation = Situation.__table__.alias("into_situation")
     statement = (
         select(
             WatchlistItem.id,
@@ -92,6 +95,7 @@ def items(connection: Connection, watchlist_id: int) -> Sequence[Row]:
             WatchlistItem.entity_id,
             WatchlistItem.event_id,
             WatchlistItem.instrument_id,
+            WatchlistItem.situation_id,
             WatchlistItem.value,
             WatchlistItem.created_at,
             own_entity.c.name.label("entity_name"),
@@ -105,6 +109,9 @@ def items(connection: Connection, watchlist_id: int) -> Sequence[Row]:
             Instrument.symbol.label("instrument_symbol"),
             linked_entity.c.id.label("instrument_entity_id"),
             linked_entity.c.name.label("instrument_entity_name"),
+            own_situation.c.name.label("situation_name"),
+            into_situation.c.id.label("situation_merged_into_id"),
+            into_situation.c.name.label("situation_merged_into_name"),
         )
         .outerjoin(own_entity, own_entity.c.id == WatchlistItem.entity_id)
         .outerjoin(into_entity, into_entity.c.id == own_entity.c.merged_into_id)
@@ -112,6 +119,8 @@ def items(connection: Connection, watchlist_id: int) -> Sequence[Row]:
         .outerjoin(into_event, into_event.c.id == own_event.c.merged_into_id)
         .outerjoin(Instrument, Instrument.id == WatchlistItem.instrument_id)
         .outerjoin(linked_entity, linked_entity.c.id == Instrument.entity_id)
+        .outerjoin(own_situation, own_situation.c.id == WatchlistItem.situation_id)
+        .outerjoin(into_situation, into_situation.c.id == own_situation.c.merged_into_id)
         .where(WatchlistItem.watchlist_id == watchlist_id)
         .order_by(WatchlistItem.created_at, WatchlistItem.id)
     )
@@ -142,7 +151,7 @@ def containing(connection: Connection, kind: str, target: int) -> list[int]:
     """The watchlists that follow this entity, event or Wertpapier."""
     column = {
         WatchItemKind.ENTITY: WatchlistItem.entity_id, WatchItemKind.EVENT: WatchlistItem.event_id,
-        WatchItemKind.INSTRUMENT: WatchlistItem.instrument_id,
+        WatchItemKind.INSTRUMENT: WatchlistItem.instrument_id, WatchItemKind.SITUATION: WatchlistItem.situation_id,
     }[kind]
     statement = select(WatchlistItem.watchlist_id).where(WatchlistItem.kind == kind, column == literal(target))
     return list(connection.execute(statement).scalars())

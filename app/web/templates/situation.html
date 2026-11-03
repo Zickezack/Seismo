@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% from "_watch.html" import watch_form %}
+{% block title %}Lage{% endblock %}
+{% block content %}
+{% set situation = detail.situation %}
+{% set in_force = situation.status in ("confirmed", "proposed") %}
+{% set confirmed = situation.status == "confirmed" %}
+{% set sections = [("events", "Ereignisse")]
+  + ([("proposed", "Vorgeschlagen")] if detail.proposed and confirmed else [])
+  + [("sources", "Quellen")]
+  + ([("merge", "Zusammenführen")] if detail.merge_choices else [])
+  + ([("removed", "Entfernt")] if detail.removed else []) %}
+<h1 data-testid="situation-title">{{ situation.name }}</h1>
+
+{% if detail.merged_into %}
+<p class="message message-warning" data-testid="merged-into">Zusammengeführt in <a href="/situations/{{ detail.merged_into.id }}">{{ detail.merged_into.name }}</a>. Ihre Ereignisse stehen dort.</p>
+{% elif situation.status == "proposed" %}
+<div class="message message-warning stack" data-testid="proposed">
+  <p>Vorgeschlagen, noch nicht in Kraft: Sie zählt für Filter, Watchlists und Alerts erst, wenn sie bestätigt ist. Nicht passende Ereignisse vorher unten entfernen.</p>
+  <form class="actions" method="post" action="/situations/confirm" data-testid="decide-form">
+    <input type="hidden" name="situation_id" value="{{ situation.id }}">
+    <button class="button" type="submit" data-testid="confirm-situation">Bestätigen</button>
+    <button class="button button-secondary" type="submit" formaction="/situations/reject" data-testid="reject-situation">Ablehnen</button>
+  </form>
+</div>
+{% elif not in_force %}
+<p class="message message-warning" data-testid="not-in-force">{{ situation.status_label }}.</p>
+{% endif %}
+
+<section class="card stack">
+  <div class="table-container">
+    <table class="table table-details" data-testid="situation-meta">
+      <tbody>
+        <tr><th scope="row">Status</th><td data-testid="meta-status">{{ situation.status_label }}{% if confirmed %} · {% if situation.dormant %}<span class="status status-inactive">Ruhend</span>{% else %}<span class="status status-active">Aktiv</span>{% endif %}{% endif %}</td></tr>
+        <tr><th scope="row">Ereignisse</th><td data-testid="meta-events">{{ situation.event_count }}{% if situation.automatic_count %} <span class="hint">davon {{ situation.automatic_count }} automatisch</span>{% endif %}{% if confirmed %} · <a href="/events?situation={{ situation.id }}">in der Ereignisliste</a>{% endif %}</td></tr>
+        <tr><th scope="row">Zuletzt berichtet</th><td>{{ situation.last_event_at|local_time }}</td></tr>
+        <tr><th scope="row">Vorgeschlagen</th><td>{{ situation.created_at|local_time }}</td></tr>
+        {% if situation.decided_at %}<tr><th scope="row">Entschieden</th><td>{{ situation.decided_at|local_time }}</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% if in_force %}
+  {# Saved in place, without a page reload (static/app.js). #}
+  <form class="form-grid" method="post" action="/situations/{{ situation.id }}/describe" data-inline-save data-testid="describe-form">
+    <div class="field field-wide">
+      <label for="situation-name">Name</label>
+      <input id="situation-name" name="name" value="{{ situation.name }}" maxlength="200" required data-testid="situation-name">
+    </div>
+    <div class="field field-wide">
+      <label for="situation-description">Beschreibung</label>
+      <textarea id="situation-description" name="description" rows="3" maxlength="1000" data-testid="situation-description">{{ situation.description or "" }}</textarea>
+    </div>
+    <div class="form-actions">
+      <button class="button button-secondary" type="submit" data-testid="describe">Speichern</button>
+      <span class="save-status" data-save-status role="status" data-testid="save-status"></span>
+    </div>
+  </form>
+  <p class="hint">Name und Beschreibung schlägt das LLM auf Englisch vor, wie die Ereignistitel.</p>
+  {% endif %}
+  {% if confirmed %}{{ watch_form("situation", situation.id, watch.watchlists, watch.following, request.url.path) }}{% endif %}
+</section>
+
+{% if sections|length > 2 %}
+<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
+  {% for id, title in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+</nav>
+{% endif %}
+
+{% macro member_table(members, prefix) %}
+<div class="table-container">
+  <table class="table">
+    <thead>
+      <tr>
+        {% if in_force %}<th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Ereignisse auswählen" data-testid="{{ prefix }}-select-all"></th>{% endif %}
+        <th>Zuerst berichtet</th>
+        <th>Ereignis</th>
+        <th>Zustand</th>
+        <th>Berichte</th>
+        <th>Zuordnung</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for member in members %}
+      <tr data-testid="{{ prefix }}-{{ member.event_id }}">
+        {% if in_force %}<td class="cell-select"><input type="checkbox" name="event_id" value="{{ member.event_id }}" data-select-row data-name="{{ member.title }}" aria-label="{{ member.title }} auswählen" data-testid="{{ prefix }}-select-{{ member.event_id }}"></td>{% endif %}
+        <td class="cell-wrap">{{ member.first_reported_at|local_time }}</td>
+        <td class="cell-title"><a href="/events/{{ member.event_id }}" data-testid="{{ prefix }}-title-{{ member.event_id }}">{{ member.title }}</a>{% if member.changes %}<span class="hint" data-testid="{{ prefix }}-changes-{{ member.event_id }}">{% for change in member.changes %}{{ change.status_label }} {{ change.valid_from|local_time }}{% if not loop.last %} · {% endif %}{% endfor %}</span>{% endif %}</td>
+        <td>{{ member.event.state_label if member.event else "–" }}</td>
+        <td class="cell-wrap">{% if member.event %}{{ member.event.report_count }} aus {{ member.event.source_count }} {{ "Quelle" if member.event.source_count == 1 else "Quellen" }}{% else %}–{% endif %}</td>
+        <td class="cell-wrap" data-testid="{{ prefix }}-status-{{ member.event_id }}">{% if member.status == "automatic" %}<span class="status status-uncertain">automatisch</span>{% elif member.status == "proposed" %}<span class="status status-change">vorgeschlagen</span>{% else %}{{ member.status_label }}{% endif %}<span class="hint">{{ member.origin_label }}{% if member.score is not none %}, Ähnlichkeit {{ "%.2f"|format(member.score) }}{% endif %}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% set timeline = detail.members if confirmed or not in_force else detail.proposed %}
+<details class="section" id="events" open data-testid="events-section">
+  <summary><h2>Ereignisse ({{ timeline|length }})</h2></summary>
+  <form class="stack" method="post" action="/situations/{{ situation.id }}/confirm-events" data-bulk-form data-testid="event-list">
+    <p class="hint">Die Ereignisse der Lage, das früheste zuerst, mit ihren Zustandswechseln. „Automatisch“ hat der Worker zugeordnet; Bestätigen nimmt die Markierung weg, Entfernen nimmt das Ereignis aus der Lage, und der Worker ordnet es ihr nie wieder zu.</p>
+    {% if in_force %}
+    <div class="toolbar">
+      <div class="actions">
+        {% if confirmed %}<button class="button button-secondary" type="submit" formaction="/situations/{{ situation.id }}/confirm-events" data-bulk-action data-testid="confirm-events" disabled>Bestätigen</button>{% endif %}
+        <button class="button button-danger" type="submit" formaction="/situations/{{ situation.id }}/remove-events" data-bulk-action data-confirm="Ereignis|Ereignisse" data-confirm-verb="entfernen" data-testid="remove-events" disabled>Entfernen</button>
+        {% if confirmed %}
+        <span class="action-group">
+          <input name="name" maxlength="200" placeholder="Name der neuen Lage" aria-label="Name der neuen Lage" data-testid="split-name">
+          <button class="button button-secondary" type="submit" formaction="/situations/{{ situation.id }}/split" data-bulk-action data-testid="split" disabled>Als neue Lage abspalten</button>
+        </span>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% if timeline %}{{ member_table(timeline, "member") }}{% else %}<p data-testid="no-members">Keine Ereignisse.</p>{% endif %}
+  </form>
+</details>
+
+{% if detail.proposed and confirmed %}
+<details class="section" id="proposed" open data-testid="proposed-section">
+  <summary><h2>Vorgeschlagen ({{ detail.proposed|length }})</h2></summary>
+  <form class="stack" method="post" action="/situations/{{ situation.id }}/confirm-events" data-bulk-form data-testid="proposed-list">
+    <p class="hint">Die Lage ruhte: Diese Ereignisse passen zu ihr und zählen erst, wenn sie bestätigt sind – eine Wiederaufnahme.</p>
+    <div class="toolbar">
+      <div class="actions">
+        <button class="button button-secondary" type="submit" formaction="/situations/{{ situation.id }}/confirm-events" data-bulk-action data-testid="confirm-proposed" disabled>Bestätigen</button>
+        <button class="button button-danger" type="submit" formaction="/situations/{{ situation.id }}/remove-events" data-bulk-action data-confirm="Ereignis|Ereignisse" data-confirm-verb="entfernen" data-testid="remove-proposed" disabled>Entfernen</button>
+      </div>
+    </div>
+    {{ member_table(detail.proposed, "proposed") }}
+  </form>
+</details>
+{% endif %}
+
+<details class="section" id="sources" open data-testid="sources-section">
+  <summary><h2>Quellen ({{ detail.sources|length }})</h2></summary>
+  {% if detail.sources %}
+  <ul class="plain-list" data-testid="source-list">
+    {% for source in detail.sources %}<li>{{ source.name }} <span class="hint">{{ source.events }} {{ "Ereignis" if source.events == 1 else "Ereignisse" }}</span></li>{% endfor %}
+  </ul>
+  {% else %}
+  <p>Noch keine.</p>
+  {% endif %}
+</details>
+
+{% if detail.merge_choices %}
+<details class="section" id="merge" open data-testid="merge-section">
+  <summary><h2>Zusammenführen</h2></summary>
+  <form class="stack" method="post" action="/situations/{{ situation.id }}/merge" data-bulk-form data-testid="merge-list">
+    <p class="hint">Die Ereignisse der ausgewählten Lagen kommen in diese; wo diese über ein Ereignis schon entschieden hat, bleibt es dabei. Die anderen bleiben als „zusammengeführt“ stehen.</p>
+    <div class="toolbar">
+      <div class="actions">
+        <button class="button button-danger" type="submit" formaction="/situations/{{ situation.id }}/merge" data-bulk-action data-confirm="Lage|Lagen" data-confirm-verb="zusammenführen" data-testid="merge" disabled>In diese Lage zusammenführen</button>
+      </div>
+    </div>
+    <div class="table-container">
+      <table class="table">
+        <thead><tr><th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Lagen auswählen" data-testid="merge-select-all"></th><th>Lage</th></tr></thead>
+        <tbody>
+          {% for other in detail.merge_choices %}
+          <tr data-testid="merge-{{ other.id }}">
+            <td class="cell-select"><input type="checkbox" name="situation_id" value="{{ other.id }}" data-select-row data-name="{{ other.name }}" aria-label="{{ other.name }} auswählen" data-testid="merge-select-{{ other.id }}"></td>
+            <td class="cell-title"><a href="/situations/{{ other.id }}">{{ other.name }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+</details>
+{% endif %}
+
+{% if detail.removed %}
+<details class="section" id="removed" open data-testid="removed-section">
+  <summary><h2>Entfernt ({{ detail.removed|length }})</h2></summary>
+  <ul class="plain-list">
+    {% for member in detail.removed %}<li data-testid="removed-{{ member.event_id }}"><a href="/events/{{ member.event_id }}">{{ member.title }}</a> <span class="hint">{% if member.moved_to_id %}in <a href="/situations/{{ member.moved_to_id }}">eine andere Lage</a> verschoben{% else %}entfernt{% endif %}, {{ member.decided_at|local_time }}</span></li>{% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% endblock %}

@@ -21,6 +21,9 @@ from app.db.models import (
     Extraction,
     Instrument,
     Job,
+    MemberStatus,
+    Situation,
+    SituationMember,
     Source,
     Statement,
     WatchItemKind,
@@ -225,6 +228,7 @@ class EventFilter:
     since: datetime | None = None  # a report from then on
     development: str | None = None  # with `since`: NEW, DEVELOPING or CHANGED
     watchlist_id: int | None = None  # it has one of the things the watchlist follows (_watched)
+    situation_id: int | None = None  # it belongs to the Lage (_in_situations)
 
 
 # First reported from `since` on; reported before and again from then on; a change of state from then on.
@@ -301,11 +305,22 @@ def _matching(criteria: EventFilter, source_count) -> list:
             conditions.append(_changed_since(criteria.since))
     if criteria.watchlist_id is not None:
         conditions.append(_watched(criteria.watchlist_id))
+    if criteria.situation_id is not None:
+        conditions.append(_in_situations(select(Situation.id, Situation.merged_into_id).where(Situation.id == criteria.situation_id)))
     return conditions
 
 
+def _in_situations(chosen):
+    """The event belongs to one of the chosen Lagen, in effect - automatic or confirmed -, or to the one a merged one
+    went into."""
+    return Event.id.in_(select(SituationMember.event_id).where(
+        SituationMember.situation_id.in_(_followed(Situation, chosen)),
+        SituationMember.status.in_((MemberStatus.AUTOMATIC, MemberStatus.CONFIRMED)),
+    ))
+
+
 def _watched(watchlist_id: int):
-    """The event has one of the things the watchlist follows: it is one of its events, has one of its types or
+    """The event has one of the things the watchlist follows: it is one of its events or of its Lagen, has one of its types or
     countries - it or one of its reports -, or a report names one of its entities, or the one a Wertpapier of it is
     linked to. An entity or event merged since stands for the one it went into; an empty watchlist matches nothing."""
     item = WatchlistItem.watchlist_id == watchlist_id
@@ -323,8 +338,12 @@ def _watched(watchlist_id: int):
         Event.id.in_(select(WatchlistItem.event_id).where(item, WatchlistItem.kind == WatchItemKind.EVENT))
     ))
     types, countries = values(WatchItemKind.EVENT_TYPE), values(WatchItemKind.COUNTRY)
+    situations = select(Situation.id, Situation.merged_into_id).where(
+        Situation.id.in_(select(WatchlistItem.situation_id).where(item, WatchlistItem.kind == WatchItemKind.SITUATION))
+    )
     return or_(
         Event.id.in_(events),
+        _in_situations(situations),
         Event.event_type.in_(types),
         Event.country.in_(countries),
         _a_report(or_(

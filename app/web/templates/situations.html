@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Lagen{% endblock %}
+{% block content %}
+<h1>Lagen</h1>
+
+<section class="card stack">
+  <p class="hint">Eine Lage fasst zusammengehörige Ereignisse über Wochen zusammen – ein Krieg, ein Handelskonflikt, eine Serie von Angriffen. Ein Ereignis bleibt ein einzelner Vorfall und kann zu mehreren Lagen gehören. Der Worker schlägt stündlich neue Lagen vor, aus Ereignissen mit ähnlichen Wörtern und Entitäten; das LLM prüft, benennt und beschreibt sie. Eine Lage gilt erst, wenn sie bestätigt ist. Danach ordnet er ihr neue Ereignisse selbst zu, als „automatisch“ markiert; eine Lage ohne Ereignis in der offenen Zeit (Plattform-Einstellungen) ruht, und ein passendes Ereignis wird als Wiederaufnahme vorgeschlagen.</p>
+  {% if overview.rejected or overview.dismissed %}<p class="hint" data-testid="not-lagen">{{ overview.rejected }} abgelehnt, {{ overview.dismissed }} vom LLM verworfen.</p>{% endif %}
+</section>
+
+<details class="section" id="proposals" open data-testid="proposals-section">
+  <summary><h2>Vorschläge ({{ overview.proposals|length }})</h2></summary>
+  <form class="stack" method="post" action="/situations/confirm" data-bulk-form data-testid="proposal-list">
+    <div class="toolbar">
+      <div class="actions">
+        <button class="button" type="submit" formaction="/situations/confirm" data-bulk-action data-testid="confirm" disabled>Bestätigen</button>
+        <button class="button button-danger" type="submit" formaction="/situations/reject" data-bulk-action data-confirm="Vorschlag|Vorschläge" data-confirm-verb="ablehnen" data-testid="reject" disabled>Ablehnen</button>
+      </div>
+    </div>
+    {% if overview.proposals %}
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Vorschläge auswählen" data-testid="select-all-proposals"></th>
+            <th>Lage</th>
+            <th>Ereignisse</th>
+            <th>Vorgeschlagen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for proposal in overview.proposals %}
+          {% set situation = proposal.situation %}
+          <tr data-testid="proposal-{{ situation.id }}">
+            <td class="cell-select"><input type="checkbox" name="situation_id" value="{{ situation.id }}" data-select-row data-name="{{ situation.name }}" aria-label="{{ situation.name }} auswählen" data-testid="select-{{ situation.id }}"></td>
+            <td class="cell-title"><a href="/situations/{{ situation.id }}" data-testid="name-{{ situation.id }}">{{ situation.name }}</a>{% if situation.description %}<span class="hint">{{ situation.description }}</span>{% endif %}</td>
+            <td class="cell-title">
+              <ul class="plain-list">
+                {% for member in proposal.members %}<li><a href="/events/{{ member.event_id }}">{{ member.title }}</a> <span class="hint">{{ member.first_reported_at|local_time }}</span></li>{% endfor %}
+              </ul>
+            </td>
+            <td class="cell-wrap">{{ situation.created_at|local_time }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-proposals">Keine Vorschläge offen.</p>
+    {% endif %}
+  </form>
+</details>
+
+<details class="section" id="lagen" open data-testid="lagen-section">
+  <summary><h2>Lagen ({{ overview.situations|length }})</h2></summary>
+  {% if overview.situations %}
+  <div class="table-container">
+    <table class="table" data-testid="lage-list">
+      <thead>
+        <tr>
+          <th>Lage</th>
+          <th>Status</th>
+          <th>Ereignisse</th>
+          <th>Zuletzt berichtet</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for situation in overview.situations %}
+        <tr data-testid="lage-{{ situation.id }}">
+          <td class="cell-title"><a href="/situations/{{ situation.id }}" data-testid="lage-name-{{ situation.id }}">{{ situation.name }}</a>{% if situation.description %}<span class="hint">{{ situation.description }}</span>{% endif %}</td>
+          <td data-testid="lage-status-{{ situation.id }}">{% if situation.dormant %}<span class="status status-inactive">Ruhend</span>{% else %}<span class="status status-active">Aktiv</span>{% endif %}</td>
+          <td class="cell-wrap" data-testid="lage-events-{{ situation.id }}"><a href="/events?situation={{ situation.id }}">{{ situation.event_count }}</a>{% if situation.automatic_count %}<span class="hint">davon {{ situation.automatic_count }} automatisch</span>{% endif %}{% if situation.proposed_count %}<span class="hint">{{ situation.proposed_count }} vorgeschlagen</span>{% endif %}</td>
+          <td class="cell-wrap">{{ situation.last_event_at|local_time }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p data-testid="no-lagen">Noch keine bestätigten Lagen.</p>
+  {% endif %}
+</details>
+{% endblock %}

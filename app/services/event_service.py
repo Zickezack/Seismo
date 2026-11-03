@@ -41,7 +41,7 @@ from app.jobs.errors import JobDeferred
 from app.llm.event_schema import Horizon, TargetKind
 from app.llm.limiter import LlmCallLimiter
 from app.llm.ollama import OllamaClient
-from app.repositories import event_correction_repository, event_repository
+from app.repositories import event_correction_repository, event_repository, situation_repository
 from app.repositories.event_repository import CHANGED, DEVELOPING, NEW, EventFilter
 from app.services import entity_service, job_service, watchlist_service
 from app.services.extraction_service import EVENT_TYPE_LABELS, HORIZON_LABELS, STATUS_LABELS, StatementView
@@ -400,6 +400,7 @@ class FilterChoices:
     countries: list[str]
     sectors: list  # entity_service.EntityRef of the sectors
     watchlists: list = field(default_factory=list)  # watchlist_service.WatchlistRef
+    situations: list = field(default_factory=list)  # the confirmed Lagen: id and name
     types = EVENT_TYPE_LABELS
     horizons = FILTER_HORIZONS
     min_sources = MIN_SOURCES
@@ -429,6 +430,8 @@ def parse_filter(params: Mapping[str, str], now: datetime | None = None, with_pe
         values["horizon"] = params["horizon"]
     if (params.get("watchlist") or "").isdigit():
         values["watchlist"] = str(int(params["watchlist"]))
+    if (params.get("situation") or "").isdigit():
+        values["situation"] = str(int(params["situation"]))
     since = None
     if with_period:
         if params.get("development") in DEVELOPMENT_LABELS:
@@ -448,6 +451,7 @@ def parse_filter(params: Mapping[str, str], now: datetime | None = None, with_pe
         since=since,
         development=values.get("development"),
         watchlist_id=int(values["watchlist"]) if "watchlist" in values else None,
+        situation_id=int(values["situation"]) if "situation" in values else None,
     )
     return EventFilterForm(values, criteria)
 
@@ -455,7 +459,8 @@ def parse_filter(params: Mapping[str, str], now: datetime | None = None, with_pe
 def filter_choices(engine: Engine) -> FilterChoices:
     with engine.connect() as connection:
         countries = event_repository.countries(connection)
-    return FilterChoices(countries, entity_service.choices(engine, EntityKind.SECTOR), watchlist_service.choices(engine))
+        situations = list(situation_repository.choices(connection))
+    return FilterChoices(countries, entity_service.choices(engine, EntityKind.SECTOR), watchlist_service.choices(engine), situations)
 
 
 @dataclass(frozen=True)

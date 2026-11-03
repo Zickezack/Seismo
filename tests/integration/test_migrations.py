@@ -532,3 +532,26 @@ def test_watchlists_and_alerts_go_with_a_downgrade_and_the_entities_stay(engine)
 
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_the_lagen_go_with_a_downgrade_and_a_watchlist_keeps_its_other_items(engine):
+    upgrade(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO situation (name, status) VALUES ('Red Sea', 'confirmed')"))
+        connection.execute(text("INSERT INTO watchlist (name) VALUES ('Seewege')"))
+        connection.execute(text("INSERT INTO watchlist_item (watchlist_id, kind, situation_id) SELECT w.id, 'situation', s.id FROM watchlist w, situation s"))
+        connection.execute(text("INSERT INTO watchlist_item (watchlist_id, kind, value) SELECT id, 'country', 'YE' FROM watchlist"))
+        settings = connection.execute(text("SELECT count(*) FROM platform_settings")).scalar_one()
+
+    downgrade(engine, "da655b1db15d")
+
+    with engine.connect() as connection:
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+        items = connection.execute(text("SELECT kind FROM watchlist_item")).scalars().all()
+    assert not tables & {"situation", "situation_member", "situation_check"} and items == ["country"] and settings == 0
+
+    upgrade(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO platform_settings (id) VALUES (1)"))
+        values = connection.execute(text("SELECT situation_open_days, situation_llm_calls_per_hour FROM platform_settings")).one()
+    assert tuple(values) == (30, 20) and revision_of(engine) == head_revision()

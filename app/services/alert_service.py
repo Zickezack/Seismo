@@ -46,7 +46,7 @@ DEFAULTS = {"max_per_hour": 5, "cooldown_hours": 6, "on_new": True, "on_change":
 TRIGGER_LABELS = {AlertTrigger.NEW: "Neues Ereignis", AlertTrigger.CHANGE: "Zustandswechsel", AlertTrigger.REPORT: "Neuer Bericht"}
 # The filter's fields a rule keeps: the event list's but for period and development (and the watchlist, a field of
 # its own).
-_FILTER_FIELDS = ("type", "country", "sector", "company", "sources", "impact", "horizon")
+_FILTER_FIELDS = ("situation", "type", "country", "sector", "company", "sources", "impact", "horizon")
 
 
 class InvalidRule(ValueError):

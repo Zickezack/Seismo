@@ -12,6 +12,15 @@
       </select>
     </div>
     <div class="field">
+      <label for="filter-situation">Lage</label>
+      <select id="filter-situation" name="situation" data-testid="filter-situation">
+        <option value="">Alle</option>
+        {% for situation in choices.situations %}
+        <option value="{{ situation.id }}"{% if filter.values.situation == situation.id|string %} selected{% endif %}>{{ situation.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
       <label for="filter-type">Typ</label>
       <select id="filter-type" name="type" data-testid="filter-type">
         <option value="">Alle Typen</option>

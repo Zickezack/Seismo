@@ -58,6 +58,9 @@ class PlatformSettings:
     # The Wertpapiere's prices (price_service, history_service).
     price_interval_minutes: int = 30
     price_history_years: int = 2
+    # The Lagen (situation_service): open after their latest event; LLM calls per hour, apart from the other budgets.
+    situation_open_days: int = 30
+    situation_llm_calls_per_hour: int = 20
 
     @property
     def blocked_domains(self) -> list[str]:
@@ -247,6 +250,21 @@ FORM_FIELDS = {
             "für jedes Wertpapier noch einmal von vorn; eine Senkung löscht keine gespeicherten Kurse.",
             1,
             30,
+        ),
+        NumberField(
+            "situation_open_days",
+            "Offen nach dem letzten Ereignis (Tage)",
+            "So lange ordnet der Worker einer Lage neue Ereignisse von selbst zu; danach ruht sie, und ein passendes Ereignis "
+            "wird als Wiederaufnahme vorgeschlagen.",
+            1,
+            365,
+        ),
+        NumberField(
+            "situation_llm_calls_per_hour",
+            "LLM-Aufrufe pro Stunde (höchstens)",
+            "Für Vorschläge neuer Lagen und Zuordnungen im Zweifel, immer nach der laufenden Arbeit. 0 hält die Lagenbildung an.",
+            0,
+            1000,
         ),
         NumberField(
             "succeeded_jobs_retention_days", "Erledigte Jobs aufbewahren (Tage)", "Danach löscht der Worker sie.", 1, 3650
