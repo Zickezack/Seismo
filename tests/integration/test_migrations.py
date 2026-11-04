@@ -630,3 +630,30 @@ def test_the_wirkungsannahmen_start_empty_and_go_with_a_downgrade(engine):
     assert not tables & {"impact_assessment", "impact_hypothesis", "impact_hypothesis_version"}
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_the_versions_so_far_stay_without_a_probability(engine):
+    upgrade(engine, "cc8ef9040619")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO entity (kind, name) VALUES ('company', 'Shell')"))
+        connection.execute(text(
+            "INSERT INTO event (title, event_type, first_reported_at, last_reported_at) VALUES ('Oil', 'other', now(), now())"
+        ))
+        connection.execute(text(
+            "INSERT INTO impact_hypothesis (event_id, target_entity_id, path, origin) SELECT e.id, n.id, 'direct', 'llm' FROM event e, entity n"
+        ))
+        connection.execute(text(
+            "INSERT INTO impact_hypothesis_version (hypothesis_id, number, status, direction, horizon, mechanism, counterarguments, "
+            "classification, origin) SELECT id, 1, 'proposed', 'negative', 'months', 'm', 'c', 'plausible', 'llm' FROM impact_hypothesis"
+        ))
+
+    upgrade(engine)
+    with engine.connect() as connection:
+        row = connection.execute(text("SELECT probability, abstention, expected, expected_support, priced_in FROM impact_hypothesis_version")).one()
+    assert tuple(row) == (None, None, None, [], None)
+
+    downgrade(engine, "cc8ef9040619")
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM impact_hypothesis_version")).scalar_one() == 1
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

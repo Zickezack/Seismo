@@ -27,16 +27,18 @@ from app.db.models import (
     IMPACT_DIRECTIONS,
     IMPACT_HORIZONS,
     EntityKind,
+    Expected,
     ImpactClass,
     ImpactOrigin,
     ImpactPath,
+    ImpactProbability,
     ImpactStatus,
     RelationshipKind,
 )
 from app.llm.limiter import LlmCallLimiter
 from app.llm.ollama import OllamaClient
 from app.repositories import entity_repository, impact_repository, relationship_repository, reprocessing_repository
-from app.services import instrument_service, job_service, platform_settings_service, relationship_service
+from app.services import event_study_service, instrument_service, job_service, platform_settings_service, relationship_service
 from app.services.bulk import BulkResult
 from app.services.entity_service import KIND_LABELS as ENTITY_KIND_LABELS
 from app.services.extraction_service import DIRECTION_LABELS, HORIZON_LABELS, TARGET_KIND_LABELS
@@ -47,7 +49,8 @@ logger = logging.getLogger(__name__)
 KIND = job_service.ASSESS_IMPACTS_JOB_KIND
 # A change of prompt, schema or meaning is a new version: every proposed version names the assessment it came from.
 # 2 (2026-11-04): mechanism and counterarguments without the lists' numbers - the model wrote "relationship 2".
-PROMPT_VERSION = 2
+# 3 (2026-11-04): probability apart from direction, abstention, and whether the event was expected (story 2).
+PROMPT_VERSION = 3
 BUDGET_PERIOD = timedelta(hours=1)
 AGAIN_AFTER = timedelta(days=1)
 TARGET_KINDS = (EntityKind.COMPANY, EntityKind.SUBSIDIARY, EntityKind.SECTOR, EntityKind.COMMODITY)
@@ -71,6 +74,15 @@ CLASS_LABELS = {ImpactClass.EVIDENCED: "belegt", ImpactClass.PLAUSIBLE: "plausib
 # Strongest first: a cap takes the later of two.
 _CLASS_ORDER = (ImpactClass.EVIDENCED, ImpactClass.PLAUSIBLE, ImpactClass.SPECULATIVE)
 ORIGIN_LABELS = {ImpactOrigin.LLM: "LLM", ImpactOrigin.ANALYST: "Analyst"}
+PROBABILITY_LABELS = {ImpactProbability.HIGH: "hoch", ImpactProbability.MEDIUM: "mittel", ImpactProbability.LOW: "niedrig"}
+# Highest first: a cap takes the later of two, a step down the next.
+_PROBABILITY_ORDER = (ImpactProbability.HIGH, ImpactProbability.MEDIUM, ImpactProbability.LOW)
+EXPECTED_LABELS = {Expected.YES: "erwartet", Expected.NO: "nicht erwartet", Expected.UNKNOWN: "unbekannt, ob erwartet"}
+# The form's choice for no probability.
+ABSTAIN = "abstain"
+# The Vorlauf counts as a move the assumed way from this t value of the market model on (event_study_service).
+PRICED_IN_T = 2.0
+TOO_LITTLE_DATA = "Zu wenig Daten: kein Beleg und keine Beziehung."
 # How the LLM reads a relationship, its subject first.
 _RELATION_WORDS = {
     RelationshipKind.SUPPLIES: "supplies",
@@ -93,6 +105,11 @@ Each hypothesis:
 - support: the numbers of the evidence that backs it; against: the numbers of the evidence that speaks against it.
 - classification: evidenced only when an evidence item states this very effect on this target; plausible when it
   follows through a relationship, a source's forecast or a stated effect; speculative otherwise.
+- probability: how likely the effect occurs at all - high, medium or low -, apart from its direction; null to
+  abstain when the evidence does not allow a judgement, then abstention says why (else abstention is empty).
+- expected: yes when the evidence says the event was announced, scheduled or widely expected before it happened
+  (then the market may have priced it in), no when it came as a surprise, unknown otherwise; expected_support: the
+  numbers of the evidence that says so.
 
 At most {MAX_HYPOTHESES} hypotheses, the most relevant first; none when the event has no economic effect on the
 listed targets. Write in English, mechanism and counterarguments as plain sentences that name the entities - never
@@ -261,8 +278,15 @@ def schema(context: Context) -> dict:
             "support": _numbers_schema(len(context.items)),
             "against": _numbers_schema(len(context.items)),
             "classification": {"enum": [each.value for each in ImpactClass]},
+            "probability": {"enum": [*(each.value for each in ImpactProbability), None]},
+            "abstention": {"type": "string", "maxLength": MAX_REASON_CHARS},
+            "expected": {"enum": [each.value for each in Expected]},
+            "expected_support": _numbers_schema(len(context.items)),
         },
-        "required": ["target", "path", "via", "direction", "horizon", "mechanism", "counterarguments", "support", "against", "classification"],
+        "required": [
+            "target", "path", "via", "direction", "horizon", "mechanism", "counterarguments", "support", "against",
+            "classification", "probability", "abstention", "expected", "expected_support",
+        ],
         "additionalProperties": False,
     }
     return {
@@ -300,6 +324,57 @@ def capped(proposed: str | None, allowed: ImpactClass) -> ImpactClass:
     return max(ImpactClass(proposed), allowed, key=_CLASS_ORDER.index)
 
 
+def cap_probability(
+    proposed: str | None, abstention: str | None, classification: str, support: int, against: int,
+    through_relationship: bool, priced_in: bool | None, expected: str | None,
+) -> tuple[str | None, str | None]:
+    """The probability a hypothesis may claim and, without one, why (requirements.md, Markt- und Wirkungsmodell,
+    criterion 4): none without any Beleg and relationship - too little data; spekulativ, or more Belege against than
+    for, at most low; priced in by the Vorlauf or expected by the reports one step lower. Only ever lowered."""
+    if not support and not through_relationship:
+        return None, TOO_LITTLE_DATA
+    if proposed not in ImpactProbability._value2member_map_:
+        return None, abstention or "Enthaltung ohne Begründung."
+    level = ImpactProbability(proposed)
+    if classification == ImpactClass.SPECULATIVE or against > support:
+        level = max(level, ImpactProbability.LOW, key=_PROBABILITY_ORDER.index)
+    if priced_in or expected == Expected.YES:
+        level = _PROBABILITY_ORDER[min(_PROBABILITY_ORDER.index(level) + 1, len(_PROBABILITY_ORDER) - 1)]
+    return level.value, None
+
+
+def is_priced_in(direction: str, move) -> bool | None:
+    """Whether the target's Vorlauf moved markedly the assumed way: None when unmeasured, or for a direction that is
+    neither positive nor negative."""
+    if move is None or move.t is None or move.abnormal is None or direction not in ("positive", "negative"):
+        return None
+    return abs(move.t) >= PRICED_IN_T and (move.abnormal > 0) == (direction == "positive")
+
+
+@dataclass(frozen=True)
+class Market:
+    """What the Vorlauf of the target's Wertpapier says, for a version."""
+
+    instrument_id: int | None = None
+    abnormal: float | None = None
+    t: float | None = None
+    priced_in: bool | None = None
+
+    def fields(self) -> dict:
+        return {"pre_instrument_id": self.instrument_id, "pre_abnormal": self.abnormal, "pre_t": self.t, "priced_in": self.priced_in}
+
+
+def market_of(direction: str, move) -> Market:
+    if move is None:
+        return Market()
+    return Market(move.instrument_id, _rounded(move.abnormal), _rounded(move.t), is_priced_in(direction, move))
+
+
+def _rounded(value: float | None) -> float | None:
+    # Stored as compared: a later computation of the same prices gives the same version.
+    return None if value is None else round(value, 6)
+
+
 @dataclass(frozen=True)
 class Proposal:
     target_entity_id: int
@@ -314,16 +389,30 @@ class Proposal:
     against: list[dict]
     proposed_classification: str | None
     classification: str
+    proposed_probability: str | None = None
+    llm_abstention: str | None = None  # the LLM's reason, before the rule
+    expected: str | None = None
+    expected_support: list[dict] = field(default_factory=list)
+    market: Market = field(default_factory=Market)
 
     @property
     def key(self) -> tuple:
         return (self.target_entity_id, self.path, self.via_relationship_id)
 
+    @property
+    def settled(self) -> tuple[str | None, str | None]:
+        return cap_probability(
+            self.proposed_probability, self.llm_abstention, self.classification, len(self.support), len(self.against),
+            self.via_relationship_id is not None, self.market.priced_in, self.expected,
+        )
+
     def fields(self) -> dict:
+        probability, abstention = self.settled
         return {
             "direction": self.direction, "horizon": self.horizon, "mechanism": self.mechanism,
             "counterarguments": self.counterarguments, "support": self.support, "against": self.against,
-            "classification": self.classification,
+            "classification": self.classification, "probability": probability, "abstention": abstention,
+            "expected": self.expected, "expected_support": self.expected_support, **self.market.fields(),
         }
 
 
@@ -393,9 +482,12 @@ def _proposal(item: dict, context: Context) -> Proposal | None:
     support, against = _cited(item.get("support"), context), _cited(item.get("against"), context)
     proposed = item.get("classification") if item.get("classification") in ImpactClass._value2member_map_ else None
     allowed = classify(path, direction, target.entity_id, context.items_of(support), way[0] is not None)
+    probability = item.get("probability") if item.get("probability") in ImpactProbability._value2member_map_ else None
+    expected = item.get("expected") if item.get("expected") in Expected._value2member_map_ else Expected.UNKNOWN
     return Proposal(
         target.entity_id, path, way[0], way[1], direction, horizon, mechanism, _text(item.get("counterarguments")),
-        support, against, proposed, capped(proposed, allowed),
+        support, against, proposed, capped(proposed, allowed), probability,
+        _text(item.get("abstention"), MAX_REASON_CHARS) or None, expected, _cited(item.get("expected_support"), context),
     )
 
 
@@ -412,7 +504,7 @@ def enqueue_due(engine: Engine) -> list[int]:
         if left <= 0:
             return []
         queued = []
-        for event_id in impact_repository.due(connection, KIND, TARGET_KINDS, AGAIN_AFTER, left):
+        for event_id in impact_repository.due(connection, KIND, TARGET_KINDS, AGAIN_AFTER, left, PROMPT_VERSION):
             job_id = job_service.enqueue(connection, KIND, {"event_id": event_id}, dedupe_key=f"{KIND}:{event_id}", priority=BACKFILL_PRIORITY)
             if job_id:
                 queued.append(job_id)
@@ -430,6 +522,9 @@ def assess(engine: Engine, payload: Mapping, client: OllamaClient, limiter: LlmC
     with limiter.slot():
         answer = client.chat_json(messages(shown), schema(shown))
     found, dropped = proposals(answer.content if answer.complete else "", shown)
+    with engine.connect() as connection:
+        moves = event_study_service.pre_moves(connection, event_id, {each.target_entity_id for each in found})
+    found = [replace(each, market=market_of(each.direction, moves.get(each.target_entity_id))) for each in found]
 
     def store(connection: Connection) -> None:
         impact_repository.lock(connection, event_id)
@@ -453,7 +548,7 @@ def reconcile(connection: Connection, event_id: int, found: Sequence[Proposal], 
         row = existing.get(proposal.key)
         version = proposal.fields() | {
             "status": ImpactStatus.PROPOSED, "proposed_classification": proposal.proposed_classification,
-            "origin": ImpactOrigin.LLM, "assessment_id": assessment_id,
+            "proposed_probability": proposal.proposed_probability, "origin": ImpactOrigin.LLM, "assessment_id": assessment_id,
         }
         if row is None:
             hypothesis_id = impact_repository.insert_hypothesis(connection, {
@@ -473,7 +568,7 @@ def reconcile(connection: Connection, event_id: int, found: Sequence[Proposal], 
         if key not in keys and row.status == ImpactStatus.PROPOSED:
             impact_repository.insert_version(connection, row.id, _fields(row) | {
                 "status": ImpactStatus.SUPERSEDED, "proposed_classification": row.proposed_classification,
-                "origin": ImpactOrigin.LLM, "assessment_id": assessment_id,
+                "proposed_probability": row.proposed_probability, "origin": ImpactOrigin.LLM, "assessment_id": assessment_id,
             })
             appended += 1
     return appended
@@ -483,6 +578,9 @@ def _fields(row) -> dict:
     return {
         "direction": row.direction, "horizon": row.horizon, "mechanism": row.mechanism, "counterarguments": row.counterarguments,
         "support": list(row.support), "against": list(row.against), "classification": row.classification,
+        "probability": row.probability, "abstention": row.abstention, "expected": row.expected,
+        "expected_support": list(row.expected_support), "pre_instrument_id": row.pre_instrument_id,
+        "pre_abnormal": row.pre_abnormal, "pre_t": row.pre_t, "priced_in": row.priced_in,
     }
 
 
@@ -511,7 +609,8 @@ def _review(engine: Engine, event_id: int, hypothesis_ids: Iterable[int], status
             return BulkResult(0, blocked)
         for row in rows:
             impact_repository.insert_version(connection, row.id, _fields(row) | {
-                "status": status, "proposed_classification": None, "origin": ImpactOrigin.ANALYST, "note": note,
+                "status": status, "proposed_classification": None, "proposed_probability": None, "origin": ImpactOrigin.ANALYST,
+                "note": note,
             })
     logger.info("Impact hypotheses reviewed", extra={"event_id": event_id, "status": status, "hypotheses": len(rows)})
     return BulkResult(len(rows), [])
@@ -542,9 +641,13 @@ class Entries:
     note: str | None
 
 
-def parse(form: Mapping[str, str], support: Sequence[str], against: Sequence[str], context: Context, keep_way: tuple | None = None) -> Entries:
+def parse(
+    form: Mapping[str, str], support: Sequence[str], against: Sequence[str], context: Context, keep_way: tuple | None = None,
+    moves: Mapping[int, object] | None = None, expected_support: Sequence[Mapping] = (),
+) -> Entries:
     """The form's entries against the event's targets, relationships and Belege; `keep_way` (target, path,
-    relationship, via entity) for a change, which keeps them. The classification is the rule's at most."""
+    relationship, via entity) for a change, which keeps them; `moves` the targets' Vorlauf (event_study_service).
+    Classification and probability are the rules' at most."""
     errors = []
     if keep_way is None:
         target_id = int(form["target"]) if (form.get("target") or "").isdigit() else None
@@ -578,6 +681,12 @@ def parse(form: Mapping[str, str], support: Sequence[str], against: Sequence[str
     except InvalidHypothesis as error:
         errors.append(str(error))
         note = None
+    probability, reason = form.get("probability"), _text(form.get("abstention"), MAX_REASON_CHARS)
+    if probability != ABSTAIN and probability not in ImpactProbability._value2member_map_:
+        errors.append("Bitte eine Wahrscheinlichkeit wählen oder sich enthalten.")
+    elif probability == ABSTAIN and not reason:
+        errors.append("Bitte begründen, warum keine Wahrscheinlichkeit.")
+    expected = form.get("expected") if form.get("expected") in Expected._value2member_map_ else Expected.UNKNOWN
     if errors:
         raise InvalidHypothesis(" ".join(errors))
     cited = [ref for ref in (parse_ref(each) for each in support) if ref]
@@ -587,10 +696,16 @@ def parse(form: Mapping[str, str], support: Sequence[str], against: Sequence[str
     countered = [ref for ref in countered if ref_key(ref) in known]
     target_id, path, relationship_id, via_id = keep_way
     allowed = classify(path, direction, target_id, context.items_of(cited), relationship_id is not None)
-    chosen = form.get("classification")
+    classification = capped(form.get("classification"), allowed)
+    market = market_of(direction, (moves or {}).get(target_id))
+    settled = cap_probability(
+        None if probability == ABSTAIN else probability, reason or None, classification, len(cited), len(countered),
+        relationship_id is not None, market.priced_in, expected,
+    )
     fields = {
         "direction": direction, "horizon": horizon, "mechanism": mechanism, "counterarguments": counterarguments,
-        "support": cited, "against": countered, "classification": capped(chosen, allowed),
+        "support": cited, "against": countered, "classification": classification, "probability": settled[0],
+        "abstention": settled[1], "expected": expected, "expected_support": list(expected_support), **market.fields(),
     }
     return Entries(target_id, path, relationship_id, via_id, fields, note)
 
@@ -602,7 +717,9 @@ def create(engine: Engine, event_id: int, form: Mapping[str, str], support: Sequ
         shown = context(connection, event_id)
         if shown is None:
             raise InvalidHypothesis("Ereignis nicht gefunden oder zusammengeführt.")
-        entries = parse(form, support, against, shown)
+        target = int(form["target"]) if (form.get("target") or "").isdigit() else None
+        moves = event_study_service.pre_moves(connection, event_id, [target]) if target is not None else {}
+        entries = parse(form, support, against, shown, moves=moves)
         impact_repository.lock(connection, event_id)
         existing = {(row.target_entity_id, row.path, row.via_relationship_id): row for row in impact_repository.hypotheses(connection, event_id)}
         if (entries.target_entity_id, entries.path, entries.via_relationship_id) in existing:
@@ -626,7 +743,8 @@ def change(engine: Engine, hypothesis_id: int, form: Mapping[str, str], support:
             return False
         shown = context(connection, row.event_id) or _empty_context(row.event_id)
         keep = (row.target_entity_id, row.path, row.via_relationship_id, row.via_entity_id)
-        entries = parse(form, support, against, _with_cited(shown, connection, row), keep)
+        moves = event_study_service.pre_moves(connection, row.event_id, [row.target_entity_id])
+        entries = parse(form, support, against, _with_cited(shown, connection, row), keep, moves, row.expected_support)
         impact_repository.lock(connection, row.event_id)
         impact_repository.insert_version(connection, hypothesis_id, entries.fields | {
             "status": ImpactStatus.CONFIRMED, "origin": ImpactOrigin.ANALYST, "note": entries.note,
@@ -689,6 +807,62 @@ class BelegView:
 
 
 @dataclass(frozen=True)
+class Likelihood:
+    """How likely a version's effect is, apart from its direction, and what lowered it (story 2)."""
+
+    probability: str | None = None
+    proposed_probability: str | None = None
+    abstention: str | None = None
+    expected: str | None = None
+    expected_support: list[BelegView] = field(default_factory=list)
+    pre_symbol: str | None = None
+    pre_abnormal: float | None = None
+    pre_t: float | None = None
+    priced_in: bool | None = None
+
+    @property
+    def assessed(self) -> bool:
+        """False for a version from before story 2: neither a probability nor an abstention."""
+        return self.probability is not None or self.abstention is not None
+
+    @property
+    def label(self) -> str:
+        if self.probability:
+            return PROBABILITY_LABELS[self.probability]
+        return "Enthaltung" if self.abstention else "nicht bewertet"
+
+    @property
+    def lowered_from(self) -> str | None:
+        """What the LLM proposed, when the rule took it lower or to an abstention."""
+        if self.proposed_probability and self.proposed_probability != self.probability:
+            return PROBABILITY_LABELS[self.proposed_probability]
+        return None
+
+    @property
+    def expected_label(self) -> str | None:
+        return EXPECTED_LABELS.get(self.expected) if self.expected else None
+
+    @property
+    def pre_label(self) -> str | None:
+        """The Vorlauf of the target's Wertpapier, as the pages state it."""
+        if self.pre_symbol is None:
+            return None
+        if self.pre_abnormal is None or self.pre_t is None:
+            return f"Vorlauf {self.pre_symbol}: nicht messbar"
+        abnormal = f"{self.pre_abnormal * 100:+.2f}".replace(".", ",")
+        t = f"{self.pre_t:.2f}".replace(".", ",")
+        return f"Vorlauf {self.pre_symbol}: {abnormal} % abnormal, t {t}"
+
+
+def _likelihood(row, items: Mapping[str, Item], reports: Mapping[int, object]) -> Likelihood:
+    return Likelihood(
+        row.probability, row.proposed_probability, row.abstention, row.expected,
+        [each for each in (_beleg(items, reports, ref) for ref in row.expected_support) if each],
+        row.pre_symbol, row.pre_abnormal, row.pre_t, row.priced_in,
+    )
+
+
+@dataclass(frozen=True)
 class HypothesisView:
     id: int
     event_id: int
@@ -714,6 +888,7 @@ class HypothesisView:
     against: list[BelegView] = field(default_factory=list)
     instruments: list = field(default_factory=list)  # instrument_service.InstrumentView of the target
     event_title: str | None = None
+    likelihood: Likelihood = field(default_factory=Likelihood)
 
     @property
     def status_label(self) -> str:
@@ -797,6 +972,7 @@ class VersionView:
     created_at: datetime
     support: list[BelegView]
     against: list[BelegView]
+    likelihood: Likelihood = field(default_factory=Likelihood)
 
     @property
     def status_label(self) -> str:
@@ -860,7 +1036,7 @@ def _beleg(connection_items: Mapping[str, Item], reports: Mapping[int, object], 
 
 
 def _views(connection: Connection, rows: Sequence) -> list[HypothesisView]:
-    refs = [ref for row in rows for ref in (*row.support, *row.against)]
+    refs = [ref for row in rows for ref in (*row.support, *row.against, *row.expected_support)]
     items = _resolve(connection, refs)
     reports = impact_repository.reports_by_id(connection, {item.candidate_id for item in items.values()}) if items else {}
     relationships = {}
@@ -877,7 +1053,7 @@ def _views(connection: Connection, rows: Sequence) -> list[HypothesisView]:
             row.changed_at, row.note,
             [each for each in (_beleg(items, reports, ref) for ref in row.support) if each],
             [each for each in (_beleg(items, reports, ref) for ref in row.against) if each],
-            [], mapping.get("event_title"),
+            [], mapping.get("event_title"), _likelihood(row, items, reports),
         ))
     return views
 
@@ -939,7 +1115,7 @@ def detail(engine: Engine, hypothesis_id: int) -> HypothesisDetail | None:
         row = rows[hypothesis_id]
         [view] = _views(connection, [row])
         versions = impact_repository.versions(connection, hypothesis_id)
-        items = _resolve(connection, [ref for version in versions for ref in (*version.support, *version.against)])
+        items = _resolve(connection, [ref for version in versions for ref in (*version.support, *version.against, *version.expected_support)])
         reports = impact_repository.reports_by_id(connection, {item.candidate_id for item in items.values()}) if items else {}
         version_views = [
             VersionView(
@@ -948,6 +1124,7 @@ def detail(engine: Engine, hypothesis_id: int) -> HypothesisDetail | None:
                 version.note, version.created_at,
                 [each for each in (_beleg(items, reports, ref) for ref in version.support) if each],
                 [each for each in (_beleg(items, reports, ref) for ref in version.against) if each],
+                _likelihood(version, items, reports),
             )
             for version in versions
         ]

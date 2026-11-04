@@ -121,7 +121,9 @@ def test_a_beleg_travels_as_a_form_value_and_back():
 
 
 def form(**fields):
-    return {"target": str(TOTAL), "direction": "negative", "horizon": "weeks", "mechanism": "Costs.", "counterarguments": "Hedged."} | fields
+    values = {"target": str(TOTAL), "direction": "negative", "horizon": "weeks", "mechanism": "Costs.", "counterarguments": "Hedged.",
+              "probability": "high"}
+    return values | fields
 
 
 def test_the_form_caps_the_classification_by_the_rule():
@@ -148,3 +150,96 @@ def test_the_form_caps_the_classification_by_the_rule():
 def test_the_form_names_what_is_missing_or_wrong(fields, message):
     with pytest.raises(InvalidHypothesis, match=message):
         impacts.parse(form(**fields), [], [], CONTEXT)
+
+
+# The probability (story 2)
+
+
+def cap(proposed="high", abstention=None, classification="plausible", support=1, against=0, relationship=False, priced_in=None, expected="no"):
+    return impacts.cap_probability(proposed, abstention, classification, support, against, relationship, priced_in, expected)
+
+
+def test_without_any_beleg_or_relationship_it_is_an_abstention_for_too_little_data():
+    assert cap(support=0) == (None, impacts.TOO_LITTLE_DATA)
+    assert cap(support=0, relationship=True) == ("high", None)
+
+
+def test_the_llm_may_abstain_with_its_reason():
+    assert cap(proposed=None, abstention="Nothing known of its exposure.") == (None, "Nothing known of its exposure.")
+    assert cap(proposed="certain") == (None, "Enthaltung ohne Begründung.")
+
+
+def test_speculative_or_more_against_than_for_is_low_at_most():
+    assert cap(classification="speculative") == ("low", None)
+    assert cap(support=1, against=2) == ("low", None)
+    assert cap(support=2, against=2) == ("high", None)
+
+
+def test_priced_in_or_expected_takes_it_one_step_lower_never_below_low():
+    assert cap(priced_in=True) == ("medium", None)
+    assert cap(expected="yes") == ("medium", None)
+    assert cap(proposed="medium", priced_in=True, expected="yes") == ("low", None)
+    assert cap(proposed="low", priced_in=True) == ("low", None)
+    assert cap(expected="unknown", priced_in=False) == ("high", None)
+
+
+class Move:
+    def __init__(self, abnormal, t):
+        self.instrument_id, self.symbol, self.abnormal, self.t = 9, "SHEL", abnormal, t
+
+
+@pytest.mark.parametrize(
+    ("direction", "abnormal", "t", "priced_in"),
+    [
+        ("negative", -0.05, -2.4, True),
+        ("negative", -0.05, -1.5, False),  # not marked enough
+        ("positive", -0.05, -2.4, False),  # the other way
+        ("positive", 0.04, 2.0, True),
+        ("mixed", 0.04, 3.0, None),  # no way to have moved
+    ],
+)
+def test_the_vorlauf_counts_as_priced_in_from_t_2_the_assumed_way(direction, abnormal, t, priced_in):
+    assert impacts.is_priced_in(direction, Move(abnormal, t)) is priced_in
+
+
+def test_an_unmeasured_vorlauf_says_nothing():
+    assert impacts.is_priced_in("negative", None) is None
+    assert impacts.is_priced_in("negative", Move(None, None)) is None
+    assert impacts.market_of("negative", None) == impacts.Market()
+
+
+def test_the_answer_carries_probability_abstention_and_what_was_expected():
+    [shell, total], _ = found(
+        hypothesis(1, probability="high", abstention="", expected="yes", expected_support=[2]),
+        hypothesis(2, support=[], probability=None, abstention="No exposure known.", expected="unknown", expected_support=[]),
+    )
+    assert shell.fields()["probability"] == "medium"  # expected: one step lower
+    assert (shell.proposed_probability, shell.expected, shell.expected_support) == ("high", "yes", [FORECAST.ref])
+    # No Beleg and no relationship: the rule's reason before the LLM's.
+    assert (total.fields()["probability"], total.fields()["abstention"]) == (None, impacts.TOO_LITTLE_DATA)
+
+
+def test_the_schema_asks_for_probability_or_abstention():
+    item = impacts.schema(CONTEXT)["properties"]["hypotheses"]["items"]
+    assert item["properties"]["probability"] == {"enum": ["high", "medium", "low", None]}
+    assert {"probability", "abstention", "expected", "expected_support"} <= set(item["required"])
+
+
+def test_the_form_needs_a_probability_or_a_reason_to_abstain():
+    with pytest.raises(InvalidHypothesis, match="Bitte eine Wahrscheinlichkeit wählen"):
+        impacts.parse(form(probability=""), [], [], CONTEXT)
+    with pytest.raises(InvalidHypothesis, match="Bitte begründen"):
+        impacts.parse(form(probability="abstain"), ["s7"], [], CONTEXT)
+    abstained = impacts.parse(form(probability="abstain", abstention="Unclear exposure."), ["s7"], [], CONTEXT)
+    assert (abstained.fields["probability"], abstained.fields["abstention"]) == (None, "Unclear exposure.")
+    priced = impacts.parse(form(target=str(SHELL)), ["i10.0"], [], CONTEXT, moves={SHELL: Move(-0.06, -3.1)})
+    assert (priced.fields["probability"], priced.fields["priced_in"], priced.fields["pre_t"]) == ("medium", True, -3.1)
+
+
+def test_a_likelihood_reads_as_the_pages_show_it():
+    lowered = impacts.Likelihood("medium", "high", None, "yes", [], "SHEL", -0.0612, -3.14, True)
+    assert (lowered.label, lowered.lowered_from, lowered.expected_label) == ("mittel", "hoch", "erwartet")
+    assert lowered.pre_label == "Vorlauf SHEL: -6,12 % abnormal, t -3,14"
+    assert impacts.Likelihood(None, "high", impacts.TOO_LITTLE_DATA).label == "Enthaltung"
+    old = impacts.Likelihood()
+    assert (old.label, old.assessed) == ("nicht bewertet", False)

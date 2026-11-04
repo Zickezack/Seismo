@@ -14,7 +14,10 @@ router = APIRouter(prefix="/events/{event_id}/impacts", tags=["impacts"])
 HypothesisIds = Annotated[list[int], Form(alias="hypothesis_id")]
 Refs = Annotated[list[str], Form()]
 Text = Annotated[str, Form()]
-FIELDS = ("target", "way", "direction", "horizon", "mechanism", "counterarguments", "classification", "note")
+FIELDS = (
+    "target", "way", "direction", "horizon", "mechanism", "counterarguments", "classification", "probability", "abstention",
+    "expected", "note",
+)
 
 
 def _section(event_id: int) -> RedirectResponse:
@@ -117,6 +120,8 @@ def _form_page(request, event_id, detail, choices, values, support, against, err
         values = {
             "direction": current.direction, "horizon": current.horizon, "mechanism": current.mechanism,
             "counterarguments": current.counterarguments, "classification": current.classification,
+            "probability": current.likelihood.probability or (impact_service.ABSTAIN if current.likelihood.abstention else ""),
+            "abstention": current.likelihood.abstention or "", "expected": current.likelihood.expected or "unknown",
         }
         support = [each.key for each in current.support]
         against = [each.key for each in current.against]
@@ -124,5 +129,6 @@ def _form_page(request, event_id, detail, choices, values, support, against, err
         "event_id": event_id, "detail": detail, "choices": choices, "values": values, "support": set(support),
         "against": set(against), "error": error, "directions": impact_service.DIRECTION_LABELS,
         "horizons": impact_service.HORIZON_LABELS, "classes": impact_service.CLASS_LABELS,
+        "probabilities": impact_service.PROBABILITY_LABELS, "expectations": impact_service.EXPECTED_LABELS,
     }
     return templates.TemplateResponse(request, "impact.html", context, status_code=200)

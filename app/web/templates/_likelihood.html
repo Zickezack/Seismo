@@ -1,0 +1,12 @@
+{# How likely a Wirkungsannahme's effect is, apart from its direction (Markt- und Wirkungsmodell, story 2): the level
+   or the abstention with its reason, what the rule lowered, whether it was expected, and the Vorlauf - the same on
+   the event's page, the hypothesis's and in its versions. #}
+{% macro likelihood(l, testid) %}
+<span class="uncertainty" data-testid="{{ testid }}">
+  <span>{{ l.label }}</span>
+  {% if l.abstention %}<span class="hint">{{ l.abstention }}</span>{% endif %}
+  {% if l.lowered_from %}<span class="hint">vom LLM: {{ l.lowered_from }}</span>{% endif %}
+  {% if l.expected_label %}<span class="hint">{{ l.expected_label }}{% if l.expected_support %} ({{ l.expected_support|length }} {{ "Beleg" if l.expected_support|length == 1 else "Belege" }}){% endif %}</span>{% endif %}
+  {% if l.pre_label %}<span class="hint">{{ l.pre_label }}{% if l.priced_in %}: möglicherweise eingepreist{% endif %}</span>{% endif %}
+</span>
+{% endmacro %}

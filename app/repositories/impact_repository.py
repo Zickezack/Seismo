@@ -17,6 +17,7 @@ from app.db.models import (
     ImpactAssessment,
     ImpactHypothesis,
     ImpactHypothesisVersion,
+    Instrument,
     Job,
     Source,
     Statement,
@@ -43,10 +44,13 @@ def report_count(event_id_column):
     return select(func.count()).where(EventCandidate.event_id == event_id_column).scalar_subquery()
 
 
-def due(connection: Connection, job_kind: str, target_kinds: Sequence[str], again_after: timedelta, limit: int) -> list[int]:
-    """Events not merged whose reports name an economic effect and an entity it may be about, never assessed or with
-    a report more than when last assessed - and not asked within `again_after` (a job of `job_kind` queued for it,
-    whatever became of it: a run that fails is not asked again at once); the latest reported first."""
+def due(
+    connection: Connection, job_kind: str, target_kinds: Sequence[str], again_after: timedelta, limit: int, prompt_version: int,
+) -> list[int]:
+    """Events not merged whose reports name an economic effect and an entity it may be about, never assessed, with a
+    report more than when last assessed or last assessed with an older prompt - and not asked within `again_after` (a
+    job of `job_kind` queued for it, whatever became of it: a run that fails is not asked again at once); the latest
+    reported first."""
     economic = (
         select(EventCandidate.id)
         .where(EventCandidate.event_id == Event.id, EventCandidate.impacts.op("@?")(_ECONOMIC_IMPACT))
@@ -61,7 +65,7 @@ def due(connection: Connection, job_kind: str, target_kinds: Sequence[str], agai
         .exists()
     )
     latest = (
-        select(ImpactAssessment.reports, ImpactAssessment.created_at)
+        select(ImpactAssessment.reports, ImpactAssessment.prompt_version, ImpactAssessment.created_at)
         .where(ImpactAssessment.event_id == Event.id)
         .order_by(ImpactAssessment.created_at.desc(), ImpactAssessment.id.desc())
         .limit(1)
@@ -77,7 +81,9 @@ def due(connection: Connection, job_kind: str, target_kinds: Sequence[str], agai
         .outerjoin(latest, literal_column("true"))
         .where(
             Event.merged_into_id.is_(None), economic, named, ~asked,
-            or_(latest.c.reports.is_(None), report_count(Event.id) > latest.c.reports),
+            or_(
+                latest.c.reports.is_(None), report_count(Event.id) > latest.c.reports, latest.c.prompt_version < prompt_version
+            ),
         )
         .order_by(Event.last_reported_at.desc(), Event.id)
         .limit(limit)
@@ -179,6 +185,7 @@ def _latest_version():
 
 
 _TARGET = aliased(Entity)
+_PRE = aliased(Instrument)
 
 
 def _hypotheses():
@@ -199,6 +206,16 @@ def _hypotheses():
             ImpactHypothesisVersion.against,
             ImpactHypothesisVersion.origin.label("version_origin"),
             ImpactHypothesisVersion.note,
+            ImpactHypothesisVersion.probability,
+            ImpactHypothesisVersion.proposed_probability,
+            ImpactHypothesisVersion.abstention,
+            ImpactHypothesisVersion.expected,
+            ImpactHypothesisVersion.expected_support,
+            ImpactHypothesisVersion.pre_instrument_id,
+            ImpactHypothesisVersion.pre_abnormal,
+            ImpactHypothesisVersion.pre_t,
+            ImpactHypothesisVersion.priced_in,
+            _PRE.symbol.label("pre_symbol"),
             ImpactHypothesisVersion.created_at.label("changed_at"),
             target.name.label("target_name"), target.kind.label("target_kind"), target.merged_into_id.label("target_merged_into_id"),
             via.name.label("via_name"),
@@ -206,6 +223,7 @@ def _hypotheses():
         .join(ImpactHypothesisVersion, ImpactHypothesisVersion.hypothesis_id == ImpactHypothesis.id)
         .join(target, target.id == ImpactHypothesis.target_entity_id)
         .outerjoin(via, via.id == ImpactHypothesis.via_entity_id)
+        .outerjoin(_PRE, _PRE.id == ImpactHypothesisVersion.pre_instrument_id)
         .where(_latest_version())
     )
 
@@ -239,8 +257,9 @@ def of_entity(connection: Connection, entity_id: int, statuses: Iterable[str], l
 def versions(connection: Connection, hypothesis_id: int) -> Sequence[Row]:
     """Every version of the hypothesis with the assessment it came from, the earliest first."""
     statement = (
-        select(ImpactHypothesisVersion.__table__, ImpactAssessment.model, ImpactAssessment.prompt_version)
+        select(ImpactHypothesisVersion.__table__, ImpactAssessment.model, ImpactAssessment.prompt_version, _PRE.symbol.label("pre_symbol"))
         .outerjoin(ImpactAssessment, ImpactAssessment.id == ImpactHypothesisVersion.assessment_id)
+        .outerjoin(_PRE, _PRE.id == ImpactHypothesisVersion.pre_instrument_id)
         .where(ImpactHypothesisVersion.hypothesis_id == hypothesis_id)
         .order_by(ImpactHypothesisVersion.number)
     )

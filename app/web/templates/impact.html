@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_price.html" import price %}
+{% from "_likelihood.html" import likelihood %}
 {% block title %}Wirkungsannahme{% endblock %}
 
 {% macro belege(items, testid) %}
@@ -25,6 +26,7 @@
         <tr><th>Zustand</th><td data-testid="hypothesis-status">{{ current.status_label }}, Version {{ current.number }} ({{ current.origin_label }}, {{ current.changed_at|local_time }}){% if current.note %}<span class="hint">{{ current.note }}</span>{% endif %}</td></tr>
         <tr><th>Richtung, Horizont</th><td>{{ current.direction_label }}, {{ current.horizon_label }}</td></tr>
         <tr><th>Einstufung</th><td data-testid="hypothesis-class">{{ current.classification_label }}{% if current.capped_from %}<span class="hint">vom LLM als {{ current.capped_from }} vorgeschlagen, nach der Regel herabgestuft</span>{% endif %}</td></tr>
+        <tr><th>Wahrscheinlichkeit</th><td>{{ likelihood(current.likelihood, "hypothesis-probability") }}</td></tr>
         <tr><th>Mechanismus</th><td>{{ current.mechanism }}</td></tr>
         <tr><th>Gegenargumente</th><td>{{ current.counterarguments or "keine genannt" }}</td></tr>
         <tr><th>Wertpapiere</th><td>{% for instrument in current.instruments %}<a href="/instruments/{{ instrument.id }}">{{ instrument.name }}</a> {{ price(instrument.price, "hypothesis-price-" ~ instrument.id) }}{% if not loop.last %}<br>{% endif %}{% else %}<span class="hint">keine gehandelten</span>{% endfor %}</td></tr>
@@ -42,7 +44,7 @@
   <summary><h2>{% if current %}Ändern{% else %}Anlegen{% endif %}</h2></summary>
   <form class="form-grid" method="post" action="/events/{{ event_id }}/impacts{% if current %}/{{ current.id }}{% endif %}" data-testid="hypothesis-form">
     {% if error %}<p class="message message-error field-wide" role="alert" data-testid="form-error">{{ error }}</p>{% endif %}
-    <p class="hint field-wide">Eine Änderung ist eine neue Version, bestätigt; die früheren bleiben. Die Einstufung gilt höchstens so weit, wie die Belege es nach der Regel zulassen: belegt nur, wenn ein Bericht diese Wirkung auf dieses Ziel in dieser Richtung selbst nennt; plausibel über eine Beziehung oder mit einem Beleg; sonst spekulativ.</p>
+    <p class="hint field-wide">Eine Änderung ist eine neue Version, bestätigt; die früheren bleiben. Die Einstufung gilt höchstens so weit, wie die Belege es nach der Regel zulassen: belegt nur, wenn ein Bericht diese Wirkung auf dieses Ziel in dieser Richtung selbst nennt; plausibel über eine Beziehung oder mit einem Beleg; sonst spekulativ. Ebenso die Wahrscheinlichkeit: ohne Beleg und Beziehung eine Enthaltung, spekulativ oder mehr Belege dagegen höchstens niedrig, erwartet oder im Vorlauf schon so bewegt eine Stufe tiefer.</p>
     {% if not current %}
     <div class="field">
       <label for="target">Ziel</label>
@@ -85,6 +87,24 @@
       </select>
     </div>
     <div class="field">
+      <label for="probability">Wahrscheinlichkeit (höchstens)</label>
+      <select id="probability" name="probability" required data-testid="field-probability">
+        <option value="">Bitte wählen</option>
+        {% for key, label in probabilities.items() %}<option value="{{ key }}"{% if values.probability == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        <option value="abstain"{% if values.probability == "abstain" %} selected{% endif %}>Enthaltung</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="abstention">Warum keine (bei Enthaltung)</label>
+      <input id="abstention" name="abstention" type="text" maxlength="300" value="{{ values.abstention or '' }}" data-testid="field-abstention">
+    </div>
+    <div class="field">
+      <label for="expected">Vorher erwartet</label>
+      <select id="expected" name="expected" data-testid="field-expected">
+        {% for key, label in expectations.items() %}<option value="{{ key }}"{% if (values.expected or "unknown") == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
       <label for="note">Begründung (optional)</label>
       <input id="note" name="note" type="text" maxlength="1000" value="{{ values.note or '' }}" data-testid="field-note">
     </div>
@@ -109,7 +129,7 @@
   <summary><h2>Versionen ({{ detail.versions|length }})</h2></summary>
   <div class="table-container">
     <table class="table" data-testid="version-list">
-      <thead><tr><th>Nr.</th><th>Zustand</th><th>Richtung, Horizont</th><th>Einstufung</th><th>Mechanismus und Gegenargumente</th><th>Von</th></tr></thead>
+      <thead><tr><th>Nr.</th><th>Zustand</th><th>Richtung, Horizont</th><th>Einstufung</th><th>Wahrscheinlichkeit</th><th>Mechanismus und Gegenargumente</th><th>Von</th></tr></thead>
       <tbody>
         {% for version in detail.versions|reverse %}
         <tr data-testid="version-{{ version.number }}">
@@ -117,6 +137,7 @@
           <td class="cell-wrap">{{ version.status_label }}{% if version.note %}<span class="hint">{{ version.note }}</span>{% endif %}</td>
           <td class="cell-wrap">{{ version.direction_label }}, {{ version.horizon_label }}</td>
           <td class="cell-wrap">{{ version.classification_label }}<span class="hint">{{ version.support|length }} dafür, {{ version.against|length }} dagegen</span></td>
+          <td class="cell-wrap">{{ likelihood(version.likelihood, "version-probability-" ~ version.number) }}</td>
           <td class="cell-wrap">{{ version.mechanism }}<span class="hint">Dagegen: {{ version.counterarguments or "keine genannt" }}</span></td>
           <td class="cell-wrap">{{ version.origin_label }}<span class="hint">{{ version.created_at|local_time }}</span></td>
         </tr>

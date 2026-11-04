@@ -575,6 +575,37 @@ def of_event(engine: Engine, event_id: int, now: datetime | None = None) -> Even
     return EventReaction(event_day, estimation, period, sector, [each.reaction for each in observations], missing)
 
 
+@dataclass(frozen=True)
+class PreMove:
+    """A Wertpapier's Vorlauf before an event against the market: whether the event was priced in (impact_service)."""
+
+    instrument_id: int
+    symbol: str
+    status: Status
+    abnormal: float | None  # the market model's, summed over the Vorlauf
+    t: float | None
+
+
+def pre_moves(connection: Connection, event_id: int, entity_ids: Iterable[int], now: datetime | None = None) -> dict[int, PreMove]:
+    """Per entity the Vorlauf (-5 to -1) of its Wertpapier with daily prices - a traded one first, then by symbol -
+    against SPY, by the market model; an entity without one is left out."""
+    entity_ids = list(entity_ids)
+    if not entity_ids:
+        return {}
+    rows = event_study_repository.observations_of_entities(connection, event_id, entity_ids)
+    if not rows:
+        return {}
+    observations, _, _, _ = _study(connection, rows, now or datetime.now(UTC))
+    moves: dict[int, PreMove] = {}
+    for row, observation in zip(rows, observations, strict=True):
+        market = next((each for each in observation.reaction.measurements if each.benchmark == Benchmark.MARKET), None)
+        if row.entity_id in moves or market is None:
+            continue
+        before = market.windows[0]
+        moves[row.entity_id] = PreMove(row.instrument_id, row.symbol, before.status, before.abnormal, before.t)
+    return moves
+
+
 def parse_choice(params: Mapping[str, str]) -> tuple[Benchmark, Measure]:
     """The overview's choice from its URL; anything else is the default: market, market model."""
     benchmark = params.get("benchmark", "")

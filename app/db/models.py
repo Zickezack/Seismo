@@ -358,6 +358,22 @@ class ImpactOrigin(StrEnum):
     ANALYST = "analyst"
 
 
+class ImpactProbability(StrEnum):
+    """How likely a Wirkungsannahme's effect is, apart from its direction (impact_service.cap_probability)."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class Expected(StrEnum):
+    """Whether the reports say the event was announced or expected before (impact_service)."""
+
+    YES = "yes"
+    NO = "no"
+    UNKNOWN = "unknown"
+
+
 # The directions and horizons of an effect, as the event schema has them (app/llm/event_schema.py).
 IMPACT_DIRECTIONS = ("positive", "negative", "mixed", "unclear")
 IMPACT_HORIZONS = ("days", "weeks", "months", "years", "unknown")
@@ -1490,10 +1506,28 @@ class ImpactHypothesisVersion(Base):
     assessment_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("impact_assessment.id", ondelete="SET NULL"))
     # The analyst's reason: required to reject.
     note: Mapped[str | None] = mapped_column(Text)
+    # How likely, capped by the rule; None with an abstention, or for a version from before (UI: nicht bewertet).
+    probability: Mapped[str | None] = mapped_column(String(10))
+    proposed_probability: Mapped[str | None] = mapped_column(String(10))
+    # Why no probability is given: the LLM's or the analyst's reason, or the rule's (too little data).
+    abstention: Mapped[str | None] = mapped_column(Text)
+    # Whether the reports say the event was expected, and the Belege for it.
+    expected: Mapped[str | None] = mapped_column(String(10))
+    expected_support: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    # The target's move before the event (event_study_service, the Vorlauf against the market): the Wertpapier, its
+    # summed abnormal return and t value, and whether it moved the assumed way markedly; None where unmeasured.
+    pre_instrument_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("instrument.id", ondelete="SET NULL"))
+    pre_abnormal: Mapped[float | None] = mapped_column(Float)
+    pre_t: Mapped[float | None] = mapped_column(Float)
+    priced_in: Mapped[bool | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint(hypothesis_id, number),
+        CheckConstraint(probability.in_([s.value for s in ImpactProbability]), name="probability"),
+        CheckConstraint(proposed_probability.in_([s.value for s in ImpactProbability]), name="proposed_probability"),
+        CheckConstraint(expected.in_([s.value for s in Expected]), name="expected"),
+        CheckConstraint("probability IS NULL OR abstention IS NULL", name="abstention"),
         CheckConstraint(status.in_([s.value for s in ImpactStatus]), name="status"),
         CheckConstraint(direction.in_(IMPACT_DIRECTIONS), name="direction"),
         CheckConstraint(horizon.in_(IMPACT_HORIZONS), name="horizon"),

@@ -185,3 +185,33 @@ def test_the_entity_page_lists_the_hypotheses_about_it(client, entity_pages):
 
     assert '<a href="/events/7/impacts/1">Freight rates squeeze margins</a>' in html
     assert text_of(html, "impact-class-1") == "plausibel"
+
+
+def test_the_probability_stands_apart_with_what_lowered_it(client, impacts):
+    from app.services.impact_service import Likelihood
+
+    lowered = Likelihood("medium", "high", None, "yes", [FORECAST], "SHEL", -0.0612, -3.14, True)
+    abstained = Likelihood(None, "high", impact_service.TOO_LITTLE_DATA)
+    impacts["event"] = EventImpacts([hypothesis(1, likelihood=lowered), hypothesis(2, "TotalEnergies", likelihood=abstained), hypothesis(3, "Eni")], None)
+
+    html = client.get("/events/7").text
+
+    cell = re.search(r'data-testid="impact-probability-1">(.*?)</td>', html, re.DOTALL).group(1)
+    assert all(part in cell for part in ("mittel", "vom LLM: hoch", "erwartet (1 Beleg)", "Vorlauf SHEL: -6,12 % abnormal, t -3,14: möglicherweise eingepreist"))
+    total = re.search(r'data-testid="impact-probability-2">(.*?)</td>', html, re.DOTALL).group(1)
+    assert "Enthaltung" in total and "Zu wenig Daten" in total
+    assert "nicht bewertet" in re.search(r'data-testid="impact-probability-3">(.*?)</td>', html, re.DOTALL).group(1)
+
+
+def test_the_form_offers_probability_or_abstention_filled_from_the_latest_version(client, impacts):
+    from dataclasses import replace
+
+    from app.services.impact_service import Likelihood
+
+    impacts["detail"] = replace(detail(), hypothesis=hypothesis(1, likelihood=Likelihood(None, None, "Unclear exposure.", "yes")))
+
+    html = client.get("/events/7/impacts/1").text
+
+    assert '<option value="abstain" selected>Enthaltung</option>' in html
+    assert 'value="Unclear exposure."' in tag_of(html, "field-abstention")
+    assert '<option value="yes" selected>erwartet</option>' in html

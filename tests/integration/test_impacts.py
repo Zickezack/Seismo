@@ -2,8 +2,9 @@
 when, what the LLM is shown, the rule's classification, the versions an assessment appends, and the analyst's review,
 change and own hypothesis."""
 import json
+import random
 import threading
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from functools import partial
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import httpx2
 import pytest
 from sqlalchemy import func, insert, select, update
 
-from app.db.models import Entity, EntityAlias, EntityMention, ImpactAssessment, ImpactHypothesisVersion, Job
+from app.db.models import Entity, EntityAlias, TradingDay, EntityMention, ImpactAssessment, ImpactHypothesisVersion, Job
 from app.jobs.handlers import build_handlers
 from app.jobs.runner import run_next_job
 from app.llm.limiter import LlmCallLimiter
@@ -19,6 +20,7 @@ from app.llm.ollama import OllamaClient
 from app.repositories import impact_repository
 from app.services import impact_service, job_service, platform_settings_service, relationship_service
 from app.services.impact_service import InvalidHypothesis
+from tests.integration import test_event_study as study
 from tests.integration.test_duplicates import database  # noqa: F401
 from tests.integration.test_event_context import event_of, reported, statement
 from tests.integration.test_event_filter import named
@@ -48,9 +50,14 @@ def answer(*hypotheses):
 
 @pytest.fixture
 def oil(database):
+    return oil_event(database)
+
+
+def oil_event(database, published_at=None):
     """An event whose report names Shell's margins squeezed - its effect linked to Shell -, with TotalEnergies among its
     actors and a source's forecast; ExxonMobil, which it does not name, competes with Shell."""
-    candidate = reported(database, "oil", REPORT, [statement("source_forecast", "Freight rates stay high into next year.")])
+    when = {"published_at": published_at} if published_at else {}
+    candidate = reported(database, "oil", REPORT, [statement("source_forecast", "Freight rates stay high into next year.")], **when)
     shell = named(database, candidate, "company", "Shell")
     total = named(database, candidate, "company", "TotalEnergies", position=1)
     with database.begin() as connection:
@@ -153,7 +160,7 @@ def test_a_new_assessment_changes_only_what_is_still_proposed(database, oil):
 def test_an_event_is_due_once_then_again_after_a_new_report_at_most_once_a_day(database, oil):
     event_id = oil["event_id"]
     with database.connect() as connection:
-        assert event_id in impact_repository.due(connection, KIND, impact_service.TARGET_KINDS, impact_service.AGAIN_AFTER, 10)
+        assert event_id in impact_repository.due(connection, KIND, impact_service.TARGET_KINDS, impact_service.AGAIN_AFTER, 10, impact_service.PROMPT_VERSION)
     assert impact_service.enqueue_due(database)
     assert impact_service.enqueue_due(database) == []
     run_jobs(database, Ollama(answer(hypothesis(1))))
@@ -177,11 +184,11 @@ def test_an_event_naming_no_company_sector_or_commodity_is_not_assessed(database
     named(database, candidate, "authority", "ECB")
     event_id = event_of(database, candidate)
     with database.connect() as connection:
-        assert event_id not in impact_repository.due(connection, KIND, impact_service.TARGET_KINDS, impact_service.AGAIN_AFTER, 10)
+        assert event_id not in impact_repository.due(connection, KIND, impact_service.TARGET_KINDS, impact_service.AGAIN_AFTER, 10, impact_service.PROMPT_VERSION)
 
 
 def form(**fields):
-    return {"direction": "negative", "horizon": "weeks", "mechanism": "Costs rise.", "counterarguments": "Hedged.", **fields}
+    return {"direction": "negative", "horizon": "weeks", "mechanism": "Costs rise.", "counterarguments": "Hedged.", "probability": "medium", **fields}
 
 
 def test_the_analyst_adds_one_by_hand_capped_by_the_rule_and_never_twice(database, oil):
@@ -259,3 +266,63 @@ def test_a_disputed_relationship_opens_no_way(database, oil):
     with database.connect() as connection:
         shown = impact_service.context(connection, oil["event_id"])
     assert [each.name for each in shown.targets] == ["Shell", "TotalEnergies"] and shown.relationships == []
+
+
+# Probability, abstention and priced in (story 2)
+
+
+def test_probability_is_capped_and_without_belege_an_abstention(database, oil):
+    assess(database, oil["event_id"], answer(
+        hypothesis(1) | {"probability": "high", "abstention": "", "expected": "yes", "expected_support": [2]},
+        hypothesis(2, support=()) | {"probability": "high", "abstention": "", "expected": "no", "expected_support": []},
+    ))
+
+    found = by_target(database, oil["event_id"])
+    shell, total = found["Shell"].likelihood, found["TotalEnergies"].likelihood
+    assert (shell.probability, shell.lowered_from, shell.expected_label) == ("medium", "hoch", "erwartet")
+    assert [each.text for each in shell.expected_support] == ["Freight rates stay high into next year."]
+    assert (total.probability, total.abstention, total.label) == (None, impact_service.TOO_LITTLE_DATA, "Enthaltung")
+
+
+def test_a_marked_vorlauf_the_assumed_way_counts_as_priced_in(database):
+    oil = oil_event(database, study.REPORTED_AT)
+    rng = random.Random(3)
+    market = [rng.gauss(0.0004, 0.01) for _ in study.CALENDAR]
+    shell = [0.0002 + value + rng.gauss(0, 0.004) for value in market]
+    for day in range(study.START - 5, study.START):
+        shell[day] -= 0.015  # the market saw it coming
+    with database.begin() as connection:
+        connection.execute(insert(TradingDay), [
+            {"day": day, "opens_at": datetime.combine(day, time(9, 30), study.NEW_YORK), "closes_at": datetime.combine(day, time(16), study.NEW_YORK)}
+            for day in study.CALENDAR
+        ])
+        study.store(connection, study.instrument(connection, "SPY", "etf"), study.closes(market))
+        shel = study.instrument(connection, "SHEL", entity_id=oil["shell"])
+        study.store(connection, shel, study.closes(shell))
+
+    assess(database, oil["event_id"], answer(hypothesis(1) | {"probability": "high", "abstention": "", "expected": "no", "expected_support": []}))
+
+    shell_view = by_target(database, oil["event_id"])["Shell"].likelihood
+    assert shell_view.pre_symbol == "SHEL" and shell_view.pre_t < -2 and shell_view.pre_abnormal < -0.05
+    assert (shell_view.priced_in, shell_view.probability) == (True, "medium")
+    assert "möglicherweise" not in shell_view.pre_label  # the page adds it
+
+
+def test_an_older_prompt_makes_the_event_due_again_once(database, oil):
+    assess(database, oil["event_id"], answer(hypothesis(1)))
+    forget_asking(database)
+    assert impact_service.enqueue_due(database) == []
+    with database.begin() as connection:
+        connection.execute(update(ImpactAssessment).values(prompt_version=impact_service.PROMPT_VERSION - 1))
+    assert impact_service.enqueue_due(database)
+
+
+def test_a_version_from_before_shows_as_not_assessed_and_a_review_keeps_it_so(database, oil):
+    assess(database, oil["event_id"], answer(hypothesis(1) | {"probability": "high", "abstention": "", "expected": "no", "expected_support": []}))
+    shell = by_target(database, oil["event_id"])["Shell"]
+    with database.begin() as connection:
+        connection.execute(update(ImpactHypothesisVersion).values(probability=None, abstention=None, proposed_probability=None))
+    impact_service.confirm(database, oil["event_id"], [shell.id])
+
+    confirmed = by_target(database, oil["event_id"])["Shell"].likelihood
+    assert (confirmed.label, confirmed.assessed) == ("nicht bewertet", False)

@@ -47,6 +47,22 @@ def observations(connection: Connection, event_ids: Iterable[int] | None = None)
     return connection.execute(statement).all()
 
 
+def observations_of_entities(connection: Connection, event_id: int, entity_ids: Iterable[int]) -> Sequence[Row]:
+    """The event with each Wertpapier with daily prices of these entities, named by its reports or not: the columns of
+    `observations`, plus the entity's id."""
+    statement = (
+        select(
+            Event.id.label("event_id"), Event.event_type, Event.title, Event.first_reported_at,
+            Instrument.id.label("instrument_id"), Instrument.symbol, Instrument.name, Instrument.history_through,
+            Instrument.delisted_on, Instrument.entity_id,
+        )
+        .join(Instrument, Instrument.entity_id.in_(list(entity_ids)))
+        .where(Event.id == event_id, Instrument.source == PriceSource.ALPACA, Instrument.history)
+        .order_by(Instrument.entity_id, Instrument.status, Instrument.symbol, Instrument.id)
+    )
+    return connection.execute(statement).all()
+
+
 def sectors(connection: Connection, event_ids: Iterable[int]) -> Sequence[Row]:
     """The sectors of the starter list the events' reports name: event_id, the sector's key and name, and how many of
     the event's reports name it."""
