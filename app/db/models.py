@@ -328,6 +328,41 @@ class MemberOrigin(StrEnum):
     ANALYST = "analyst"  # added, split off or merged by the analyst
 
 
+class ImpactPath(StrEnum):
+    """How an event reaches the target of a Wirkungsannahme (impact_service)."""
+
+    DIRECT = "direct"  # the event itself affects it
+    INDIRECT = "indirect"  # through a relationship of an entity the event affects
+
+
+class ImpactStatus(StrEnum):
+    """A Wirkungsannahme's state, per version (impact_service)."""
+
+    PROPOSED = "proposed"  # by the LLM, not reviewed yet
+    CONFIRMED = "confirmed"  # by the analyst
+    REJECTED = "rejected"  # by the analyst, with a reason
+    SUPERSEDED = "superseded"  # proposed, then no longer proposed by a later assessment
+
+
+class ImpactClass(StrEnum):
+    """How well a Wirkungsannahme is founded, by the rule of impact_service.classify - never above what its evidence
+    allows."""
+
+    EVIDENCED = "evidenced"  # a report names the effect itself, with its quote
+    PLAUSIBLE = "plausible"  # follows through a relationship, a source's forecast or a named effect
+    SPECULATIVE = "speculative"  # neither
+
+
+class ImpactOrigin(StrEnum):
+    LLM = "llm"
+    ANALYST = "analyst"
+
+
+# The directions and horizons of an effect, as the event schema has them (app/llm/event_schema.py).
+IMPACT_DIRECTIONS = ("positive", "negative", "mixed", "unclear")
+IMPACT_HORIZONS = ("days", "weeks", "months", "years", "unknown")
+
+
 class TdmrepStatus(StrEnum):
     RULES = "rules"  # tdmrep_rules holds the rules of a valid file
     NONE = "none"  # no file, or none that could be read: the host does not use the protocol
@@ -423,6 +458,8 @@ class PlatformSettingsRecord(Base):
     # The Lagen (situation_service): open this long after their latest event; LLM calls per hour for them.
     situation_open_days: Mapped[int] = mapped_column(server_default="30")
     situation_llm_calls_per_hour: Mapped[int] = mapped_column(server_default="20")
+    # The assessment of an event's effects (impact_service): LLM calls per hour for it; 0 holds it.
+    impact_llm_calls_per_hour: Mapped[int] = mapped_column(server_default="20")
     # The event study's periods (event_study_service): an event of its first report's day up to the first is in
     # training, up to the second in validation, after the last one set in test; neither set: not divided.
     study_training_until: Mapped[date | None] = mapped_column(Date)
@@ -452,6 +489,7 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(situation_open_days.between(1, 365), name="situation_open_days"),
         # 0 holds the forming of Lagen.
         CheckConstraint(situation_llm_calls_per_hour >= 0, name="situation_llm_calls_per_hour"),
+        CheckConstraint(impact_llm_calls_per_hour.between(0, 1000), name="impact_llm_calls_per_hour"),
         # Validation only after a training period, and after its end.
         CheckConstraint(
             "study_validation_until IS NULL OR (study_training_until IS NOT NULL AND study_validation_until > study_training_until)",
@@ -1383,3 +1421,82 @@ class SituationCheck(Base):
 
     event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), primary_key=True)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ImpactAssessment(Base):
+    """One LLM run weighing an event's effects (UI term: Wirkungsbewertung; impact_service): what it was asked with,
+    so every proposed version can be traced to it (datamodel.md, rule 2)."""
+
+    __tablename__ = "impact_assessment"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    model: Mapped[str] = mapped_column(String(100))
+    prompt_version: Mapped[int] = mapped_column(SmallInteger)
+    # The event's reports when it was asked: a new one makes it due again.
+    reports: Mapped[int] = mapped_column(Integer)
+    # How many hypotheses the answer held after the checks, and how many the checks left out.
+    hypotheses: Mapped[int] = mapped_column(Integer)
+    dropped: Mapped[int] = mapped_column(Integer, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ImpactHypothesis(Base):
+    """An assumed effect of an event on an entity - a company, a sector, a commodity - directly or through one of its
+    relationships (UI term: Wirkungsannahme). What it says lives in its versions, appended and never changed
+    (datamodel.md, rule 3); its identity is the event, the target and the way."""
+
+    __tablename__ = "impact_hypothesis"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    # Entities are never deleted, only merged: a page follows merged_into_id.
+    target_entity_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("entity.id"), index=True)
+    path: Mapped[str] = mapped_column(String(10))
+    # Of an indirect one: the relationship, and the entity of the event at its other side.
+    via_relationship_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity_relationship.id", ondelete="SET NULL"))
+    via_entity_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("entity.id"))
+    origin: Mapped[str] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(path.in_([s.value for s in ImpactPath]), name="path"),
+        CheckConstraint(origin.in_([s.value for s in ImpactOrigin]), name="origin"),
+        CheckConstraint("(path = 'direct') = (via_entity_id IS NULL)", name="via"),
+    )
+
+
+class ImpactHypothesisVersion(Base):
+    """One version of a Wirkungsannahme: a proposal of an assessment, or the analyst's review or change."""
+
+    __tablename__ = "impact_hypothesis_version"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    hypothesis_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("impact_hypothesis.id", ondelete="CASCADE"))
+    number: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(12))
+    direction: Mapped[str] = mapped_column(String(10))
+    horizon: Mapped[str] = mapped_column(String(10))
+    mechanism: Mapped[str] = mapped_column(Text)
+    # Never empty in the UI: none known is said as such.
+    counterarguments: Mapped[str] = mapped_column(Text)
+    classification: Mapped[str] = mapped_column(String(12))
+    # What the LLM proposed, before the rule capped it; None for the analyst's.
+    proposed_classification: Mapped[str | None] = mapped_column(String(12))
+    # The Belege it cites from the event's reports: [{"statement_id": 1} | {"candidate_id": 2, "impact": 0}].
+    support: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    against: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    origin: Mapped[str] = mapped_column(String(10))
+    assessment_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("impact_assessment.id", ondelete="SET NULL"))
+    # The analyst's reason: required to reject.
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(hypothesis_id, number),
+        CheckConstraint(status.in_([s.value for s in ImpactStatus]), name="status"),
+        CheckConstraint(direction.in_(IMPACT_DIRECTIONS), name="direction"),
+        CheckConstraint(horizon.in_(IMPACT_HORIZONS), name="horizon"),
+        CheckConstraint(classification.in_([s.value for s in ImpactClass]), name="classification"),
+        CheckConstraint(origin.in_([s.value for s in ImpactOrigin]), name="origin"),
+    )

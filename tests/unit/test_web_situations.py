@@ -10,6 +10,7 @@ from app.services import (
     event_correction_service,
     event_service,
     event_study_service,
+    impact_service,
     instrument_service,
     situation_service,
 )
@@ -31,7 +32,7 @@ from app.services.situation_service import (
 from app.services.event_context_service import Comparison, Uncertainty
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
-from tests.unit.test_web_events import NO_REACTION, event
+from tests.unit.test_web_events import NO_IMPACTS, NO_REACTION, event
 
 
 @pytest.fixture
@@ -141,6 +142,7 @@ def test_the_event_page_names_its_lagen_and_offers_the_others(client, monkeypatc
     monkeypatch.setattr(event_context_service, "uncertainty_of", lambda _engine, event_ids: {each: Uncertainty() for each in event_ids})
     monkeypatch.setattr(event_context_service, "earlier_events", lambda _engine, event_id: Comparison())
     monkeypatch.setattr(event_study_service, "of_event", lambda _engine, event_id: NO_REACTION)
+    monkeypatch.setattr(impact_service, "of_event", lambda _engine, event_id: NO_IMPACTS)
     monkeypatch.setattr(instrument_service, "of_entities", lambda _engine, entity_ids: [])
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: [])
     monkeypatch.setattr(situation_service, "of_event", lambda _engine, _id: EventSituations(

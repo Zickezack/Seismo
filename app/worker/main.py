@@ -49,6 +49,7 @@ from app.services import (
     entity_service,
     event_service,
     extraction_service,
+    impact_service,
     ingestion_service,
     history_service,
     normalization_service,
@@ -342,6 +343,7 @@ def _enqueue_due_llm_jobs(engine: Engine, llm: Callable[[], OllamaClient], was_s
         (event_service.enqueue_due, "Assignment"),
         (entity_service.enqueue_due, "Entity recognition"),
         (reprocessing_service.enqueue_due, "Reprocessing"),
+        (impact_service.enqueue_due, "Impact assessment"),
     )
     for enqueue_due, name in sweeps:
         try:

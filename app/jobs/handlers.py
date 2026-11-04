@@ -20,6 +20,7 @@ from app.services import (
     event_service,
     extraction_service,
     history_service,
+    impact_service,
     ingestion_service,
     normalization_service,
     price_service,
@@ -28,6 +29,7 @@ from app.services import (
 )
 from app.services.job_service import (
     ASSIGN_EVENT_JOB_KIND,
+    ASSESS_IMPACTS_JOB_KIND,
     ASSIGN_SITUATION_JOB_KIND,
     BACKFILL_JOB_KIND,
     BACKFILL_MINUTES_JOB_KIND,
@@ -95,6 +97,9 @@ def build_handlers(
         ),
         PROPOSE_SITUATION_JOB_KIND: lambda job: run_llm_job(
             llm, lambda client: situation_service.propose(engine, job.payload, client, limiter)
+        ),
+        ASSESS_IMPACTS_JOB_KIND: lambda job: run_llm_job(
+            llm, lambda client: impact_service.assess(engine, job.payload, client, limiter)
         ),
         RECOGNISE_ENTITIES_JOB_KIND: lambda job: run_llm_job(
             llm, lambda client: entity_service.recognise(engine, job.payload["extraction_id"], client, limiter)

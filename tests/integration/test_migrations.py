@@ -611,3 +611,22 @@ def test_the_settings_row_starts_with_the_events_undivided_and_keeps_its_values_
         assert connection.execute(text("SELECT backups_to_keep FROM platform_settings")).scalar_one() == 5
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_the_wirkungsannahmen_start_empty_and_go_with_a_downgrade(engine):
+    upgrade(engine, "5b22c0023be1")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO platform_settings (id) VALUES (1)"))
+
+    upgrade(engine)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT impact_llm_calls_per_hour FROM platform_settings")).scalar_one() == 20
+        assert connection.execute(text("SELECT count(*) FROM impact_hypothesis")).scalar_one() == 0
+
+    downgrade(engine, "5b22c0023be1")
+
+    with engine.connect() as connection:
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+    assert not tables & {"impact_assessment", "impact_hypothesis", "impact_hypothesis_version"}
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

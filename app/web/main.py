@@ -13,8 +13,8 @@ from app.services.auth_service import session_signing_key
 from app.web.access import SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, NotAuthenticated, redirect_to_login, require_admin
 from app.web.middleware import log_requests
 from app.web.routes import (
-    alerts, articles, auth, dashboard, data, entities, event_study, events, health, instruments, jobs, relationships,
-    situations, sources, watchlists,
+    alerts, articles, auth, dashboard, data, entities, event_study, events, health, impacts, instruments, jobs,
+    relationships, situations, sources, watchlists,
 )
 from app.web.routes import settings as platform_settings
 from app.web.templating import STATIC_DIR
@@ -59,6 +59,7 @@ def create_app(settings: Settings, auth_settings: AuthSettings) -> FastAPI:
     app.include_router(sources.router, dependencies=[Depends(require_admin)])
     app.include_router(articles.router, dependencies=[Depends(require_admin)])
     app.include_router(events.router, dependencies=[Depends(require_admin)])
+    app.include_router(impacts.router, dependencies=[Depends(require_admin)])
     app.include_router(situations.router, dependencies=[Depends(require_admin)])
     app.include_router(entities.router, dependencies=[Depends(require_admin)])
     app.include_router(relationships.router, dependencies=[Depends(require_admin)])

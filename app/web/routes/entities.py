@@ -6,7 +6,14 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app.db.models import ReviewStatus, WatchItemKind
-from app.services import entity_correction_service, entity_service, instrument_service, relationship_service, watchlist_service
+from app.services import (
+    entity_correction_service,
+    entity_service,
+    impact_service,
+    instrument_service,
+    relationship_service,
+    watchlist_service,
+)
 from app.services.relationship_service import InvalidRelationship
 from app.web.templating import flash, name_list, templates
 
@@ -41,6 +48,7 @@ def entity_page(request: Request, entity_id: int) -> Response:
         "roles": relationship_service.role_choices(),
         "choices": entity_service.choices(engine),
         "instruments": instrument_service.of_entities(engine, [entity_id]),
+        "impacts": impact_service.about_entity(engine, entity_id),
         "watch": watchlist_service.watching(engine, WatchItemKind.ENTITY, entity_id),
     }
     return templates.TemplateResponse(request, "entity.html", context)

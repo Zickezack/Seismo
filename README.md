@@ -94,6 +94,10 @@ against SPY and the sector ETF of the sector they name most, from the daily pric
 sector ETFs are fetched first). To keep training, validation and test apart, set "Training bis" and "Validierung bis"
 under Plattform-Einstellungen, Event-Study; empty, the events are not divided.
 
+With Ollama configured, the worker proposes Wirkungsannahmen for events whose reports name an economic effect and a
+company, sector or commodity - at most "LLM-Aufrufe pro Stunde (höchstens)" under Plattform-Einstellungen,
+Wirkungsannahmen (20 by default, 0 holds it). They are reviewed on the event's page.
+
 The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
 show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):
 

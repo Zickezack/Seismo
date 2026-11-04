@@ -702,3 +702,17 @@ a:focus-visible {
   justify-content: flex-end;
   gap: 0.5rem;
 }
+
+/* A Beleg to cite for or against a Wirkungsannahme (templates/impact.html): its two checkboxes, then its text. */
+.beleg-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 1rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.beleg-choice > span {
+  flex: 1 1 20rem;
+}

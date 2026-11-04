@@ -13,6 +13,7 @@ from app.services import (
     event_correction_service,
     event_service,
     event_study_service,
+    impact_service,
     instrument_service,
     relationship_service,
     tracking_service,
@@ -37,7 +38,7 @@ from app.services.event_context_service import Comparison, Uncertainty
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, SETTINGS, tag_of, text_of
 from tests.unit.test_web_entities import entity
-from tests.unit.test_web_events import NO_REACTION, event
+from tests.unit.test_web_events import NO_IMPACTS, NO_REACTION, event
 
 AT = datetime(2026, 10, 30, 20, 29, tzinfo=UTC)
 SOURCES = [SourceStatus("alpaca", "Alpaca", True, ("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY")), SourceStatus("six", "SIX", True, ()),
@@ -243,6 +244,7 @@ def test_an_entity_and_an_event_show_the_latest_prices_of_their_wertpapiere(clie
     monkeypatch.setattr(instrument_service, "of_entities", lambda _engine, entity_ids: [instrument(1, entity_id=7, entity_name="Nestlé")])
     monkeypatch.setattr(entity_service, "choices", lambda _engine: [])
     monkeypatch.setattr(entity_service, "detail", lambda _engine, entity_id: EntityDetail(entity(7), [], [], 0))
+    monkeypatch.setattr(impact_service, "about_entity", lambda _engine, entity_id: [])
     monkeypatch.setattr(entity_correction_service, "similar_entities", lambda _engine, entity_id: [])
     monkeypatch.setattr(relationship_service, "of_entity", lambda _engine, entity_id: [])
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: [EventEntity(7, "company", "Nestlé", 1, False, ["Nestlé"])])
@@ -251,6 +253,7 @@ def test_an_entity_and_an_event_show_the_latest_prices_of_their_wertpapiere(clie
     monkeypatch.setattr(event_context_service, "uncertainty_of", lambda _engine, event_ids: {each: Uncertainty() for each in event_ids})
     monkeypatch.setattr(event_context_service, "earlier_events", lambda _engine, event_id: Comparison())
     monkeypatch.setattr(event_study_service, "of_event", lambda _engine, event_id: NO_REACTION)
+    monkeypatch.setattr(impact_service, "of_event", lambda _engine, event_id: NO_IMPACTS)
 
     for path in ("/entities/7", "/events/8"):
         html = client.get(path).text

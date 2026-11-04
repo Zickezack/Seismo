@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% from "_price.html" import price %}
+{% block title %}Wirkungsannahme{% endblock %}
+
+{% macro belege(items, testid) %}
+{% if items %}
+<ul class="plain-list" data-testid="{{ testid }}">
+  {% for each in items %}<li><span class="status">{{ each.label }}</span> {{ each.text }}{% if each.quote %} <q class="hint">{{ each.quote }}</q>{% endif %}{% if each.article_url %} <span class="hint">· <a href="{{ each.article_url }}" rel="noopener noreferrer">{{ each.source_display_name or "Artikel" }}</a></span>{% endif %}</li>{% endfor %}
+</ul>
+{% else %}<p class="hint" data-testid="{{ testid }}">keine</p>{% endif %}
+{% endmacro %}
+
+{% block content %}
+{% set current = detail.hypothesis if detail else none %}
+<p><a href="/events/{{ event_id }}#impacts">Zurück zum Ereignis</a></p>
+<h1>{% if current %}Wirkungsannahme: {{ current.target_name }}{% else %}Neue Wirkungsannahme{% endif %}</h1>
+
+{% if current %}
+<section class="card stack" data-testid="hypothesis">
+  <div class="table-container">
+    <table class="table table-details">
+      <tbody>
+        <tr><th>Ziel</th><td><a href="/entities/{{ current.target_id }}">{{ current.target_name }}</a> <span class="hint">{{ current.target_kind_label }}</span>{% if current.target_merged_into_id %} <span class="hint">zusammengeführt in <a href="/entities/{{ current.target_merged_into_id }}">Entität {{ current.target_merged_into_id }}</a></span>{% endif %}</td></tr>
+        <tr><th>Weg</th><td data-testid="hypothesis-way">{{ current.way_label }}</td></tr>
+        <tr><th>Zustand</th><td data-testid="hypothesis-status">{{ current.status_label }}, Version {{ current.number }} ({{ current.origin_label }}, {{ current.changed_at|local_time }}){% if current.note %}<span class="hint">{{ current.note }}</span>{% endif %}</td></tr>
+        <tr><th>Richtung, Horizont</th><td>{{ current.direction_label }}, {{ current.horizon_label }}</td></tr>
+        <tr><th>Einstufung</th><td data-testid="hypothesis-class">{{ current.classification_label }}{% if current.capped_from %}<span class="hint">vom LLM als {{ current.capped_from }} vorgeschlagen, nach der Regel herabgestuft</span>{% endif %}</td></tr>
+        <tr><th>Mechanismus</th><td>{{ current.mechanism }}</td></tr>
+        <tr><th>Gegenargumente</th><td>{{ current.counterarguments or "keine genannt" }}</td></tr>
+        <tr><th>Wertpapiere</th><td>{% for instrument in current.instruments %}<a href="/instruments/{{ instrument.id }}">{{ instrument.name }}</a> {{ price(instrument.price, "hypothesis-price-" ~ instrument.id) }}{% if not loop.last %}<br>{% endif %}{% else %}<span class="hint">keine gehandelten</span>{% endfor %}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>Belege dafür</h2>
+  {{ belege(current.support, "hypothesis-support") }}
+  <h2>Belege dagegen</h2>
+  {{ belege(current.against, "hypothesis-against") }}
+</section>
+{% endif %}
+
+<details class="card section" id="form" open data-testid="section-form">
+  <summary><h2>{% if current %}Ändern{% else %}Anlegen{% endif %}</h2></summary>
+  <form class="form-grid" method="post" action="/events/{{ event_id }}/impacts{% if current %}/{{ current.id }}{% endif %}" data-testid="hypothesis-form">
+    {% if error %}<p class="message message-error field-wide" role="alert" data-testid="form-error">{{ error }}</p>{% endif %}
+    <p class="hint field-wide">Eine Änderung ist eine neue Version, bestätigt; die früheren bleiben. Die Einstufung gilt höchstens so weit, wie die Belege es nach der Regel zulassen: belegt nur, wenn ein Bericht diese Wirkung auf dieses Ziel in dieser Richtung selbst nennt; plausibel über eine Beziehung oder mit einem Beleg; sonst spekulativ.</p>
+    {% if not current %}
+    <div class="field">
+      <label for="target">Ziel</label>
+      <select id="target" name="target" required data-testid="field-target">
+        <option value="">Bitte wählen</option>
+        {% for each in choices.targets %}<option value="{{ each.entity_id }}"{% if values.target == each.entity_id|string %} selected{% endif %}>{{ each.name }} ({{ each.kind_label }}{% if not each.named %}, nur über eine Beziehung{% endif %})</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="way">Weg</label>
+      <select id="way" name="way" data-testid="field-way">
+        {% for each in choices.ways %}<option value="{{ each.value }}"{% if values.way == each.value %} selected{% endif %}>{{ each.label }}</option>{% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div class="field">
+      <label for="direction">Richtung</label>
+      <select id="direction" name="direction" required data-testid="field-direction">
+        {% for key, label in directions.items() %}<option value="{{ key }}"{% if values.direction == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="horizon">Horizont</label>
+      <select id="horizon" name="horizon" required data-testid="field-horizon">
+        {% for key, label in horizons.items() %}<option value="{{ key }}"{% if values.horizon == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field field-wide">
+      <label for="mechanism">Mechanismus</label>
+      <textarea id="mechanism" name="mechanism" rows="3" maxlength="600" required data-testid="field-mechanism">{{ values.mechanism or "" }}</textarea>
+    </div>
+    <div class="field field-wide">
+      <label for="counterarguments">Gegenargumente</label>
+      <textarea id="counterarguments" name="counterarguments" rows="3" maxlength="600" required data-testid="field-counterarguments">{{ values.counterarguments or "" }}</textarea>
+    </div>
+    <div class="field">
+      <label for="classification">Einstufung (höchstens)</label>
+      <select id="classification" name="classification" data-testid="field-classification">
+        {% for key, label in classes.items() %}<option value="{{ key }}"{% if values.classification == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="note">Begründung (optional)</label>
+      <input id="note" name="note" type="text" maxlength="1000" value="{{ values.note or '' }}" data-testid="field-note">
+    </div>
+    <fieldset class="field field-wide" data-testid="field-belege">
+      <legend>Belege aus seinen Berichten</legend>
+      {% for each in choices.belege %}
+      <div class="beleg-choice">
+        <label class="checkbox-label"><input type="checkbox" name="support" value="{{ each.key }}"{% if each.key in support %} checked{% endif %} data-testid="support-{{ each.key }}"> dafür</label>
+        <label class="checkbox-label"><input type="checkbox" name="against" value="{{ each.key }}"{% if each.key in against %} checked{% endif %} data-testid="against-{{ each.key }}"> dagegen</label>
+        <span><span class="status">{{ each.label }}</span> {{ each.text }}{% if each.quote %} <q class="hint">{{ each.quote }}</q>{% endif %}</span>
+      </div>
+      {% else %}<p class="hint">Seine Berichte nennen keine Wirkungen und Aussagen.</p>{% endfor %}
+    </fieldset>
+    <div class="form-actions">
+      <button class="button" type="submit" data-testid="save-hypothesis">{% if current %}Als neue Version speichern{% else %}Anlegen{% endif %}</button>
+    </div>
+  </form>
+</details>
+
+{% if detail %}
+<details class="card section" id="versions" open data-testid="section-versions">
+  <summary><h2>Versionen ({{ detail.versions|length }})</h2></summary>
+  <div class="table-container">
+    <table class="table" data-testid="version-list">
+      <thead><tr><th>Nr.</th><th>Zustand</th><th>Richtung, Horizont</th><th>Einstufung</th><th>Mechanismus und Gegenargumente</th><th>Von</th></tr></thead>
+      <tbody>
+        {% for version in detail.versions|reverse %}
+        <tr data-testid="version-{{ version.number }}">
+          <td>{{ version.number }}</td>
+          <td class="cell-wrap">{{ version.status_label }}{% if version.note %}<span class="hint">{{ version.note }}</span>{% endif %}</td>
+          <td class="cell-wrap">{{ version.direction_label }}, {{ version.horizon_label }}</td>
+          <td class="cell-wrap">{{ version.classification_label }}<span class="hint">{{ version.support|length }} dafür, {{ version.against|length }} dagegen</span></td>
+          <td class="cell-wrap">{{ version.mechanism }}<span class="hint">Dagegen: {{ version.counterarguments or "keine genannt" }}</span></td>
+          <td class="cell-wrap">{{ version.origin_label }}<span class="hint">{{ version.created_at|local_time }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+{% endif %}
+{% endblock %}

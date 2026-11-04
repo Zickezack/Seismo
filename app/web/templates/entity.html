@@ -6,7 +6,7 @@
 {% set entity = detail.entity %}
 {% set merged = detail.merged_into is not none %}
 {% set sections = [("aliases", "Namensformen"), ("mentions", "Berichte")]
-  + ([] if merged else [("relationships", "Beziehungen"), ("instruments", "Wertpapiere"), ("similar", "Ähnliche Entitäten")]) %}
+  + ([] if merged else [("relationships", "Beziehungen"), ("instruments", "Wertpapiere"), ("impacts", "Wirkungsannahmen"), ("similar", "Ähnliche Entitäten")]) %}
 <h1 data-testid="entity-title">{{ entity.name }}</h1>
 
 {% if merged %}
@@ -228,6 +228,33 @@
     </div>
     {% else %}
     <p data-testid="no-instruments">Kein Wertpapier verknüpft. Ein Wertpapier kommt über seine ISIN oder die Angabe auf seiner Seite zu einer Entität.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="section" id="impacts" open data-testid="impacts-section">
+  <summary><h2>Wirkungsannahmen ({{ impacts|length }})</h2></summary>
+  <div class="stack">
+    {% if impacts %}
+    <p class="hint">Was Ereignisse für diese Entität bewirken könnten, vorgeschlagen oder bestätigt, die zuletzt geänderten zuerst.</p>
+    <div class="table-container">
+      <table class="table" data-testid="impact-list">
+        <thead><tr><th>Ereignis</th><th>Richtung</th><th>Einstufung</th><th>Mechanismus</th><th>Zustand</th></tr></thead>
+        <tbody>
+          {% for each in impacts %}
+          <tr data-testid="impact-{{ each.id }}">
+            <td class="cell-title"><a href="/events/{{ each.event_id }}/impacts/{{ each.id }}">{{ each.event_title }}</a><span class="hint">{{ each.way_label }}</span></td>
+            <td class="cell-wrap">{{ each.direction_label }}<span class="hint">{{ each.horizon_label }}</span></td>
+            <td class="cell-wrap" data-testid="impact-class-{{ each.id }}">{{ each.classification_label }}</td>
+            <td class="cell-wrap">{{ each.mechanism }}</td>
+            <td class="cell-wrap">{{ each.status_label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-impacts">Keine Wirkungsannahme betrifft diese Entität.</p>
     {% endif %}
   </div>
 </details>

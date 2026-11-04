@@ -267,6 +267,45 @@ def _move(connection: Connection, record_ids: list[int], kind: str, subject_id: 
     relationship_repository.move_records(connection, record_ids, target, swap_sides=swapped)
 
 
+@dataclass(frozen=True)
+class InEffect:
+    """A relationship that holds and is not disputed, with both its entities (impact_service)."""
+
+    id: int
+    kind: str
+    subject_id: int
+    subject_name: str
+    subject_kind: str
+    object_id: int
+    object_name: str
+    object_kind: str
+    review: str
+
+    def other(self, entity_id: int) -> int:
+        return self.object_id if self.subject_id == entity_id else self.subject_id
+
+
+def in_effect_around(connection: Connection, entity_ids: Iterable[int]) -> list[InEffect]:
+    """The relationships in effect now with one of these entities on either side, by id."""
+    rows = relationship_repository.involving(connection, entity_ids)
+    if not rows:
+        return []
+    records: dict[int, list] = {row.id: [] for row in rows}
+    for record in relationship_repository.records(connection, list(records)):
+        records[record.relationship_id].append(record)
+    entities = entity_repository.entities(connection, {each for row in rows for each in (row.subject_id, row.object_id)})
+    found = []
+    for row in sorted(rows, key=lambda row: row.id):
+        steps = replay(records[row.id])
+        # None: no Angabe that counts - nothing known holds.
+        state = steps[-1][1] if steps else None
+        if state is None or not state.in_effect:
+            continue
+        subject, object_ = entities[row.subject_id], entities[row.object_id]
+        found.append(InEffect(row.id, row.kind, subject.id, subject.name, subject.kind, object_.id, object_.name, object_.kind, state.review))
+    return found
+
+
 def _states(connection: Connection, relationship_ids: list[int]) -> dict[int, State]:
     by_relationship: dict[int, list] = {relationship_id: [] for relationship_id in relationship_ids}
     for record in relationship_repository.records(connection, relationship_ids):

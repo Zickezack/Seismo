@@ -8,7 +8,7 @@
 {% set merged = detail.merged_into is not none %}
 {# A split needs a report to leave and one to stay. #}
 {% set splittable = not merged and detail.reports|length > 1 %}
-{% set sections = [("states", "Verlauf"), ("uncertainty", "Unsicherheit"), ("chronicle", "Chronik"), ("reports", "Berichte"), ("sources", "Quellen"), ("entities", "Entitäten"), ("instruments", "Kurse"), ("reaction", "Marktreaktion")]
+{% set sections = [("states", "Verlauf"), ("uncertainty", "Unsicherheit"), ("chronicle", "Chronik"), ("reports", "Berichte"), ("sources", "Quellen"), ("entities", "Entitäten"), ("instruments", "Kurse"), ("impacts", "Wirkungsannahmen"), ("reaction", "Marktreaktion")]
   + ([] if merged else [("similar", "Ähnliche Ereignisse"), ("earlier", "Frühere Ereignisse")])
   + ([("corrections", "Korrekturen")] if detail.corrections else []) %}
 <h1 data-testid="event-title">{{ event.title }}</h1>
@@ -268,6 +268,73 @@
     </div>
     {% else %}
     <p data-testid="no-instruments">Keine Entität seiner Berichte hat ein Wertpapier.</p>
+    {% endif %}
+  </div>
+</details>
+
+{# Wirkungsannahmen (Markt- und Wirkungsmodell, story 1): proposed by the LLM, reviewed by the analyst, each change a
+   version of its own. #}
+{% set status_classes = {"proposed": "status-queued", "confirmed": "status-review-confirmed", "rejected": "status-review-disputed", "superseded": "status-replaced"} %}
+{% macro hypothesis_cells(each) %}
+<td class="cell-title"><a href="/entities/{{ each.target_id }}" data-testid="impact-target-{{ each.id }}">{{ each.target_name }}</a><span class="hint">{{ each.target_kind_label }} · {{ each.way_label }}{% for instrument in each.instruments %} · <a href="/instruments/{{ instrument.id }}">{{ instrument.code }}</a>{% endfor %}</span></td>
+<td class="cell-wrap" data-testid="impact-direction-{{ each.id }}">{{ each.direction_label }}<span class="hint">{{ each.horizon_label }}</span></td>
+<td class="cell-wrap" data-testid="impact-class-{{ each.id }}">{{ each.classification_label }}{% if each.capped_from %}<span class="hint">vom LLM: {{ each.capped_from }}</span>{% endif %}<span class="hint">{{ each.support|length }} dafür, {{ each.against|length }} dagegen</span></td>
+<td class="cell-wrap">{{ each.mechanism }}<span class="hint">Dagegen: {{ each.counterarguments or "keine genannt" }}</span></td>
+<td class="cell-wrap" data-testid="impact-status-{{ each.id }}"><span class="status {{ status_classes[each.status] }}">{{ each.status_label }}</span><span class="hint">Version {{ each.number }}, {{ each.origin_label }} · <a href="/events/{{ event.id }}/impacts/{{ each.id }}" data-testid="impact-open-{{ each.id }}">Ansehen, ändern</a></span></td>
+{% endmacro %}
+<details class="section" id="impacts" open data-testid="impacts-section">
+  <summary><h2>Wirkungsannahmen ({{ impacts.current|length }})</h2></summary>
+  <div class="stack">
+    <p class="hint">Was das Ereignis bei Unternehmen, Branchen und Rohstoffen bewirken könnte, direkt oder über eine Beziehung einer betroffenen Entität. Vorgeschlagen vom LLM aus den Wirkungen und Aussagen seiner Berichte, eingestuft nach einer festen Regel: belegt nur, wenn ein Bericht diese Wirkung auf dieses Ziel in dieser Richtung selbst nennt; plausibel über eine Beziehung oder mit einem Beleg; sonst spekulativ. Richtung und Einstufung sind keine Wahrscheinlichkeit.</p>
+    <p class="hint" data-testid="impacts-assessment">{% if impacts.assessment %}Zuletzt bewertet {{ impacts.assessment.created_at|local_time }} von {{ impacts.assessment.model }} (Prompt {{ impacts.assessment.prompt_version }}): {{ impacts.assessment.hypotheses }} {{ "Annahme" if impacts.assessment.hypotheses == 1 else "Annahmen" }}{% if impacts.assessment.dropped %}, {{ impacts.assessment.dropped }} ausgelassen, weil Ziel, Weg oder Angaben nicht stimmten{% endif %}. Nach neuen Berichten höchstens einmal am Tag neu.{% else %}Noch nicht bewertet. Bewertet werden Ereignisse, deren Berichte eine wirtschaftliche Wirkung und ein Unternehmen, eine Branche oder einen Rohstoff nennen.{% endif %}</p>
+    {% if not merged %}<p><a class="button button-secondary" href="/events/{{ event.id }}/impacts/new" data-testid="new-impact">Neue Wirkungsannahme</a></p>{% endif %}
+    {% if impacts.current %}
+    <form class="stack" method="post" action="/events/{{ event.id }}/impacts/confirm" data-bulk-form data-testid="impact-list">
+      <div class="toolbar">
+        <div class="actions">
+          <input type="text" name="note" maxlength="1000" placeholder="Begründung (zum Verwerfen nötig)" aria-label="Begründung" data-testid="impact-note">
+          <button class="button" type="submit" formaction="/events/{{ event.id }}/impacts/confirm" data-bulk-action data-testid="confirm-impacts" disabled>Bestätigen</button>
+          <button class="button button-secondary" type="submit" formaction="/events/{{ event.id }}/impacts/reject" data-bulk-action data-testid="reject-impacts" disabled>Verwerfen</button>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="cell-select"><input type="checkbox" data-select-all aria-label="Alle Wirkungsannahmen auswählen" data-testid="select-all-impacts"></th>
+              <th>Ziel und Weg</th>
+              <th>Richtung</th>
+              <th>Einstufung</th>
+              <th>Mechanismus und Gegenargumente</th>
+              <th>Zustand</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for each in impacts.current %}
+            <tr data-testid="impact-{{ each.id }}">
+              <td class="cell-select"><input type="checkbox" name="hypothesis_id" value="{{ each.id }}" data-select-row data-name="{{ each.target_name }}" aria-label="{{ each.target_name }} auswählen" data-testid="select-impact-{{ each.id }}"></td>
+              {{ hypothesis_cells(each) }}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% else %}
+    <p data-testid="no-impacts">Keine offenen Wirkungsannahmen.</p>
+    {% endif %}
+    {% if impacts.closed %}
+    <details data-testid="closed-impacts">
+      <summary>Verworfen und überholt ({{ impacts.closed|length }})</summary>
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Ziel und Weg</th><th>Richtung</th><th>Einstufung</th><th>Mechanismus und Gegenargumente</th><th>Zustand</th></tr></thead>
+          <tbody>
+            {% for each in impacts.closed %}<tr data-testid="impact-{{ each.id }}">{{ hypothesis_cells(each) }}</tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
     {% endif %}
   </div>
 </details>

@@ -13,6 +13,7 @@ from app.services import (
     event_correction_service,
     event_service,
     event_study_service,
+    impact_service,
     instrument_service,
     situation_service,
     watchlist_service,
@@ -59,6 +60,7 @@ def event_page(request: Request, event_id: int) -> Response:
         "entities": entities,
         "instruments": instrument_service.of_entities(engine, [entity.id for entity in entities]),
         "reaction": event_study_service.of_event(engine, event_id),
+        "impacts": impact_service.of_event(engine, event_id),
         "watch": watchlist_service.watching(engine, WatchItemKind.EVENT, event_id),
         "situations": situation_service.of_event(engine, event_id),
     }

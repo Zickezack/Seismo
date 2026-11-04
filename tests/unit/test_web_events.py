@@ -12,6 +12,7 @@ from app.services import (
     event_correction_service,
     event_service,
     event_study_service,
+    impact_service,
     instrument_service,
 )
 from app.services.bulk import BulkResult
@@ -52,11 +53,13 @@ from app.services.event_study_service import (
     Status,
     WindowResult,
 )
+from app.services.impact_service import EventImpacts
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
 
 
 NO_REACTION = EventReaction(None, None, Period.UNDIVIDED, None, [], [])
+NO_IMPACTS = EventImpacts([], None)
 CHOICES = FilterChoices(["CH", "US"], [EntityRef(7, "Halbleiter"), EntityRef(8, "Öl und Gas")])
 
 
@@ -92,6 +95,7 @@ def pages(monkeypatch):
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: calls.get("entities", []))
     monkeypatch.setattr(instrument_service, "of_entities", lambda _engine, entity_ids: calls.get("instruments", []))
     monkeypatch.setattr(event_study_service, "of_event", lambda _engine, event_id: calls.get("reaction", NO_REACTION))
+    monkeypatch.setattr(impact_service, "of_event", lambda _engine, event_id: NO_IMPACTS)
     return calls
 
 

@@ -66,6 +66,8 @@ class PlatformSettings:
     # The Lagen (situation_service): open after their latest event; LLM calls per hour, apart from the other budgets.
     situation_open_days: int = 30
     situation_llm_calls_per_hour: int = 20
+    # The Wirkungsannahmen (impact_service): LLM calls per hour, apart from the other budgets.
+    impact_llm_calls_per_hour: int = 20
     # The event study's periods (event_study_service): training up to the first day, validation up to the second, test
     # after the last one set; neither set: not divided.
     study_training_until: date | None = None
@@ -315,6 +317,14 @@ FORM_FIELDS = {
             "situation_llm_calls_per_hour",
             "LLM-Aufrufe pro Stunde (höchstens)",
             "Für Vorschläge neuer Lagen und Zuordnungen im Zweifel, immer nach der laufenden Arbeit. 0 hält die Lagenbildung an.",
+            0,
+            1000,
+        ),
+        NumberField(
+            "impact_llm_calls_per_hour",
+            "LLM-Aufrufe pro Stunde (höchstens)",
+            "Für die Wirkungsannahmen der Ereignisse, immer nach der laufenden Arbeit; ein Ereignis wird nach neuen Berichten "
+            "höchstens einmal am Tag neu bewertet. 0 hält die Bewertung an.",
             0,
             1000,
         ),

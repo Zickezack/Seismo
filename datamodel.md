@@ -45,7 +45,8 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Handelstag | `trading_day` | A trading day of the US exchanges with its opening and closing time: what a gap is, and when a day's prices are known. | none |
 | Erfassungslücke | `price_gap` | A time a tracked Wertpapier's prices were not collected during trading hours, with its cause: recorded, never filled. | none |
 | Marktdaten-Abgleich | `market_data_sync` | How far each sync of the historical market data came (list, corporate actions, period). Not shown as such. | none |
-| Wirkungsannahme | `impact_hypothesis` | An assumed effect of an event on companies, sectors or assets. | none |
+| Wirkungsannahme | `impact_hypothesis` | An assumed effect of an event on a company, sector or commodity - directly or through a relationship - with direction, horizon, mechanism, Belege for and against, counterarguments and a classification (belegt, plausibel, spekulativ), each change a version of its own (`impact_hypothesis_version`). | none |
+| Wirkungsbewertung | `impact_assessment` | One LLM run that proposed an event's Wirkungsannahmen, with model and prompt version. | none |
 | Prognose | `forecast` | A forecast made by the platform, with creation time, data state, model version and target metric. | none |
 | Ergebnis | `forecast_outcome` | The actual outcome of a forecast. | none |
 | Watchlist | `watchlist` | What an analyst follows - Lagen, entities, Wertpapiere, single events, event types and countries -, each as a Watchlist-Eintrag (`watchlist_item`). | none |
@@ -139,6 +140,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | situation_open_days | integer | yes | 30 | A Lage takes new events by itself this long after its latest event's report, 1 to 365; then it is dormant, and an event that fits it is a proposed resumption (`situation_service`). UI: Lagen - Offen nach dem letzten Ereignis (Tage). |
   | situation_llm_calls_per_hour | integer | yes | 20 | Jobs "Lage zuordnen" and "Lage vorschlagen" queued per hour at most, apart from the other budgets; 0 holds the forming of Lagen, scores included; check constraint >= 0. UI: Lagen - LLM-Aufrufe pro Stunde (höchstens). |
   | source_quality_domains | text | no | the catalogue's suggestions | "domain level" per line, level hoch, mittel or niedrig, sorted by domain; a domain covers its subdomains, the most specific one wins. NULL: the suggestions the code starts with (`platform_settings_service.STARTER_SOURCE_QUALITY`: official bodies hoch, established media mittel, press release portals niedrig - the admin's decision of 2026-10-24). UI: Ereignisextraktion - Quellenqualität nach Domain. |
+  | impact_llm_calls_per_hour | integer | yes | 20 | Jobs "Wirkungen bewerten" queued per hour at most, apart from the other budgets; 0 holds the assessment; 0 to 1000 (check constraint). UI: Wirkungsannahmen - LLM-Aufrufe pro Stunde (höchstens). |
   | study_training_until | date | no | | The event study's training period: an event whose first report came out on this UTC day or before (`event_study_service`). Empty: the events are not divided. UI: Event-Study - Training bis. |
   | study_validation_until | date | no | | Its validation period, after training, up to this day; after it, or after training while empty, test. Needs `study_training_until` and lies after it (check constraint `study_periods`). UI: Event-Study - Validierung bis. |
   | updated_at | timestamptz | yes | now() | |
@@ -736,8 +738,6 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 - Rules: an item with an entry is never imported again, even after its record was renamed or deleted. Entry and record are written in one transaction; an item whose name is already taken is neither imported nor logged. Written only by the admin's import action, never by a migration, start or page load.
 - Privacy: none
 
-<!-- Template - copy once per entity:
-
 ### Watchlist (`watchlist`)
 - Store: SQL table `watchlist`
 - Fields:
@@ -883,6 +883,72 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 - Relationships: belongs to one Ereignis.
 - Rules: written by the sweep for an event the scores placed alone, and by the job "Lage zuordnen"; an event in doubt without budget stays due for the next hour. Not shown in the UI.
 - Privacy: none
+
+### Wirkungsbewertung (`impact_assessment`)
+- Store: SQL table `impact_assessment`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | event_id | bigint | yes | | Foreign key to `event`, `ON DELETE CASCADE`. Index. |
+  | model | varchar(100) | yes | | The model as Ollama named it when it answered. UI: von. |
+  | prompt_version | smallint | yes | | `impact_service.PROMPT_VERSION`: a change of prompt, schema or meaning is a new version (2 since 2026-11-04: texts without the lists' numbers). UI: Prompt. |
+  | reports | integer | yes | | The event's reports when it was asked: one more makes it due again. |
+  | hypotheses | integer | yes | | The hypotheses of the answer that held. |
+  | dropped | integer | yes | 0 | Those the checks left out: a target not offered, a way that does not hold, a direct one on an entity the event does not name, no mechanism, one twice. UI: ausgelassen. |
+  | created_at | timestamptz | yes | now() | UI: Zuletzt bewertet. |
+
+- Relationships: belongs to one Ereignis; its proposed versions point to it.
+- Rules: one per run of the job "Wirkungen bewerten" (`impact_service.assess`), stored in its effect; an answer outside the schema stores none and the job is retried.
+- Privacy: none
+
+### Wirkungsannahme (`impact_hypothesis`)
+- Store: SQL table `impact_hypothesis`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | event_id | bigint | yes | | Foreign key to `event`, `ON DELETE CASCADE`. Index. |
+  | target_entity_id | bigint | yes | | The company, subsidiary, sector or commodity it is about. Foreign key to `entity` (entities are merged, never deleted; a page follows `merged_into_id`). Index. UI: Ziel. |
+  | path | varchar(10) | yes | | `direct` (the event affects it itself) or `indirect` (through a relationship of an entity the event affects); check constraint. UI: Weg - direkt, indirekt über ... |
+  | via_relationship_id | bigint | no | | Of an indirect one: the Beziehung. Foreign key to `entity_relationship`, `ON DELETE SET NULL`. |
+  | via_entity_id | bigint | no | | Of an indirect one: the entity of the event at the relationship's other side; set exactly for an indirect one (check constraint `via`). |
+  | origin | varchar(10) | yes | | `llm` or `analyst`: who proposed it first; check constraint. |
+  | created_at | timestamptz | yes | now() | |
+
+- Relationships: belongs to one Ereignis; has Versionen; is about one Entität, maybe through one Beziehung.
+- Rules: its identity is event, target and way - one each, checked under the advisory lock (namespace 7308, the event's id) that every write of an event's hypotheses takes. What it says lives in its versions only (rule 3). The event's page lists the open ones (vorgeschlagen, bestätigt) to confirm or reject, all or nothing, the others apart; each has a page of its own with its Belege, the target's traded Wertpapiere and its versions, changed there; the entity's page lists those about it (story 1 of Markt- und Wirkungsmodell, the admin's decisions of 2026-11-04).
+- Privacy: none
+
+### Version einer Wirkungsannahme (`impact_hypothesis_version`)
+- Store: SQL table `impact_hypothesis_version`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | hypothesis_id | bigint | yes | | Foreign key to `impact_hypothesis`, `ON DELETE CASCADE`. Unique with `number`. |
+  | number | integer | yes | | 1, 2, ... in the order appended. UI: Version. |
+  | status | varchar(12) | yes | | `proposed`, `confirmed`, `rejected`, `superseded`; check constraint. UI: vorgeschlagen, bestätigt, verworfen, überholt. |
+  | direction | varchar(10) | yes | | `positive`, `negative`, `mixed`, `unclear`, as the event schema has them; check constraint. UI: Richtung. |
+  | horizon | varchar(10) | yes | | `days`, `weeks`, `months`, `years`, `unknown`; check constraint. UI: Horizont. |
+  | mechanism | text | yes | | How the event leads to the effect, at most 600 characters (the LLM's in English). UI: Mechanismus. |
+  | counterarguments | text | yes | | What speaks against it or another outcome, at most 600; the analyst must give some. UI: Gegenargumente, "keine genannt". |
+  | classification | varchar(12) | yes | | `evidenced`, `plausible`, `speculative`, never above the rule (`impact_service.classify`); check constraint. UI: Einstufung - belegt, plausibel, spekulativ. |
+  | proposed_classification | varchar(12) | no | | The LLM's, before the rule capped it; empty for the analyst's. UI: "vom LLM: belegt". |
+  | support, against | jsonb | yes | `[]` | The Belege it cites from the event's reports: `{"statement_id": 1}` (an Aussage) or `{"candidate_id": 2, "impact": 0}` (a report's named effect, by its position). UI: Belege dafür, dagegen. |
+  | origin | varchar(10) | yes | | `llm` or `analyst`; check constraint. |
+  | assessment_id | bigint | no | | The Wirkungsbewertung it came from. Foreign key to `impact_assessment`, `ON DELETE SET NULL`. |
+  | note | text | no | | The analyst's reason, at most 1000; required to reject. UI: Begründung. |
+  | created_at | timestamptz | yes | now() | |
+
+- Relationships: belongs to one Wirkungsannahme; maybe to one Wirkungsbewertung.
+- Rules: appended, never changed (rule 3). The rule: belegt only when a cited Beleg is a report's named effect, with its quote, on this very target (the entity the recognition linked it to) in this direction; plausibel through a relationship in effect or with any cited Beleg; spekulativ otherwise; a proposal is only capped, never raised. An assessment appends a version to a hypothesis still proposed or superseded that reads differently, a superseded one to one proposed it no longer proposes, and leaves those the analyst confirmed or rejected; the analyst's confirmation, rejection or change is a version of their own, confirmed (a change keeps target and way).
+- Privacy: none
+
+<!-- Template - copy once per entity:
 
 ### <German UI term> (`technical_name`)
 - Store: SQL table `name` | MongoDB collection `name`
