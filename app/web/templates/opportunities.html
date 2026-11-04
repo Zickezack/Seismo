@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "_opportunities.html" import opportunity_table %}
+{% block title %}Chancen{% endblock %}
+{% block content %}
+<h1>Chancen</h1>
+
+<section class="card stack">
+  {# Plain links: the period works without JavaScript and the URL can be bookmarked. #}
+  <nav class="filters" aria-label="Zeitraum" data-testid="period-filter">
+    {% for key, label in overview.periods.items() %}
+    <a class="filter" href="/opportunities?{{ overview.criteria.query() }}{{ '&' if overview.criteria.query() else '' }}period={{ key }}" data-testid="period-{{ key }}"{% if overview.period == key %} aria-current="true"{% endif %}>Letzte {{ label }}</a>
+    {% endfor %}
+  </nav>
+  <p>Wirkungsannahmen neuer und sich entwickelnder Ereignisse, deren US-Wertpapier sich seit dem Ereignis noch kaum bewegt hat - was der Markt vielleicht noch nicht aufgenommen hat. Keine Handelsempfehlung: Seismo handelt nicht.</p>
+  <p class="hint">Ereignisse mit einer Meldung im Zeitraum, nicht abgeschlossen; Annahmen vorgeschlagen oder bestätigt, mit Wahrscheinlichkeit, positiv oder negativ. Bewegung: die abnormale Rendite des Marktmodells gegen den ETF der Branche, die das Ereignis am häufigsten nennt, sonst SPY, vom Ereignistag bis zum letzten Schluss. Kaum bewegt heisst |t| unter 1, innerhalb der üblichen Schwankung; eine Bewegung gegen die angenommene Richtung zählt ebenfalls. Alle Werte nebeneinander, kein Gesamtwert.</p>
+  <p data-testid="opportunity-counts">{{ overview.total }} {{ "Chance" if overview.total == 1 else "Chancen" }} aus {{ overview.events }} {{ "Ereignis" if overview.events == 1 else "Ereignissen" }}.{% for label, count in overview.left_out %} {{ count }} {{ label }}{% if not loop.last %},{% else %}.{% endif %}{% endfor %}</p>
+</section>
+
+<section class="card stack" data-testid="section-filter">
+  <form class="form-grid" method="get" action="/opportunities" data-testid="opportunity-filter">
+    <input type="hidden" name="period" value="{{ overview.period }}">
+    {% for name, (label, options) in choices.items() %}
+    <div class="field">
+      <label for="filter-{{ name }}">{{ label }}</label>
+      <select id="filter-{{ name }}" name="{{ name }}" data-testid="filter-{{ name }}">
+        <option value="">Alle</option>
+        {% for key, text in options.items() %}<option value="{{ key }}"{% if overview.criteria|attr(name) == key %} selected{% endif %}>{{ text }}</option>{% endfor %}
+      </select>
+    </div>
+    {% endfor %}
+    <div class="field">
+      <label for="filter-sort">Sortieren nach</label>
+      <select id="filter-sort" name="sort" data-testid="filter-sort">
+        {% for key, text in sorts.items() %}<option value="{{ key }}"{% if overview.criteria.sort == key %} selected{% endif %}>{{ text }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="form-actions actions"><button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button></div>
+  </form>
+</section>
+
+<section class="card stack" data-testid="section-opportunities">
+  {% if overview.opportunities %}
+  {% if overview.total > overview.opportunities|length %}<p class="hint">Angezeigt: {{ overview.opportunities|length }} von {{ overview.total }}.</p>{% endif %}
+  {{ opportunity_table(overview.opportunities, "opportunity-list") }}
+  {% else %}
+  <p data-testid="no-opportunities">Keine Chance in den letzten {{ overview.periods[overview.period] }}{% if overview.criteria.query() %}, die zur Auswahl passt{% endif %}.</p>
+  {% endif %}
+</section>
+{% endblock %}

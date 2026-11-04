@@ -106,6 +106,9 @@ or deleted, so every variant tried stays counted. Seismo itself never trades.
 The page Status shows what the platform does, measured: articles per hour, the LLM's time and tokens per article (in CHF
 with "Kosten pro LLM-Stunde" under Plattform-Einstellungen, Verarbeitung), latencies, failed attempts, the queue and
 storage, per source and over time, and names the bottlenecks by fixed rules.
+The page Chancen (and a section of the start page) lists the Wirkungsannahmen of new and developing events whose US
+Wertpapier has not moved much since the event - or moved against the assumption -, measured against its sector or the
+market; no trading advice.
 
 The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
 show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):

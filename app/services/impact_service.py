@@ -1096,6 +1096,14 @@ def of_event(engine: Engine, event_id: int) -> EventImpacts:
     return EventImpacts(_with_instruments(engine, views), assessment)
 
 
+def open_of_events(connection: Connection, event_ids: Iterable[int]) -> list[HypothesisView]:
+    """The proposed and confirmed hypotheses of these events, with their Belege and probability (opportunity_service)."""
+    event_ids = list(event_ids)
+    if not event_ids:
+        return []
+    return _views(connection, impact_repository.of_events(connection, event_ids, (ImpactStatus.PROPOSED, ImpactStatus.CONFIRMED)))
+
+
 def about_entity(engine: Engine, entity_id: int, limit: int = 50) -> list[HypothesisView]:
     """The proposed and confirmed hypotheses about the entity, the latest changed first."""
     with engine.connect() as connection:

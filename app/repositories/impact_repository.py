@@ -241,6 +241,16 @@ def hypotheses_by_id(connection: Connection, hypothesis_ids: Iterable[int]) -> d
     return {row.id: row for row in connection.execute(statement)}
 
 
+def of_events(connection: Connection, event_ids: Iterable[int], statuses: Iterable[str]) -> Sequence[Row]:
+    """The hypotheses of these events in one of these states, in their latest version; by event, then the target's name."""
+    statement = (
+        _hypotheses()
+        .where(ImpactHypothesis.event_id.in_(list(event_ids)), ImpactHypothesisVersion.status.in_(list(statuses)))
+        .order_by(ImpactHypothesis.event_id, _TARGET.name.collate(NAME_COLLATION), ImpactHypothesis.id)
+    )
+    return connection.execute(statement).all()
+
+
 def of_entity(connection: Connection, entity_id: int, statuses: Iterable[str], limit: int) -> Sequence[Row]:
     """The hypotheses about the entity in one of these states, with their event's title, the latest changed first."""
     statement = (

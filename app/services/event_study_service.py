@@ -331,6 +331,8 @@ class Measurement:
     model: Model | None
     windows: list[WindowResult]
     pending: bool = False  # none of the benchmark's daily prices around the event are fetched yet
+    # From the Ereignistag to the last close both prices reach (opportunity_service); None before its first close.
+    since: WindowResult | None = None
 
     @property
     def benchmark_label(self) -> str:
@@ -523,7 +525,8 @@ def _study(connection: Connection, rows: Sequence, now: datetime) -> tuple[list[
             bench = series(benchmarks[symbol].id, benchmarks[symbol])
             model = market_model(stock.returns, bench.returns, range(start + ESTIMATION[0], start + ESTIMATION[1] + 1))
             windows = [measure_window(window, start, stock, bench, model, days, closes_at, now, end_of_period) for window in WINDOWS]
-            measurements.append(Measurement(kind, symbol, bench.name, model, windows, not bench.closes))
+            since = _since(start, stock, bench, model, days, closes_at, now)
+            measurements.append(Measurement(kind, symbol, bench.name, model, windows, not bench.closes, since))
         first, last = max(start + FIRST_OFFSET, 0), min(start + LAST_OFFSET, len(days) - 1)
         involved = [row.instrument_id] + [benchmarks[each.symbol].id for each in measurements]
         symbols = {row.instrument_id: row.symbol} | {benchmarks[each.symbol].id: each.symbol for each in measurements}
@@ -539,6 +542,19 @@ def _study(connection: Connection, rows: Sequence, now: datetime) -> tuple[list[
         observations.append(_Observation(row.event_id, row.event_type, start, period, reaction))
     context = {"days": days, "settings": settings, "sectors": sectors}
     return observations, context, missing_benchmarks, starts
+
+
+def _since(start: int, stock: Series, bench: Series, model: Model | None, days, closes_at, now: datetime) -> WindowResult | None:
+    """The window from the Ereignistag to the last close at `now` that both prices reach; None before its first."""
+    last = bisect_right(closes_at, now) - 1
+    for series in (stock, bench):
+        if series.history_through is None:
+            return None
+        last = min(last, bisect_right(days, series.history_through) - 1)
+    last = min(last, start + LAST_OFFSET)
+    if last < start:
+        return None
+    return measure_window(Window("since", "seit dem Ereignistag", 0, last - start), start, stock, bench, model, days, closes_at, now, None)
 
 
 def _sectors(connection: Connection, event_ids: Sequence[int]) -> dict[int, SectorRef]:
@@ -603,6 +619,44 @@ def pre_moves(connection: Connection, event_id: int, entity_ids: Iterable[int], 
             continue
         before = market.windows[0]
         moves[row.entity_id] = PreMove(row.instrument_id, row.symbol, before.status, before.abnormal, before.t)
+    return moves
+
+
+@dataclass(frozen=True)
+class Move:
+    """A Wertpapier's move since the Ereignistag against the event's sector, else the market (opportunity_service)."""
+
+    instrument_id: int
+    symbol: str
+    benchmark_symbol: str
+    status: Status | None  # None: no close since the Ereignistag yet
+    abnormal: float | None
+    t: float | None
+    days: int  # trading days measured
+    has_model: bool
+
+
+def moves_since(connection: Connection, targets: Mapping[int, Iterable[int]], now: datetime | None = None) -> dict[tuple[int, int], Move]:
+    """Per event and entity the move since the Ereignistag of the entity's Wertpapier with daily prices - a traded one
+    first -, by the market model against the ETF of the sector the event names most, else SPY; an entity without one
+    is left out. `targets`: the entities per event."""
+    rows = [row for event_id, entity_ids in targets.items() if entity_ids
+            for row in event_study_repository.observations_of_entities(connection, event_id, list(entity_ids))]
+    if not rows:
+        return {}
+    observations, _, _, _ = _study(connection, rows, now or datetime.now(UTC))
+    moves: dict[tuple[int, int], Move] = {}
+    for row, observation in zip(rows, observations, strict=True):
+        key = (row.event_id, row.entity_id)
+        measurements = {each.benchmark: each for each in observation.reaction.measurements}
+        chosen = measurements.get(Benchmark.SECTOR) or measurements.get(Benchmark.MARKET)
+        if key in moves or row.delisted_on is not None or chosen is None:
+            continue
+        since = chosen.since
+        moves[key] = Move(
+            row.instrument_id, row.symbol, chosen.symbol, since.status if since else None, since.abnormal if since else None,
+            since.t if since else None, since.window.days if since else 0, chosen.model is not None,
+        )
     return moves
 
 

@@ -1,0 +1,25 @@
+{# Chancen as a table - the page Chancen and the start page -: per Wirkungsannahme its event, target, what it assumes,
+   how likely, its first Belege, and how its Wertpapier moved since the Ereignistag, side by side, never one score. #}
+{% from "_likelihood.html" import likelihood %}
+{% macro opportunity_table(items, testid) %}
+<div class="table-container">
+  <table class="table" data-testid="{{ testid }}">
+    <thead>
+      <tr><th>Ereignis</th><th>Ziel</th><th>Annahme</th><th>Wahrscheinlichkeit</th><th>Belege</th><th>Bewegung seit dem Ereignis</th></tr>
+    </thead>
+    <tbody>
+      {% for each in items %}
+      {% set h = each.hypothesis %}
+      <tr data-testid="opportunity-{{ h.id }}">
+        <td class="cell-title"><a href="/events/{{ each.event_id }}">{{ each.event_title }}</a><span class="hint">{{ "Neu" if each.new else "In Entwicklung" }} · {{ each.state_label }} · zuletzt {{ each.last_reported_at|local_time }}</span></td>
+        <td class="cell-wrap"><a href="/events/{{ each.event_id }}/impacts/{{ h.id }}">{{ h.target_name }}</a><span class="hint">{{ h.way_label }}</span></td>
+        <td class="cell-wrap" data-testid="opportunity-says-{{ h.id }}">{{ h.direction_label }} · {{ h.horizon_label }} · {{ h.classification_label }}<span class="hint">{{ h.mechanism }}</span>{% if h.counterarguments %}<span class="hint">Dagegen: {{ h.counterarguments }}</span>{% endif %}</td>
+        <td class="cell-wrap">{{ likelihood(h.likelihood, "opportunity-likelihood-" ~ h.id) }}</td>
+        <td class="cell-wrap">{% for beleg in h.support[:2] %}<span class="hint">{{ beleg.label }}: {{ beleg.text }}{% if beleg.source_display_name %} ({{ beleg.source_display_name }}){% endif %}</span>{% else %}<span class="hint">keine</span>{% endfor %}{% if h.support|length > 2 or h.against %}<span class="hint">{{ h.support|length }} dafür, {{ h.against|length }} dagegen</span>{% endif %}</td>
+        <td class="cell-wrap" data-testid="opportunity-move-{{ h.id }}"><a href="/instruments/{{ each.move.instrument_id }}">{{ each.move.symbol }}</a> gegen {{ each.move.benchmark_symbol }}: {{ each.kind_label }}{% if each.move_label %}<span class="hint">{{ each.move_label }}</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}

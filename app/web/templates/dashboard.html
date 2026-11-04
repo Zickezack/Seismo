@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_event_filter.html" import event_filter %}
+{% from "_opportunities.html" import opportunity_table %}
 {% block title %}Dashboard{% endblock %}
 {% macro event_rows(items, kind) %}
 <div class="table-container">
@@ -64,6 +65,17 @@
   {% if dashboard.developing_total > dashboard.developing|length %}<p class="hint" data-testid="developing-more">Angezeigt: {{ dashboard.developing|length }} von {{ dashboard.developing_total }}; alle unter <a href="/events?{{ filter.query(period=dashboard.period, development='developing') }}" data-testid="developing-all">Ereignisse</a>.</p>{% endif %}
   {% else %}
   <p data-testid="no-developing">Kein früher berichtetes Ereignis{% if filter.active %}, das zum Filter passt,{% endif %} kam in den letzten {{ dashboard.period_label }} wieder vor.</p>
+  {% endif %}
+</section>
+
+<section class="card stack" id="chances" data-testid="section-chances">
+  <h2>Chancen ({{ chances_total }})</h2>
+  {% if chances %}
+  <p class="hint">Wirkungsannahmen der Ereignisse im Zeitraum, deren Wertpapier sich seit dem Ereignis noch kaum oder gegenläufig bewegt hat; das neueste Ereignis zuerst, unabhängig vom Filter.</p>
+  {{ opportunity_table(chances, "chance-list") }}
+  {% if chances_total > chances|length %}<p class="hint" data-testid="chances-more">Angezeigt: {{ chances|length }} von {{ chances_total }}; alle unter <a href="/opportunities" data-testid="chances-all">Chancen</a>.</p>{% endif %}
+  {% else %}
+  <p data-testid="no-chances">Keine Chance in den letzten {{ dashboard.period_label }}; mehr Zeitraum unter <a href="/opportunities">Chancen</a>.</p>
   {% endif %}
 </section>
 {% endblock %}
