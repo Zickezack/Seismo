@@ -63,6 +63,8 @@ ASSIGN_SITUATION_JOB_KIND = "assign_situation"
 PROPOSE_SITUATION_JOB_KIND = "propose_situation"
 # The Wirkungsannahmen (impact_service): an event's effects weighed by the LLM.
 ASSESS_IMPACTS_JOB_KIND = "assess_impacts"
+# A backtest of the Wirkungsannahmen (backtest_service), behind live work: an analysis never slows the live operation.
+RUN_BACKTEST_JOB_KIND = "run_backtest"
 # The kinds that need Ollama: the worker claims them only while it serves the model (app/worker/main.py).
 LLM_JOB_KINDS = frozenset({
     EXTRACT_EVENTS_JOB_KIND, ASSIGN_EVENT_JOB_KIND, RECOGNISE_ENTITIES_JOB_KIND, REEXTRACT_EVENTS_JOB_KIND,
@@ -90,11 +92,12 @@ KIND_LABELS = {
     ASSIGN_SITUATION_JOB_KIND: "Lage zuordnen",
     PROPOSE_SITUATION_JOB_KIND: "Lage vorschlagen",
     ASSESS_IMPACTS_JOB_KIND: "Wirkungen bewerten",
+    RUN_BACKTEST_JOB_KIND: "Backtest rechnen",
 }
 # Kinds that are behind live work by their nature: their label needs no "(Backfill)".
 _OWN_PRIORITY_KINDS = frozenset({
     BACKFILL_JOB_KIND, REEXTRACT_EVENTS_JOB_KIND, RERECOGNISE_ENTITIES_JOB_KIND, SYNC_MARKET_JOB_KIND, FETCH_ACTIONS_JOB_KIND,
-    FETCH_BARS_JOB_KIND, ASSIGN_SITUATION_JOB_KIND, PROPOSE_SITUATION_JOB_KIND, ASSESS_IMPACTS_JOB_KIND,
+    FETCH_BARS_JOB_KIND, ASSIGN_SITUATION_JOB_KIND, PROPOSE_SITUATION_JOB_KIND, ASSESS_IMPACTS_JOB_KIND, RUN_BACKTEST_JOB_KIND,
 })
 
 

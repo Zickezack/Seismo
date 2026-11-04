@@ -72,6 +72,9 @@ class PlatformSettings:
     # after the last one set; neither set: not divided.
     study_training_until: date | None = None
     study_validation_until: date | None = None
+    # A backtest's default costs (backtest_service): per side and leg in basis points, the short leg's borrow fee per year.
+    backtest_cost_bps: int = 10
+    backtest_borrow_bps: int = 50
 
     @property
     def blocked_domains(self) -> list[str]:
@@ -337,6 +340,21 @@ FORM_FIELDS = {
             "study_validation_until",
             "Validierung bis",
             "Danach bis und mit diesem Tag Validierung, später Test. Leer: nach dem Training gleich Test.",
+        ),
+        NumberField(
+            "backtest_cost_bps",
+            "Handelskosten je Seite und Bein (Basispunkte)",
+            "Kommission und halber Spread, beim Kauf und beim Verkauf, für den Titel und für den Benchmark. Vorgabe für neue "
+            "Backtest-Läufe; jeder Lauf speichert seine eigenen.",
+            0,
+            500,
+        ),
+        NumberField(
+            "backtest_borrow_bps",
+            "Leihgebühr Short pro Jahr (Basispunkte)",
+            "Für das Short-Bein eines Trades, anteilig über seine Handelstage. Vorgabe für neue Backtest-Läufe.",
+            0,
+            5000,
         ),
         NumberField(
             "succeeded_jobs_retention_days", "Erledigte Jobs aufbewahren (Tage)", "Danach löscht der Worker sie.", 1, 3650

@@ -480,6 +480,9 @@ class PlatformSettingsRecord(Base):
     # training, up to the second in validation, after the last one set in test; neither set: not divided.
     study_training_until: Mapped[date | None] = mapped_column(Date)
     study_validation_until: Mapped[date | None] = mapped_column(Date)
+    # A backtest's default costs (backtest_service): per side and leg in basis points, the short leg's borrow fee per year.
+    backtest_cost_bps: Mapped[int] = mapped_column(server_default="10")
+    backtest_borrow_bps: Mapped[int] = mapped_column(server_default="50")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -506,6 +509,8 @@ class PlatformSettingsRecord(Base):
         # 0 holds the forming of Lagen.
         CheckConstraint(situation_llm_calls_per_hour >= 0, name="situation_llm_calls_per_hour"),
         CheckConstraint(impact_llm_calls_per_hour.between(0, 1000), name="impact_llm_calls_per_hour"),
+        CheckConstraint(backtest_cost_bps.between(0, 500), name="backtest_cost_bps"),
+        CheckConstraint(backtest_borrow_bps.between(0, 5000), name="backtest_borrow_bps"),
         # Validation only after a training period, and after its end.
         CheckConstraint(
             "study_validation_until IS NULL OR (study_training_until IS NOT NULL AND study_validation_until > study_training_until)",
@@ -1616,4 +1621,117 @@ class ForecastOutcome(Base):
     __table_args__ = (
         CheckConstraint(status.in_([s.value for s in OutcomeStatus]), name="status"),
         CheckConstraint("(status = 'measured') = (excess_return IS NOT NULL)", name="measured"),
+    )
+
+
+class BacktestMode(StrEnum):
+    """When a backtest's signal counts as known (backtest_service)."""
+
+    CREATED = "created"  # when its version was created: no data leakage
+    EVENT_DAY = "event_day"  # from the event's first report: with hindsight, always flagged as data leakage
+
+
+class TradeKind(StrEnum):
+    SIGNAL = "signal"  # from a version of a Wirkungsannahme
+    PAPER = "paper"  # from a logged Prognose: paper trading
+
+
+class TradeStatus(StrEnum):
+    MEASURED = "measured"
+    GAP = "gap"  # a price missing: not measurable, never filled
+    ENDED = "ended"  # the Wertpapier no longer traded
+    OPEN = "open"  # its last day not closed, or its prices not in, at the data state
+
+
+class BacktestRun(Base):
+    """A backtest of the Wirkungsannahmen (UI term: Backtest-Lauf): its parameters, its data state and its trades,
+    stored once and never changed - a trigger refuses every UPDATE, DELETE and TRUNCATE, so no variant tried can be
+    hidden (requirements.md, Prognoseprotokoll und Evaluation, criteria 2 and 4)."""
+
+    __tablename__ = "backtest_run"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    # A run again with the same parameters and data state: whether it came out the same.
+    reproduces_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("backtest_run.id"), index=True)
+    # The data state: only prices and corporate actions received by then, only versions created by then.
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    code_version: Mapped[int] = mapped_column(SmallInteger)
+    # A fingerprint of everything but the data state: runs of one variant test the same thing.
+    variant: Mapped[str] = mapped_column(String(64), index=True)
+    mode: Mapped[str] = mapped_column(String(10))
+    horizon: Mapped[int] = mapped_column(SmallInteger)
+    min_probability: Mapped[str] = mapped_column(String(10))
+    # The LLM's model and prompt version whose signals count; empty: every signal, the analyst's too.
+    model: Mapped[str | None] = mapped_column(String(100))
+    prompt_version: Mapped[int | None] = mapped_column(SmallInteger)
+    # Costs: per side and leg in basis points, and the short leg's borrow fee per year.
+    cost_bps: Mapped[int] = mapped_column(Integer)
+    borrow_bps: Mapped[int] = mapped_column(Integer)
+    # The periods when it ran (Plattform-Einstellungen).
+    training_until: Mapped[date | None] = mapped_column(Date)
+    validation_until: Mapped[date | None] = mapped_column(Date)
+    # SHA-256 over its trades: a run again compares it.
+    trades_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(mode.in_([s.value for s in BacktestMode]), name="mode"),
+        CheckConstraint(horizon.in_(FORECAST_HORIZONS), name="horizon"),
+        CheckConstraint(min_probability.in_([s.value for s in ImpactProbability]), name="min_probability"),
+        CheckConstraint(cost_bps.between(0, 500), name="cost_bps"),
+        CheckConstraint(borrow_bps.between(0, 5000), name="borrow_bps"),
+        CheckConstraint("(model IS NULL) = (prompt_version IS NULL)", name="model"),
+        CheckConstraint(
+            "validation_until IS NULL OR (training_until IS NOT NULL AND validation_until > training_until)", name="periods"
+        ),
+    )
+
+
+class BacktestTrade(Base):
+    """A trade of a Backtest-Lauf (UI term: Trade): a signal or a logged Prognose, long or short its Wertpapier against
+    the benchmark from the next open to the close of its last day; the returns gross, the costs the run's."""
+
+    __tablename__ = "backtest_trade"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("backtest_run.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(10))
+    hypothesis_version_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("impact_hypothesis_version.id"))
+    forecast_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("forecast.id"))
+    hypothesis_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("impact_hypothesis.id"))
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id"))
+    instrument_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instrument.id"))
+    benchmark_instrument_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instrument.id"))
+    direction: Mapped[str] = mapped_column(String(10))
+    probability: Mapped[str] = mapped_column(String(10))
+    signal_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # From the open of the first trading day opening after the signal to the close of the horizon's last; None beyond
+    # the calendar.
+    entry_day: Mapped[date | None] = mapped_column(Date)
+    exit_day: Mapped[date | None] = mapped_column(Date)
+    # The entry day's period; cut: the exit lies past the period's end, so it does not count there.
+    period: Mapped[str] = mapped_column(String(12))
+    cut: Mapped[bool] = mapped_column()
+    # The market phase at the entry, from SPY's closes before it: up or down (200-day mean), calm or volatile.
+    trend: Mapped[str | None] = mapped_column(String(5))
+    volatility: Mapped[str | None] = mapped_column(String(10))
+    status: Mapped[str] = mapped_column(String(10))
+    asset_return: Mapped[float | None] = mapped_column(Float)
+    benchmark_return: Mapped[float | None] = mapped_column(Float)
+    # The baselines' choices: the excess return of the 20 trading days before the signal, and a direction by chance.
+    momentum: Mapped[float | None] = mapped_column(Float)
+    random_direction: Mapped[str] = mapped_column(String(10))
+    # The trading days without a price, by symbol: [{"symbol": "XCO", "day": "2026-11-05"}].
+    missing: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+
+    __table_args__ = (
+        CheckConstraint(kind.in_([s.value for s in TradeKind]), name="kind"),
+        CheckConstraint(direction.in_(("positive", "negative")), name="direction"),
+        CheckConstraint(random_direction.in_(("positive", "negative")), name="random_direction"),
+        CheckConstraint(probability.in_([s.value for s in ImpactProbability]), name="probability"),
+        CheckConstraint(status.in_([s.value for s in TradeStatus]), name="status"),
+        CheckConstraint(trend.in_(("up", "down")), name="trend"),
+        CheckConstraint(volatility.in_(("calm", "volatile")), name="volatility"),
+        CheckConstraint("(status = 'measured') = (asset_return IS NOT NULL AND benchmark_return IS NOT NULL)", name="measured"),
+        CheckConstraint("kind = 'signal' OR forecast_id IS NOT NULL", name="paper"),
     )

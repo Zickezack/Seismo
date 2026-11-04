@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Backtests{% endblock %}
+{% block content %}
+<h1>Backtests</h1>
+
+<section class="card stack">
+  <p>Was der Handel nach den Wirkungsannahmen eingebracht hätte, nach Kosten und gegen einfache Baselines - beurteilt nur in der Test-Periode, nie im Sample allein. Seismo handelt nicht; vor jedem echten Handel steht das Paper-Trading aus den protokollierten Prognosen.</p>
+  <p class="hint">Ein Signal ist eine Version einer Wirkungsannahme mit Richtung und Wahrscheinlichkeit für das US-Wertpapier ihres Ziels. Gehandelt ab der Eröffnung des ersten Handelstags nach dem Signal bis zum Schluss nach dem Horizont, long oder short gegen den Branchen-ETF, sonst SPY; Kosten auf beiden Beinen bei Kauf und Verkauf, dazu die Leihgebühr des Short-Beins. Ein Lauf liest nur Kurse, die bis zu seinem Datenstand eingegangen waren, und wird nie geändert oder gelöscht - jede ausprobierte Variante bleibt sichtbar.</p>
+</section>
+
+<details class="card section" id="new" open data-testid="section-new">
+  <summary><h2>Neuer Lauf</h2></summary>
+  <form class="form-grid" method="post" action="/backtests" data-testid="backtest-form">
+    {% if error %}<p class="message message-error field-wide" role="alert" data-testid="backtest-error">{{ error }}</p>{% endif %}
+    <div class="field">
+      <label for="backtest-mode">Signale ab</label>
+      <select id="backtest-mode" name="mode" data-testid="backtest-mode">
+        {% for key, label in modes.items() %}<option value="{{ key }}"{% if form.get("mode", "created") == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="backtest-horizon">Horizont</label>
+      <select id="backtest-horizon" name="horizon" data-testid="backtest-horizon">
+        {% for each in horizons %}<option value="{{ each }}"{% if form.get("horizon", "20") == each|string %} selected{% endif %}>{{ each }} Handelstage</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="backtest-probability">Wahrscheinlichkeit</label>
+      <select id="backtest-probability" name="min_probability" data-testid="backtest-probability">
+        {% for key, label in min_probabilities.items() %}<option value="{{ key }}"{% if form.get("min_probability", "low") == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="backtest-model">Modell</label>
+      <select id="backtest-model" name="model" data-testid="backtest-model">
+        {% for key, label in overview.choices.models %}<option value="{{ key }}"{% if form.get("model", "") == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="backtest-cost">Handelskosten je Seite und Bein (Basispunkte)</label>
+      <input id="backtest-cost" name="backtest_cost_bps" type="number" inputmode="numeric" min="0" max="500" required value="{{ form.get('backtest_cost_bps', overview.choices.cost_bps) }}" data-testid="backtest-cost">
+    </div>
+    <div class="field">
+      <label for="backtest-borrow">Leihgebühr Short pro Jahr (Basispunkte)</label>
+      <input id="backtest-borrow" name="backtest_borrow_bps" type="number" inputmode="numeric" min="0" max="5000" required value="{{ form.get('backtest_borrow_bps', overview.choices.borrow_bps) }}" data-testid="backtest-borrow">
+    </div>
+    <p class="hint field-wide">«Ab Ereignistag» nimmt die erste Annahme jeder Hypothese ab der ersten Meldung - nachträglich bewertet, darum immer als Datenleckage markiert und nie beurteilt. Die Perioden gelten wie gerade eingestellt (<a href="/settings/platform#eventstudy">Event-Study</a>), die Vorgaben der Kosten unter <a href="/settings/platform#backtests">Backtests</a>.</p>
+    <div class="form-actions actions">
+      <button class="button" type="submit" data-testid="backtest-start">Backtest starten</button>
+    </div>
+  </form>
+</details>
+
+<details class="card section" id="runs" open data-testid="section-runs">
+  <summary><h2>Läufe</h2></summary>
+  <div class="stack">
+    {% if overview.pending %}
+    <ul class="stack" data-testid="pending-runs">
+      {% for each in overview.pending %}
+      <li data-testid="pending-{{ each.job_id }}">{{ each.status_label|capitalize }}: {{ each.parameters.summary }}{% if each.reproduces_id %} · Wiederholung von Lauf {{ each.reproduces_id }}{% endif %}<span class="hint"> · Datenstand {{ each.as_of|local_time }}</span></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if overview.runs %}
+    <p class="hint">Die neuesten {{ overview.runs|length }}, der zuletzt gerechnete zuerst. Kein Lauf lässt sich löschen.</p>
+    <div class="table-container">
+      <table class="table" data-testid="run-list">
+        <thead><tr><th>Lauf</th><th>Parameter</th><th>Kosten</th><th>Signale</th><th>Datenstand</th></tr></thead>
+        <tbody>
+          {% for each in overview.runs %}
+          <tr data-testid="run-{{ each.id }}">
+            <td><a href="/backtests/{{ each.id }}">Lauf {{ each.id }}</a>{% if each.reproduces_id %}<span class="hint">Wiederholung von {{ each.reproduces_id }}</span>{% endif %}</td>
+            <td class="cell-wrap">{{ each.parameters.summary }}</td>
+            <td class="cell-wrap">{{ each.parameters.cost_label }}</td>
+            <td>{{ each.measured }} von {{ each.signals }} gemessen</td>
+            <td>{{ each.as_of|local_time }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% elif not overview.pending %}
+    <p data-testid="no-runs">Noch keine Läufe.</p>
+    {% endif %}
+  </div>
+</details>
+{% endblock %}

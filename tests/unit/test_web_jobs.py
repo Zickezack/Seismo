@@ -198,6 +198,7 @@ def test_settings_page_shows_every_setting_in_its_section(client, services):
         ("lagen", ["situation_open_days", "situation_llm_calls_per_hour"]),
         ("wirkungen", ["impact_llm_calls_per_hour"]),
         ("eventstudy", ["study_training_until", "study_validation_until"]),
+        ("backtests", ["backtest_cost_bps", "backtest_borrow_bps"]),
         ("aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
         ("backups", ["backup_interval_hours", "backups_to_keep"]),
     ]
@@ -208,7 +209,7 @@ def test_settings_page_links_every_section_from_its_quick_navigation(client, ser
 
     links = re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html)
     assert links == re.findall(r'<details class="card section" id="(\w+)"', html)
-    assert links == ["verarbeitung", "abruf", "extraktion", "kurse", "lagen", "wirkungen", "eventstudy", "aufbewahrung", "backups", "starterdaten"]
+    assert links == ["verarbeitung", "abruf", "extraktion", "kurse", "lagen", "wirkungen", "eventstudy", "backtests", "aufbewahrung", "backups", "starterdaten"]
 
 
 def test_settings_save_in_place_answers_json(client, services):

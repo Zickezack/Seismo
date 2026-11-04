@@ -49,6 +49,8 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Wirkungsbewertung | `impact_assessment` | One LLM run that proposed an event's Wirkungsannahmen, with model and prompt version. | none |
 | Prognose | `forecast` | A forecast made by the platform from a version of a Wirkungsannahme, for one Wertpapier and horizon, with creation time, data state, model version and target metric; never changed - the database refuses it. | none |
 | Ergebnis | `forecast_outcome` | The actual outcome of a forecast, stored apart once its horizon closed: measured, or not measurable for a gap. | none |
+| Backtest-Lauf | `backtest_run` | A backtest of the Wirkungsannahmen' signals with its parameters, periods and data state, never changed - the database refuses it, so no variant tried can be hidden. | none |
+| Trade | `backtest_trade` | A trade of a Backtest-Lauf: a signal or a logged Prognose (paper trading), long or short its Wertpapier against the benchmark from the next open to the close of the horizon's last day. | none |
 | Watchlist | `watchlist` | What an analyst follows - Lagen, entities, Wertpapiere, single events, event types and countries -, each as a Watchlist-Eintrag (`watchlist_item`). | none |
 | Alert-Regel | `alert_rule` | A rule that notifies about the events of its watchlist and filter: new ones, changes of state, new reports - throttled. | none |
 | Alert | `alert` | A notification of an alert rule in the app: one event's hits, or a Sammel-Alert of several. | none |
@@ -143,6 +145,8 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | impact_llm_calls_per_hour | integer | yes | 20 | Jobs "Wirkungen bewerten" queued per hour at most, apart from the other budgets; 0 holds the assessment; 0 to 1000 (check constraint). UI: Wirkungsannahmen - LLM-Aufrufe pro Stunde (höchstens). |
   | study_training_until | date | no | | The event study's training period: an event whose first report came out on this UTC day or before (`event_study_service`). Empty: the events are not divided. UI: Event-Study - Training bis. |
   | study_validation_until | date | no | | Its validation period, after training, up to this day; after it, or after training while empty, test. Needs `study_training_until` and lies after it (check constraint `study_periods`). UI: Event-Study - Validierung bis. |
+  | backtest_cost_bps | integer | yes | 10 | A new Backtest-Lauf's default costs per side and leg, in basis points (commission and half the spread); 0 to 500 (check constraint). UI: Backtests - Handelskosten je Seite und Bein (Basispunkte). |
+  | backtest_borrow_bps | integer | yes | 50 | A new Backtest-Lauf's default borrow fee of the short leg per year, in basis points; 0 to 5000 (check constraint). UI: Backtests - Leihgebühr Short pro Jahr (Basispunkte). |
   | updated_at | timestamptz | yes | now() | |
 
 - Relationships: none
@@ -1002,6 +1006,59 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
 - Relationships: belongs to one Prognose.
 - Rules: stored by the worker's hourly check (`forecast_service.resolve_due`) once the forecast's last day has closed and the Wertpapier's and the benchmark's daily prices reach it (or the Wertpapier ended before), measured as an event study's window (`event_study_service.measure_after`); once per forecast. A gap is never filled.
+- Privacy: none
+
+### Backtest-Lauf (`backtest_run`)
+- Store: SQL table `backtest_run`; a trigger refuses every UPDATE, DELETE and TRUNCATE (`backtest_immutable`): deleting a run would hide a variant tried (requirements.md, Prognoseprotokoll und Evaluation, criteria 2 and 4).
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | UI: Lauf. |
+  | reproduces_id | bigint | no | | The run it repeats with the same parameters, periods and data state. Foreign key to `backtest_run`. Index. UI: Wiederholung von Lauf ...: identisch, abweichend. |
+  | as_of | timestamptz | yes | | The data state: only daily prices and corporate actions received by then, only versions created and Prognosen logged by then (rule 11). UI: Datenstand. |
+  | code_version | smallint | yes | | `backtest_service.BACKTEST_VERSION`: a change of what a run computes is a new version. UI: Backtest-Version. |
+  | variant | varchar(64) | yes | | SHA-256 of everything but the data state - parameters, periods, code version -: runs of one variant test the same thing. Index. |
+  | mode | varchar(10) | yes | | `created` (a signal known when its version was created) or `event_day` (from the event's first report, with hindsight: data leakage); check constraint. UI: Signale ab - Ab Entstehung, Ab Ereignistag (Datenleckage). |
+  | horizon | smallint | yes | | 5, 20 or 60 trading days held; check constraint. |
+  | min_probability | varchar(10) | yes | | The lowest probability traded: `low` (all), `medium`, `high`; check constraint. UI: alle Stufen, ab mittel, nur hoch. |
+  | model, prompt_version | varchar(100), smallint | no | | Only the signals of the LLM's model and prompt version; both empty: every signal, the analyst's too (check constraint `model`). |
+  | cost_bps | integer | yes | | Costs per side and leg in basis points; 0 to 500. UI: Handelskosten. |
+  | borrow_bps | integer | yes | | The short leg's borrow fee per year in basis points; 0 to 5000. UI: Leihgebühr. |
+  | training_until, validation_until | date | no | | The periods when it was asked for (Plattform-Einstellungen, Event-Study); validation after training (check constraint `periods`). UI: Perioden. |
+  | trades_hash | varchar(64) | yes | | SHA-256 over its trades as computed: a run again compares it. UI: Prüfsumme. |
+  | created_at | timestamptz | yes | now() | When it was stored. UI: Gerechnet. |
+
+- Relationships: has many Trades; may repeat one Backtest-Lauf.
+- Rules: asked for on the page Backtests (`/backtests`) and computed by the job "Backtest rechnen" behind live work (priority 1, no LLM): the trades outside any transaction, the run stored by its effect (Prognoseprotokoll und Evaluation, story 2, the admin's decisions of 2026-11-04). The data state is the moment it was asked for, the periods those set then; "Erneut rechnen" queues a run with the run's own. Which Wertpapier belongs to a target and which sector to an event is read as now: a correction since shows as a difference. The figures and the verdict are computed when its page loads, from its trades and the variants tried by then; never stored. Never changed nor deleted.
+- Privacy: none
+
+### Trade (`backtest_trade`)
+- Store: SQL table `backtest_trade`; the trigger of `backtest_run` refuses every change here as well.
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | run_id | bigint | yes | | Foreign key to `backtest_run`. Index. |
+  | kind | varchar(10) | yes | | `signal` (a version of a Wirkungsannahme) or `paper` (a logged Prognose of the run's horizon); check constraint. UI: Signal, Paper-Trading. |
+  | hypothesis_version_id, hypothesis_id, event_id | bigint | yes | | Where it came from. Foreign keys. |
+  | forecast_id | bigint | no | | Of a paper trade its Prognose (check constraint `paper`). Foreign key to `forecast`. |
+  | instrument_id, benchmark_instrument_id | bigint | yes | | Its Wertpapier - a target's traded at the entry, whether or not it still is -, and the ETF of the sector the event names most, else SPY. Foreign keys to `instrument`. |
+  | direction, probability | varchar(10) | yes | | As the signal said; check constraints. |
+  | signal_at | timestamptz | yes | | When the signal counts as known: the version's creation, the Prognose's logging, or the event's first report (`event_day`). |
+  | entry_day, exit_day | date | no | | From the open of the first trading day opening after the signal to the close of the horizon's last; empty beyond the calendar. UI: Gehalten. |
+  | period | varchar(12) | yes | | The entry day's: `training`, `validation`, `test`, `undivided`. UI: Periode. |
+  | cut | boolean | yes | | The exit lies past the period's end: it does not count in that period's figures (rule 11). UI: reicht darüber hinaus. |
+  | trend, volatility | varchar(5), varchar(10) | no | | The market at the entry from SPY's closes before it: `up`, `down` (over or under the mean of the 200 closes before), `calm`, `volatile` (the last 20 returns' spread over or under the median of the year before); empty where the closes do not reach. UI: Markt aufwärts, abwärts, ruhig, unruhig. |
+  | status | varchar(10) | yes | | `measured`, `gap`, `ended`, `open` (not closed or its prices not in by the data state); check constraint. UI: gemessen, nicht messbar: Lücke, nicht messbar: nicht mehr gehandelt, offen. |
+  | asset_return, benchmark_return | double precision | no | | Of a measured one, gross: from the entry's open to the exit's close, with dividends after the entry day, split-adjusted; set exactly for a measured one (check constraint `measured`). |
+  | momentum | double precision | no | | The baseline's choice: the excess return of the 20 trading days up to the last close before the signal. |
+  | random_direction | varchar(10) | yes | | The baseline's choice by chance, the same for the same trade in every run. |
+  | missing | jsonb | yes | `[]` | The days without a price: `[{"symbol", "day"}]`. UI: ohne Kurs. |
+
+- Relationships: belongs to one Backtest-Lauf; to a version of a Wirkungsannahme, its hypothesis and event; maybe to a Prognose; to its Wertpapier and benchmark.
+- Rules: the costs are the run's, applied when its figures are computed: on both legs at entry and exit, and the short leg's borrow fee over its days. A missing price makes it not measurable, never filled. Never changed nor deleted.
 - Privacy: none
 
 <!-- Template - copy once per entity:

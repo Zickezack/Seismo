@@ -15,6 +15,7 @@ from app.repositories.job_repository import ClaimedJob
 from app.db.models import BACKFILL_PRIORITY
 from app.services import (
     backfill_service,
+    backtest_service,
     backup_service,
     entity_service,
     event_service,
@@ -47,6 +48,7 @@ from app.services.job_service import (
     RECOGNISE_ENTITIES_JOB_KIND,
     REEXTRACT_EVENTS_JOB_KIND,
     RERECOGNISE_ENTITIES_JOB_KIND,
+    RUN_BACKTEST_JOB_KIND,
     SYNC_MARKET_JOB_KIND,
     TEST_JOB_KIND,
 )
@@ -86,6 +88,8 @@ def build_handlers(
         COLLECT_PRICES_JOB_KIND: lambda job: run_price_job(engine, job, fetch_contact, tracking_service.collect),
         BACKFILL_MINUTES_JOB_KIND: lambda job: run_market_job(job, lambda: tracking_service.backfill_minutes(engine, job.payload, fetch_contact)),
         FETCH_MINUTES_JOB_KIND: lambda job: run_market_job(job, lambda: tracking_service.fetch_minutes(engine, job.payload, fetch_contact, _reserved_slot(job))),
+        # Reads the database only: no request, no LLM.
+        RUN_BACKTEST_JOB_KIND: lambda job: backtest_service.run(engine, job.payload),
         # Reads only the raw text: no request, no slot.
         NORMALIZE_JOB_KIND: lambda job: normalization_service.normalize(engine, job.payload["article_id"]),
         EXTRACT_EVENTS_JOB_KIND: lambda job: run_extraction_job(engine, job, llm, limiter, stop_event),

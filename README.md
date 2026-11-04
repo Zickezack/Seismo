@@ -100,6 +100,9 @@ Wirkungsannahmen (20 by default, 0 holds it). They are reviewed on the event's p
 direction - or an abstention -, lowered where the event was expected or a US Wertpapier of the target had already moved
 before it. Each such hypothesis logs Prognosen (page Prognosen) the database never lets change; their outcomes come
 by themselves once the horizon has closed and the daily prices are in.
+The page Backtests asks the worker for a backtest of these signals - after costs (defaults under Plattform-Einstellungen,
+Backtests), against simple baselines, judged on the test period of the Event-Study's periods only; no run can be changed
+or deleted, so every variant tried stays counted. Seismo itself never trades.
 
 The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
 show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):

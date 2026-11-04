@@ -673,3 +673,27 @@ def test_forecasts_are_refused_any_change_and_go_with_a_downgrade(engine):
     assert not tables & {"forecast", "forecast_outcome"} and function == 0
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_backtests_are_refused_any_change_the_settings_row_gets_default_costs_and_both_go_with_a_downgrade(engine):
+    upgrade(engine, "2f7408122d7e")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO platform_settings (id, backups_to_keep) VALUES (1, 5)"))
+
+    upgrade(engine)
+    with engine.connect() as connection:
+        assert tuple(connection.execute(text("SELECT backtest_cost_bps, backtest_borrow_bps FROM platform_settings")).one()) == (10, 50)
+        triggers = set(connection.execute(text(
+            "SELECT tgname FROM pg_trigger WHERE tgrelid IN ('backtest_run'::regclass, 'backtest_trade'::regclass) AND NOT tgisinternal"
+        )).scalars())
+    assert triggers == {"backtest_run_no_change", "backtest_run_no_truncate", "backtest_trade_no_change", "backtest_trade_no_truncate"}
+
+    downgrade(engine, "2f7408122d7e")
+
+    with engine.connect() as connection:
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+        function = connection.execute(text("SELECT count(*) FROM pg_proc WHERE proname = 'backtest_immutable'")).scalar_one()
+        assert connection.execute(text("SELECT backups_to_keep FROM platform_settings")).scalar_one() == 5
+    assert not tables & {"backtest_run", "backtest_trade"} and function == 0
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Backtest-Lauf {{ run.id }}{% endblock %}
+{% block content %}
+<p><a href="/backtests">Backtests</a></p>
+<h1>Backtest-Lauf {{ run.id }}</h1>
+
+<section class="card stack" data-testid="run-parameters">
+  <div class="table-container">
+    <table class="table table-details">
+      <tbody>
+        <tr><th>Signale ab</th><td data-testid="run-mode">{{ run.parameters.mode_label }}</td></tr>
+        <tr><th>Horizont</th><td>{{ run.parameters.horizon }} Handelstage, Einstieg zur nächsten Eröffnung, Ausstieg zum Schluss</td></tr>
+        <tr><th>Wahrscheinlichkeit</th><td>{{ run.parameters.min_probability_label }}</td></tr>
+        <tr><th>Modell</th><td>{{ run.parameters.model_label }}</td></tr>
+        <tr><th>Kosten</th><td data-testid="run-costs">{{ run.parameters.cost_label }}</td></tr>
+        <tr><th>Perioden</th><td data-testid="run-periods">{{ run.periods_label }}</td></tr>
+        <tr><th>Datenstand</th><td data-testid="run-as-of">{{ run.as_of|local_time }} - nur Kurse und Kapitalmassnahmen, die bis dahin eingegangen waren, nur Versionen, die bis dahin bestanden</td></tr>
+        <tr><th>Gerechnet</th><td>{{ run.created_at|local_time }}, Backtest-Version {{ run.code_version }}, Prüfsumme <code data-testid="run-hash">{{ run.trades_hash[:12] }}</code></td></tr>
+        {% if run.reproduces_id %}<tr><th>Wiederholung</th><td data-testid="run-reproduced">von <a href="/backtests/{{ run.reproduces_id }}">Lauf {{ run.reproduces_id }}</a>: {% if run.reproduced %}identisch{% else %}abweichend, {{ run.differing }} {{ "Trade" if run.differing == 1 else "Trades" }} anders{% endif %}</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+  <p data-testid="run-counts">{{ run.counts.signals }} Signale: {{ run.counts.measured }} gemessen, {{ run.counts.open }} offen, {{ run.counts.unmeasured }} nicht messbar. {{ run.counts.paper }} Prognosen im Paper-Trading.</p>
+  <form method="post" action="/backtests/{{ run.id }}/reproduce" class="actions">
+    <button class="button button-secondary" type="submit" data-testid="run-reproduce">Erneut rechnen</button>
+    <span class="hint">mit denselben Parametern, Perioden und demselben Datenstand - ein neuer Lauf, der zeigt, ob dasselbe herauskommt.</span>
+  </form>
+</section>
+
+{% for warning in run.warnings %}
+<p class="message message-warning" role="status" data-testid="run-warning-{{ loop.index }}">{{ warning }}</p>
+{% endfor %}
+
+<details class="card section" id="verdict" open data-testid="section-verdict">
+  <summary><h2>Urteil</h2></summary>
+  <div class="stack">
+    <p data-testid="run-verdict" data-state="{{ run.verdict.state }}">{{ run.verdict.text }}</p>
+    <p data-testid="run-paper">{{ run.verdict.paper }}</p>
+    <p data-testid="run-trading">Echter Handel: keiner. {% if run.verdict.proven %}Im Test und im Paper-Trading bewährt - Seismo handelt trotzdem nicht selbst.{% else %}Nicht bewährt: vor echtem Handel muss ein Modell im Test und im Paper-Trading bestehen.{% endif %}</p>
+    <p class="hint">Beurteilt nur in der Test-Periode, mit mindestens {{ run.min_trades }} gemessenen Trades, nach Kosten über null und über jeder Baseline, und mit |t| ab {{ run.threshold_label }} ({{ run.variants }} {{ "Variante" if run.variants == 1 else "Varianten" }} mit Test-Periode, Bonferroni bei 5 %). Ein gutes Ergebnis im Training allein zählt nicht.</p>
+  </div>
+</details>
+
+<details class="card section" id="figures" open data-testid="section-figures">
+  <summary><h2>Kennzahlen des Modells</h2></summary>
+  <div class="stack">
+    <p class="hint">Der gemessenen Trades je Ausschnitt: Treffer ist die richtige Richtung vor Kosten; Ø netto die mittlere Rendite gegenüber dem Benchmark in der gehandelten Richtung nach Kosten, mit ihrem t-Wert; Summe und Drawdown der aufsummierten Nettorenditen nach Ausstiegstag, je Trade ein gleicher Einsatz. Ein Trade, der über das Ende seiner Periode hinausreicht, zählt dort nicht. Marktphase beim Einstieg aus SPY: über oder unter dem 200-Tage-Schnitt, die Schwankung der letzten 20 Tage über oder unter dem Median des Vorjahrs.</p>
+    <div class="table-container">
+      <table class="table" data-testid="figure-table">
+        <thead><tr><th>Ausschnitt</th><th>Trades</th><th>Treffer</th><th>Ø netto</th><th>t</th><th>Summe</th><th>Max. Drawdown</th></tr></thead>
+        <tbody>
+          {% for segment in run.segments %}
+          {% set model = segment.model %}
+          <tr data-testid="figures-{{ segment.key }}">
+            <td class="cell-title">{{ segment.label }}</td><td>{{ model.count }}</td><td>{{ model.hit_label }}</td><td>{{ model.mean_label }}</td>
+            <td>{{ model.t_label }}</td><td>{{ model.total_label }}</td><td>{{ model.drawdown_label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<details class="card section" id="baselines" open data-testid="section-baselines">
+  <summary><h2>Gegen Baselines</h2></summary>
+  <div class="stack">
+    <p class="hint">Dieselben Trades mit denselben Kosten, anders gerichtet: immer long; eine Richtung durch Zufall, je Trade fest; Momentum - die Richtung der Rendite gegenüber dem Benchmark in den 20 Handelstagen vor dem Signal. Je Ausschnitt Ø netto und die Anzahl Trades.</p>
+    <div class="table-container">
+      <table class="table" data-testid="baseline-table">
+        <thead><tr><th>Ausschnitt</th>{% for key, label in run.strategies %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for segment in run.segments %}
+          <tr data-testid="baselines-{{ segment.key }}">
+            <td class="cell-title">{{ segment.label }}</td>
+            {% for key, label in run.strategies %}{% set each = segment.figures[key] %}<td data-testid="baseline-{{ segment.key }}-{{ key }}">{{ each.mean_label }}<span class="hint">n {{ each.count }}</span></td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<details class="card section" id="calibration" open data-testid="section-calibration">
+  <summary><h2>Kalibrierung</h2></summary>
+  <div class="stack">
+    <p data-testid="run-rising">{% if run.rising is none %}Zu wenige Stufen gemessen, um zu sagen, ob die Treffer mit der Wahrscheinlichkeit steigen.{% elif run.rising %}Die Treffer steigen mit der Wahrscheinlichkeit.{% else %}Die Treffer steigen nicht mit der Wahrscheinlichkeit: die Stufen sind nicht kalibriert.{% endif %}</p>
+    <div class="table-container">
+      <table class="table" data-testid="calibration-table">
+        <thead><tr><th>Wahrscheinlichkeit</th><th>Treffer, alle Signale</th>{% if run.training_until %}<th>Treffer, Test</th>{% endif %}</tr></thead>
+        <tbody>
+          {% for row in run.calibration %}
+          <tr data-testid="calibration-{{ row.probability }}">
+            <td>{{ row.label }}</td><td>{{ row.all.hit_label }}</td>{% if run.training_until %}<td>{{ row.test.hit_label }}</td>{% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<details class="card section" id="trades" open data-testid="section-trades">
+  <summary><h2>Trades</h2></summary>
+  <div class="stack">
+    {% if run.trades %}
+    <div class="table-container">
+      <table class="table" data-testid="trade-list">
+        <thead><tr><th>Ereignis und Ziel</th><th>Wertpapier</th><th>Signal</th><th>Gehalten</th><th>Periode und Markt</th><th>Ergebnis</th></tr></thead>
+        <tbody>
+          {% for each in run.trades %}
+          <tr data-testid="trade-{{ each.id }}">
+            <td class="cell-title"><a href="/events/{{ each.event_id }}/impacts/{{ each.hypothesis_id }}">{{ each.target_name }}</a><span class="hint">{{ each.event_title }}</span></td>
+            <td class="cell-wrap"><a href="/instruments/{{ each.instrument_id }}">{{ each.asset_symbol }}</a><span class="hint">gegen {{ each.benchmark_symbol }}</span></td>
+            <td class="cell-wrap">{{ each.kind_label }}: {{ each.says }}<span class="hint">{{ each.signal_at|local_time }}</span></td>
+            <td class="cell-wrap">{% if each.entry_day %}{{ each.entry_day.strftime("%d.%m.%Y") }} bis {{ each.exit_day.strftime("%d.%m.%Y") if each.exit_day else "nach dem Kalender" }}{% else %}nach dem Kalender{% endif %}</td>
+            <td class="cell-wrap">{{ each.period_label }}<span class="hint">{{ each.phase_label }}</span></td>
+            <td class="cell-wrap" data-testid="trade-outcome-{{ each.id }}">{{ each.outcome_label }}{% if each.returns_label %}<span class="hint">{{ each.returns_label }}</span>{% endif %}{% if each.missing_label %}<span class="hint">{{ each.missing_label }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-trades">Keine Signale mit US-Wertpapier bis zum Datenstand.</p>
+    {% endif %}
+  </div>
+</details>
+{% endblock %}

@@ -606,6 +606,17 @@ def pre_moves(connection: Connection, event_id: int, entity_ids: Iterable[int], 
     return moves
 
 
+def sectors_of(connection: Connection, event_ids: Iterable[int]) -> dict[int, SectorRef]:
+    """Per event the sector its reports name most, with its benchmark ETF (backtest_service)."""
+    return _sectors(connection, list(event_ids))
+
+
+def splits_and_dividends(rows) -> tuple[dict[int, list[Split]], dict[int, dict[date, Decimal]]]:
+    """Corporate action rows as `daily_returns` reads them, by Wertpapier (backtest_service)."""
+    splits, dividends, _ = _action_lines(rows)
+    return splits, dividends
+
+
 def sector_of(connection: Connection, event_id: int) -> SectorRef | None:
     """The sector the event's reports name most, with its benchmark ETF (forecast_service)."""
     return _sectors(connection, [event_id]).get(event_id)
