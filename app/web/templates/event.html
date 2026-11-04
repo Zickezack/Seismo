@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 {% from "_watch.html" import watch_form %}
 {% from "_price.html" import price %}
+{% from "_uncertainty.html" import uncertainty_compact, uncertainty_full %}
 {% block title %}Ereignis{% endblock %}
 {% block content %}
 {% set event = detail.event %}
 {% set merged = detail.merged_into is not none %}
 {# A split needs a report to leave and one to stay. #}
 {% set splittable = not merged and detail.reports|length > 1 %}
-{% set sections = [("states", "Verlauf"), ("chronicle", "Chronik"), ("reports", "Berichte"), ("sources", "Quellen"), ("entities", "Entitäten"), ("instruments", "Kurse")]
-  + ([] if merged else [("similar", "Ähnliche Ereignisse")])
+{% set sections = [("states", "Verlauf"), ("uncertainty", "Unsicherheit"), ("chronicle", "Chronik"), ("reports", "Berichte"), ("sources", "Quellen"), ("entities", "Entitäten"), ("instruments", "Kurse")]
+  + ([] if merged else [("similar", "Ähnliche Ereignisse"), ("earlier", "Frühere Ereignisse")])
   + ([("corrections", "Korrekturen")] if detail.corrections else []) %}
 <h1 data-testid="event-title">{{ event.title }}</h1>
 
@@ -97,13 +98,25 @@
 
 {# Every statement of every report with its quote, the earliest report first: each traced back to its source
    (Dashboard, Recherche und Alerts, story 1). The levels stay apart (datamodel.md, rule 7). #}
+{# Uncertainty and contradicting evidence, never one score (Dashboard, Recherche und Alerts, story 4). #}
+<details class="section" id="uncertainty" open data-testid="uncertainty-section">
+  <summary><h2>Unsicherheit und Widersprüche</h2></summary>
+  <div class="stack">
+    {% if uncertainty.reports %}
+    {{ uncertainty_full(uncertainty) }}
+    {% else %}
+    <p data-testid="no-uncertainty">Keine Berichte.</p>
+    {% endif %}
+  </div>
+</details>
+
 <details class="section" id="chronicle" open data-testid="chronicle-section">
   <summary><h2>Chronik</h2></summary>
   <div class="stack">
     {% if detail.reports %}
     <ol class="chronicle" data-testid="chronicle">
       {% for report in detail.reports %}
-      <li class="stack" data-testid="chronicle-report-{{ report.id }}">
+      <li class="stack" id="chronicle-{{ report.id }}" data-testid="chronicle-report-{{ report.id }}">
         <p><span class="chronicle-time">{{ report.moment|local_time }}</span> · {{ report.source_display_name }} · <a href="/articles/{{ report.article_id }}#events" data-testid="chronicle-article-{{ report.id }}">{{ report.title }}</a></p>
         <p class="hint">{{ report.status_label }}{% if report.effect != "none" %} · {{ report.effect_label }}{% endif %}</p>
         {% set statements = detail.statements.get(report.id, []) %}
@@ -305,6 +318,54 @@
     </form>
     {% else %}
     <p data-testid="no-similar">Keine ähnlichen Ereignisse in dieser Zeit.</p>
+    {% endif %}
+  </div>
+</details>
+
+{# Comparable earlier events, each with why and how it went on (Dashboard, Recherche und Alerts, story 4). #}
+<details class="section" id="earlier" open data-testid="earlier-section">
+  <summary><h2>Vergleichbare frühere Ereignisse ({{ earlier.events|length }})</h2></summary>
+  <div class="stack">
+    <p class="hint">Andere Vorfälle, deren letzter Bericht vor dem ersten Bericht dieses Ereignisses kam: vom selben Typ oder mit den meisten gemeinsamen Entitäten, verglichen nach den Wörtern und Entitäten ihrer Berichte (TF-IDF-Kosinus, 0 bis 1, wie bei den Lagen), die ähnlichsten zuerst, ab 0,10, höchstens zehn. Jeder Grund steht für sich; der Ausgang ist ihr Zustand heute, keine Prognose.</p>
+    {% if earlier.events %}
+    <p data-testid="earlier-summary">Davon {{ earlier.count("closed") }} abgeschlossen, {{ earlier.count("ongoing") }} andauernd{% if earlier.count("unknown") %}, {{ earlier.count("unknown") }} mit unbekanntem Zustand{% endif %}; {{ earlier.count("escalated") }} {{ "ist" if earlier.count("escalated") == 1 else "sind" }} eskaliert.</p>
+    <div class="table-container">
+      <table class="table" data-testid="earlier-list">
+        <thead>
+          <tr>
+            <th>Ereignis</th>
+            <th>Warum vergleichbar</th>
+            <th>Ausgang</th>
+            <th>Belege und Unsicherheit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for each in earlier.events %}
+          <tr data-testid="earlier-{{ each.event.id }}">
+            <td class="cell-title"><a href="/events/{{ each.event.id }}" data-testid="earlier-title-{{ each.event.id }}">{{ each.event.title }}</a><span class="hint">{{ each.event.type_label }}{% if each.event.country %}, {{ each.event.country }}{% endif %} · {{ each.event.first_reported_at|local_time }} bis {{ each.event.last_reported_at|local_time }} · {{ each.event.report_count }} {{ "Bericht" if each.event.report_count == 1 else "Berichte" }} aus {{ each.event.source_count }} {{ "Quelle" if each.event.source_count == 1 else "Quellen" }}</span></td>
+            <td class="cell-wrap" data-testid="earlier-reasons-{{ each.event.id }}">
+              <span class="uncertainty">
+                <span>Ähnlichkeit {{ each.similarity_label }}</span>
+                <span>Typ: {{ each.shared_types|join(", ") if each.shared_types else "ein anderer" }}</span>
+                <span>Land: {{ each.shared_countries|join(", ") if each.shared_countries else "kein gemeinsames" }}</span>
+                <span>Gemeinsame Entitäten: {% for entity in each.shared_entities %}<a href="/entities/{{ entity.id }}">{{ entity.name }}</a>{% if not loop.last %}, {% endif %}{% else %}keine{% endfor %}</span>
+              </span>
+            </td>
+            <td class="cell-wrap" data-testid="earlier-outcome-{{ each.event.id }}">
+              <span class="uncertainty">
+                <span>{{ each.outcome.label }}</span>
+                {% if each.outcome.closed_at %}<span class="hint">abgeschlossen seit {{ each.outcome.closed_at|local_time }}</span>{% endif %}
+                <span class="hint">berichtet über {{ each.outcome.duration_label }}</span>
+              </span>
+            </td>
+            <td>{{ uncertainty_compact(each.uncertainty, "earlier-uncertainty-" ~ each.event.id) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-earlier">Kein früheres Ereignis ist vergleichbar.</p>
     {% endif %}
   </div>
 </details>

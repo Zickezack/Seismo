@@ -1,0 +1,64 @@
+{# What an event's reports leave uncertain or contradict (event_context_service.Uncertainty), each on its own and never
+   one score (requirements.md, Dashboard, Recherche und Alerts, criterion 4). #}
+
+{# In a table cell: the statements by kind, the contradictions, and how many of each level are low or unknown. #}
+{% macro uncertainty_compact(u, testid) %}
+<span class="uncertainty" data-testid="{{ testid }}">
+  <span data-testid="{{ testid }}-kinds">{{ u.kinds_label }}</span>
+  {% if u.contradicting %}<span class="status status-contradicts" data-testid="{{ testid }}-contradicting">{{ u.contradicting|length }} {{ "widerspricht" if u.contradicting|length == 1 else "widersprechen" }} dem Zustand</span>{% endif %}
+  {% if u.impact_conflicts %}<span class="status status-contradicts" data-testid="{{ testid }}-impacts">{{ u.impact_conflicts|length }} {{ "Wirkung" if u.impact_conflicts|length == 1 else "Wirkungen" }} gegensätzlich</span>{% endif %}
+  {% if u.statements or u.reports %}<span class="hint" data-testid="{{ testid }}-weak">Niedrig oder unbekannt: Extraktion {{ u.extraction.weak }}/{{ u.extraction.total }} · Quelle {{ u.source_quality.weak }}/{{ u.source_quality.total }} · Schlussfolgerung {{ u.inference.weak }}/{{ u.inference.total }}</span>{% endif %}
+  {% if u.llm_assigned or u.uncertain_forms %}<span class="hint">{% if u.llm_assigned %}{{ u.llm_assigned }} vom LLM zugeordnet{% endif %}{% if u.llm_assigned and u.uncertain_forms %} · {% endif %}{% if u.uncertain_forms %}{{ u.uncertain_forms|length }} unsichere {{ "Namensform" if u.uncertain_forms|length == 1 else "Namensformen" }}{% endif %}</span>{% endif %}
+</span>
+{% endmacro %}
+
+{# The event page's section: every count in full, the contradictions with their reports. #}
+{% macro uncertainty_full(u) %}
+<div class="table-container">
+  <table class="table table-details" data-testid="uncertainty-levels">
+    <tbody>
+      <tr><th scope="row">Aussagen</th><td data-testid="uncertainty-kinds">{{ u.kinds_label }}</td></tr>
+      <tr><th scope="row">Extraktion (je Aussage)</th><td data-testid="uncertainty-extraction">{{ u.extraction.label }}</td></tr>
+      <tr><th scope="row">Quelle (je Beleg)</th><td data-testid="uncertainty-source">{{ u.source_quality.label }}</td></tr>
+      <tr><th scope="row">Schlussfolgerung (je Bericht)</th><td data-testid="uncertainty-inference">{{ u.inference.label }}</td></tr>
+      <tr><th scope="row">Zuordnung</th><td data-testid="uncertainty-llm">{{ u.llm_assigned }} von {{ u.reports }} {{ "Bericht" if u.reports == 1 else "Berichten" }} vom LLM zugeordnet</td></tr>
+    </tbody>
+  </table>
+</div>
+<p class="hint">Die drei Stufen werden nie verrechnet: Extraktion, wie getreu eine Aussage ihr Zitat wiedergibt; Quelle, die Qualität der Quelle des Zitats; Schlussfolgerung, wie sicher Typ, Status und Wirkungen aus dem Artikel folgen, wie das Modell sie einschätzt. Vom LLM zugeordnet: Die Wörter lagen zwischen den Schwellen, das LLM hat entschieden.</p>
+
+<h3>Widersprüche</h3>
+{% if u.contradicting %}
+<p>{{ "Dieser Bericht widerspricht" if u.contradicting|length == 1 else "Diese Berichte widersprechen" }} dem Zustand zu {{ "seiner" if u.contradicting|length == 1 else "ihrer" }} Zeit; ihre Aussagen bleiben daneben stehen:</p>
+<ul data-testid="uncertainty-contradicting">
+  {% for report in u.contradicting %}<li><a href="#chronicle-{{ report.id }}">{{ report.title }}</a></li>{% endfor %}
+</ul>
+{% endif %}
+{% if u.impact_conflicts %}
+<div class="table-container">
+  <table class="table" data-testid="uncertainty-impacts">
+    <thead><tr><th>Wirkung auf</th><th>Positiv laut</th><th>Negativ laut</th></tr></thead>
+    <tbody>
+      {% for conflict in u.impact_conflicts %}
+      <tr>
+        <td class="cell-title">{% if conflict.entity_id %}<a href="/entities/{{ conflict.entity_id }}">{{ conflict.target }}</a>{% else %}{{ conflict.target }}{% endif %}</td>
+        <td class="cell-wrap">{% for report in conflict.positive %}<a href="#chronicle-{{ report.id }}">{{ report.title }}</a>{% if not loop.last %}; {% endif %}{% endfor %}</td>
+        <td class="cell-wrap">{% for report in conflict.negative %}<a href="#chronicle-{{ report.id }}">{{ report.title }}</a>{% if not loop.last %}; {% endif %}{% endfor %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% if not u.contradictions %}
+<p data-testid="uncertainty-no-contradictions">Kein Bericht widerspricht dem Zustand, und keine Wirkung auf dasselbe Ziel wird gegensätzlich gesehen.</p>
+{% endif %}
+
+{% if u.uncertain_forms %}
+<h3>Unsichere Namensformen</h3>
+<ul data-testid="uncertainty-forms">
+  {% for form in u.uncertain_forms %}<li>„{{ form.value }}“ als <a href="/entities/{{ form.entity_id }}">{{ form.entity_name }}</a></li>{% endfor %}
+</ul>
+<p class="hint">Das LLM hat diese Namensformen nur nach einem ähnlichen Namen zugeordnet; bestätigt hat sie noch niemand.</p>
+{% endif %}
+{% endmacro %}

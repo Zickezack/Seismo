@@ -1,12 +1,21 @@
-"""Ereignisse: the most recently reported events, filtered as the analyst chooses, and one event with its reports, where the analyst merges similar
-events into it and splits off reports of another incident."""
+"""Ereignisse: the most recently reported events, filtered and searched as the analyst chooses, and one event with its
+reports, what they leave uncertain or contradict and the earlier events comparable with it, where the analyst merges
+similar events into it and splits off reports of another incident."""
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app.db.models import WatchItemKind
-from app.services import entity_service, event_correction_service, event_service, instrument_service, situation_service, watchlist_service
+from app.services import (
+    entity_service,
+    event_context_service,
+    event_correction_service,
+    event_service,
+    instrument_service,
+    situation_service,
+    watchlist_service,
+)
 from app.services.event_correction_service import InvalidReason
 from app.web.templating import flash, name_list, templates
 
@@ -23,8 +32,10 @@ def event_list(request: Request) -> Response:
     """Filtered by a plain GET form: works without JavaScript, and the URL can be bookmarked."""
     engine = request.app.state.engine
     form = event_service.parse_filter(request.query_params)
+    overview = event_service.overview(engine, form.criteria)
     context = {
-        "overview": event_service.overview(engine, form.criteria),
+        "overview": overview,
+        "uncertainty": event_context_service.uncertainty_of(engine, [event.id for event in overview.events]),
         "filter": form,
         "choices": event_service.filter_choices(engine),
     }
@@ -42,6 +53,8 @@ def event_page(request: Request, event_id: int) -> Response:
     context = {
         "detail": detail,
         "similar": event_correction_service.similar_events(engine, event_id),
+        "uncertainty": event_context_service.uncertainty_of(engine, [event_id])[event_id],
+        "earlier": event_context_service.earlier_events(engine, event_id),
         "entities": entities,
         "instruments": instrument_service.of_entities(engine, [entity.id for entity in entities]),
         "watch": watchlist_service.watching(engine, WatchItemKind.EVENT, event_id),

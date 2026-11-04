@@ -27,7 +27,10 @@ from app.db.models import (
     Source,
     Statement,
     WatchItemKind,
+    SEARCH_CONFIG,
     WatchlistItem,
+    report_words,
+    search_vector,
 )
 
 # Of the two-key advisory lock that serialises the assignments (7301 LLM slots, 7302 duplicate checks).
@@ -226,7 +229,9 @@ class EventFilter:
     impact_kinds: tuple[str, ...] = ()  # a report names an impact on one of these kinds of target
     horizon: str | None = None  # a report names an impact of this horizon
     since: datetime | None = None  # a report from then on
-    development: str | None = None  # with `since`: NEW, DEVELOPING or CHANGED
+    until: datetime | None = None  # a report before then (story 4: a period of the past)
+    development: str | None = None  # with `since`: NEW, DEVELOPING or CHANGED, within the period up to `until`
+    text: str | None = None  # a search, websearch_to_tsquery's syntax: a report's title, summary or statement has it
     watchlist_id: int | None = None  # it has one of the things the watchlist follows (_watched)
     situation_id: int | None = None  # it belongs to the Lage (_in_situations)
 
@@ -292,17 +297,27 @@ def _matching(criteria: EventFilter, source_count) -> list:
         conditions.append(_a_report(or_(*(EventCandidate.impacts.contains([{"target_kind": kind}]) for kind in criteria.impact_kinds))))
     if criteria.horizon:
         conditions.append(_a_report(EventCandidate.impacts.contains([{"horizon": criteria.horizon}])))
-    if criteria.since is not None:
+    if criteria.since is not None or criteria.until is not None:
+        within = []
+        if criteria.since is not None:
+            within.append(_MOMENT >= criteria.since)
+            conditions.append(Event.last_reported_at >= criteria.since)
+        if criteria.until is not None:
+            within.append(_MOMENT < criteria.until)
+            conditions.append(Event.first_reported_at < criteria.until)
         recent = select(EventCandidate.id).join(Article, Article.id == EventCandidate.article_id).where(
-            EventCandidate.event_id == Event.id, _MOMENT >= criteria.since
+            EventCandidate.event_id == Event.id, *within
         )
-        conditions += [Event.last_reported_at >= criteria.since, recent.exists()]
+        conditions.append(recent.exists())
+    if criteria.since is not None:
         if criteria.development == NEW:
             conditions.append(Event.first_reported_at >= criteria.since)
         elif criteria.development == DEVELOPING:
             conditions.append(Event.first_reported_at < criteria.since)
         elif criteria.development == CHANGED:
-            conditions.append(_changed_since(criteria.since))
+            conditions.append(_changed_since(criteria.since, criteria.until))
+    if criteria.text:
+        conditions.append(Event.id.in_(_searched(criteria.text)))
     if criteria.watchlist_id is not None:
         conditions.append(_watched(criteria.watchlist_id))
     if criteria.situation_id is not None:
@@ -398,9 +413,22 @@ def _naming(*conditions):
     )
 
 
-def _changed_since(since: datetime):
-    """A change of the event's state from `since` on: a version not withdrawn whose status differs from the one
-    before it - the first founds the state and changes none; a repeat is none (dashboard_service.changes_since)."""
+def _searched(words: str):
+    """The events with a report whose title and summary, or one of whose statements, have the words: English stems
+    (every text the model writes is English), by the full-text indexes. A search of stop words only finds nothing."""
+    query = func.websearch_to_tsquery(SEARCH_CONFIG, words)
+    by_report = select(EventCandidate.event_id).where(
+        search_vector(report_words(EventCandidate.title, EventCandidate.summary)).op("@@")(query)
+    )
+    by_statement = select(EventCandidate.event_id).join(Statement, Statement.candidate_id == EventCandidate.id).where(
+        search_vector(Statement.text).op("@@")(query)
+    )
+    return by_report.union(by_statement)
+
+
+def _changed_since(since: datetime, until: datetime | None = None):
+    """A change of the event's state from `since` on, before `until`: a version not withdrawn whose status differs from
+    the one before it - the first founds the state and changes none; a repeat is none (dashboard_service.changes_since)."""
     before = func.lag(EventState.status).over(partition_by=EventState.event_id, order_by=(EventState.valid_from, EventState.id))
     versions = select(EventState.event_id, EventState.status, EventState.valid_from, before.label("before")).where(
         _NOT_WITHDRAWN
@@ -408,6 +436,7 @@ def _changed_since(since: datetime):
     return exists().where(
         versions.c.event_id == Event.id,
         versions.c.valid_from >= since,
+        *([versions.c.valid_from < until] if until is not None else []),
         versions.c.before.is_not(None),
         versions.c.status != versions.c.before,
     )
@@ -458,7 +487,7 @@ def versions_of(connection: Connection, event_ids: Iterable[int]) -> Sequence[Ro
     """The versions not withdrawn of these events, each event's the earliest first: what tells a change from a
     repeat (event_service.mark_repeats)."""
     statement = (
-        select(EventState.event_id, EventState.status, EventState.valid_from)
+        select(EventState.event_id, EventState.status, EventState.valid_from, EventState.candidate_id)
         .where(EventState.event_id.in_(list(event_ids)), _NOT_WITHDRAWN)
         .order_by(EventState.event_id, EventState.valid_from, EventState.id)
     )

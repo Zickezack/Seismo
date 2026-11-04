@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.repositories.event_repository import EventFilter
-from app.services import entity_service, event_correction_service, event_service, instrument_service
+from app.services import event_context_service, entity_service, event_correction_service, event_service, instrument_service
 from app.services.bulk import BulkResult
 from app.services.entity_service import EntityRef
 from app.services.event_correction_service import InvalidReason, SimilarEvent, SplitResult
@@ -22,6 +22,16 @@ from app.services.event_service import (
     StateView,
 )
 from app.services.extraction_service import StatementView
+from app.services.event_context_service import (
+    Comparison,
+    EarlierEvent,
+    ImpactConflict,
+    Levels,
+    Outcome,
+    ReportRef,
+    UncertainForm,
+    Uncertainty,
+)
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
 
@@ -56,6 +66,8 @@ def pages(monkeypatch):
     monkeypatch.setattr(event_service, "filter_choices", lambda _engine: calls.get("choices", CHOICES))
     monkeypatch.setattr(event_service, "detail", lambda _engine, event_id: calls.get("detail"))
     monkeypatch.setattr(event_correction_service, "similar_events", lambda _engine, event_id: calls.get("similar", []))
+    monkeypatch.setattr(event_context_service, "uncertainty_of", lambda _engine, event_ids: calls.get("uncertainty") or {each: Uncertainty() for each in event_ids})
+    monkeypatch.setattr(event_context_service, "earlier_events", lambda _engine, event_id: calls.get("earlier", Comparison()))
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: calls.get("entities", []))
     monkeypatch.setattr(instrument_service, "of_entities", lambda _engine, entity_ids: calls.get("instruments", []))
     return calls
@@ -342,7 +354,7 @@ def test_the_chronicle_traces_every_statement_of_every_report_to_its_quote_and_a
     assert "AP" in second and "bestätigt" in second and "Quelle unbekannt" in second
     # Two sources, the one that reported first first.
     assert [re.search(rf'data-testid="source-{index}">\s*<td class="cell-title">([^<]*)<', html).group(1) for index in (1, 2)] == ["Xinhua", "AP"]
-    assert re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html)[:5] == ["states", "chronicle", "reports", "sources", "entities"]
+    assert re.findall(r'<a href="#(\w+)" data-testid="section-nav-\w+">', html)[:6] == ["states", "uncertainty", "chronicle", "reports", "sources", "entities"]
 
 
 def test_the_list_passes_the_filter_of_the_url_and_shows_it_again(client, pages):
@@ -389,3 +401,108 @@ def test_the_count_of_a_filtered_list_says_how_many_match(client, pages, total, 
     pages["overview"] = EventOverview(events=[event(each) for each in range(total)], total=total, waiting=0)
 
     assert text_of(client.get("/events", params={"period": "24h"}).text, "event-count") == expected
+
+
+# Historical search, uncertainty and comparable earlier events (Dashboard, Recherche und Alerts, story 4).
+
+def uncertain(**fields):
+    values = dict(
+        reports=3, statements=5, kinds={"fact": 3, "claim": 2}, extraction=Levels(3, 1, 1, 0), source_quality=Levels(0, 4, 0, 1),
+        inference=Levels(1, 0, 1, 1), contradicting=[ReportRef(2, "Report <2>")], llm_assigned=1,
+        impact_conflicts=[ImpactConflict("Maersk", 4, [ReportRef(1, "Report 1")], [ReportRef(2, "Report <2>")])],
+        uncertain_forms=[UncertainForm("Maersk Line", 4, "A.P. Moller-Maersk")],
+    )
+    return Uncertainty(**values | fields)
+
+
+def test_the_list_searches_a_period_of_the_past_and_shows_it_again(client, pages):
+    html = client.get("/events", params={"q": " port  strike ", "from": "2025-11-03", "to": "2025-11-05", "type": "labor"}).text
+
+    criteria = pages["criteria"]
+    assert criteria.text == "port strike" and criteria.until - criteria.since == timedelta(days=3)
+    assert 'value="port strike"' in tag_of(html, "filter-q")
+    assert 'value="2025-11-03"' in tag_of(html, "filter-from") and 'value="2025-11-05"' in tag_of(html, "filter-to")
+    # A rule keeps the type, neither search nor period.
+    assert tag_of(html, "save-as-rule") == '<a class="button button-secondary" href="/alerts/rules/new?type=labor" data-testid="save-as-rule">'
+
+
+def test_a_search_alone_offers_no_alert_rule(client, pages):
+    html = client.get("/events", params={"q": "strike"}).text
+    assert tag_of(html, "save-as-rule") is None and tag_of(html, "reset-filter") is not None
+
+
+def test_each_listed_event_shows_its_evidence_and_uncertainty_never_one_score(client, pages):
+    pages["uncertainty"] = {2: uncertain(), 1: Uncertainty()}
+
+    html = client.get("/events").text
+
+    assert text_of(html, "event-uncertainty-2-kinds") == "3 Tatsachen, 2 Behauptungen"
+    assert text_of(html, "event-uncertainty-2-contradicting") == "1 widerspricht dem Zustand"
+    assert text_of(html, "event-uncertainty-2-impacts") == "1 Wirkung gegensätzlich"
+    assert text_of(html, "event-uncertainty-2-weak") == "Niedrig oder unbekannt: Extraktion 1/5 · Quelle 1/5 · Schlussfolgerung 2/3"
+    assert "1 vom LLM zugeordnet · 1 unsichere Namensform" in html
+    assert text_of(html, "event-uncertainty-1-kinds") == "keine Aussagen"
+    assert tag_of(html, "event-uncertainty-1-contradicting") is None
+
+
+def test_the_event_page_shows_uncertainty_and_contradictions_in_full(client, pages):
+    pages["detail"] = EventDetail(event(7), [report(1, "new", founding=True), report(2, "score", 0.6)])
+    pages["uncertainty"] = {7: uncertain()}
+
+    html = client.get("/events/7").text
+
+    assert text_of(html, "uncertainty-kinds") == "3 Tatsachen, 2 Behauptungen"
+    assert text_of(html, "uncertainty-extraction") == "3 hoch · 1 mittel · 1 niedrig"
+    assert text_of(html, "uncertainty-source") == "4 mittel · 1 unbekannt"
+    assert text_of(html, "uncertainty-inference") == "1 hoch · 1 niedrig · 1 unbekannt"
+    assert text_of(html, "uncertainty-llm") == "1 von 3 Berichten vom LLM zugeordnet"
+    contradicting = re.search(r'data-testid="uncertainty-contradicting">(.*?)</ul>', html, re.DOTALL).group(1)
+    assert '<a href="#chronicle-2">Report &lt;2&gt;</a>' in contradicting
+    impacts = re.search(r'data-testid="uncertainty-impacts">(.*?)</table>', html, re.DOTALL).group(1)
+    assert '<a href="/entities/4">Maersk</a>' in impacts and '<a href="#chronicle-1">Report 1</a>' in impacts
+    assert "„Maersk Line“ als <a href=\"/entities/4\">A.P. Moller-Maersk</a>" in html
+    assert 'id="chronicle-2"' in html
+    assert tag_of(html, "uncertainty-no-contradictions") is None
+
+
+def test_an_event_without_contradictions_says_so(client, pages):
+    pages["detail"] = EventDetail(event(7), [report(1, "new", founding=True)])
+    pages["uncertainty"] = {7: uncertain(contradicting=[], impact_conflicts=[], uncertain_forms=[])}
+
+    html = client.get("/events/7").text
+
+    assert tag_of(html, "uncertainty-no-contradictions") is not None
+    assert tag_of(html, "uncertainty-contradicting") is None and tag_of(html, "uncertainty-forms") is None
+
+
+def test_the_event_page_lists_comparable_earlier_events_with_why_and_how_they_went_on(client, pages):
+    pages["detail"] = EventDetail(event(7), [report(1, "new", founding=True)])
+    earlier = EarlierEvent(
+        event(3, title="Quake <old>", state="closure", first_reported_at=NOW - timedelta(days=400), last_reported_at=NOW - timedelta(days=396)),
+        0.31, ["Naturkatastrophe"], ["CN"], [EntityRef(5, "China Earthquake Networks Center")],
+        Outcome("closure", True, NOW - timedelta(days=397), timedelta(days=4)), uncertain(),
+    )
+    other = EarlierEvent(event(4), 0.12, [], [], [], Outcome("update", False, None, timedelta(minutes=5)), Uncertainty())
+    pages["earlier"] = Comparison([earlier, other])
+
+    html = client.get("/events/7").text
+
+    assert text_of(html, "earlier-title-3") == "Quake &lt;old&gt;"
+    assert text_of(html, "earlier-summary") == "Davon 1 abgeschlossen, 1 andauernd; 1 ist eskaliert."
+    reasons = re.search(r'data-testid="earlier-reasons-3">(.*?)</td>', html, re.DOTALL).group(1)
+    assert "Ähnlichkeit 0,31" in reasons and "Typ: Naturkatastrophe" in reasons and "Land: CN" in reasons
+    assert '<a href="/entities/5">China Earthquake Networks Center</a>' in reasons
+    other_reasons = re.search(r'data-testid="earlier-reasons-4">(.*?)</td>', html, re.DOTALL).group(1)
+    assert "Typ: ein anderer" in other_reasons and "Land: kein gemeinsames" in other_reasons and "Entitäten: keine" in other_reasons
+    outcome = re.search(r'data-testid="earlier-outcome-3">(.*?)</td>', html, re.DOTALL).group(1)
+    assert "Abschluss, eskaliert" in outcome and "abgeschlossen seit" in outcome and "berichtet über 4 Tage" in outcome
+    assert text_of(html, "earlier-uncertainty-3-contradicting") == "1 widerspricht dem Zustand"
+    assert tag_of(html, "section-nav-earlier") is not None
+
+
+def test_without_comparable_earlier_events_the_page_says_so(client, pages):
+    pages["detail"] = EventDetail(event(7), [report(1, "new", founding=True)])
+
+    html = client.get("/events/7").text
+
+    assert text_of(html, "no-earlier") == "Kein früheres Ereignis ist vergleichbar."

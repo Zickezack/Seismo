@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.services import (
     entity_correction_service,
     entity_service,
+    event_context_service,
     event_correction_service,
     event_service,
     instrument_service,
@@ -28,6 +29,7 @@ from app.services.instrument_service import (
     PriceView,
     SourceStatus,
 )
+from app.services.event_context_service import Comparison, Uncertainty
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, SETTINGS, tag_of, text_of
 from tests.unit.test_web_entities import entity
@@ -242,6 +244,8 @@ def test_an_entity_and_an_event_show_the_latest_prices_of_their_wertpapiere(clie
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: [EventEntity(7, "company", "Nestlé", 1, False, ["Nestlé"])])
     monkeypatch.setattr(event_service, "detail", lambda _engine, event_id: EventDetail(event(8)))
     monkeypatch.setattr(event_correction_service, "similar_events", lambda _engine, event_id: [])
+    monkeypatch.setattr(event_context_service, "uncertainty_of", lambda _engine, event_ids: {each: Uncertainty() for each in event_ids})
+    monkeypatch.setattr(event_context_service, "earlier_events", lambda _engine, event_id: Comparison())
 
     for path in ("/entities/7", "/events/8"):
         html = client.get(path).text

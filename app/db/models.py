@@ -21,6 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     func,
+    literal_column,
     text,
     true,
 )
@@ -28,6 +29,21 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+
+SEARCH_CONFIG = literal_column("'english'::regconfig")
+
+
+def search_vector(words):
+    """The English full-text vector of `words` (Dashboard, Recherche und Alerts, story 4): every text the model writes is
+    English. Index and query state the same expression, else PostgreSQL does not use the index - a bound parameter in it
+    would be another expression, so the configuration and the space are literals."""
+    return func.to_tsvector(SEARCH_CONFIG, words)
+
+
+def report_words(title, summary):
+    """What the search reads of a report: its title and summary."""
+    return title.op("||")(literal_column("' '")).op("||")(summary)
 
 
 class JobStatus(StrEnum):
@@ -730,6 +746,8 @@ class EventCandidate(Base):
         CheckConstraint(status.in_([s.value for s in EventStatus]), name="status"),
         CheckConstraint(assignment_method.in_([s.value for s in AssignmentMethod]), name="assignment_method"),
         CheckConstraint(inference_confidence.in_([s.value for s in ConfidenceLevel]), name="inference_confidence"),
+        # The historical search (event_repository.EventFilter.text).
+        Index("ix_event_candidate_search", search_vector(report_words(title, summary)), postgresql_using="gin"),
     )
 
 
@@ -799,6 +817,7 @@ class Statement(Base):
     __table_args__ = (
         CheckConstraint(kind.in_([s.value for s in StatementKind]), name="kind"),
         CheckConstraint(extraction_confidence.in_([s.value for s in ConfidenceLevel]), name="extraction_confidence"),
+        Index("ix_statement_search", search_vector(text), postgresql_using="gin"),
     )
 
 

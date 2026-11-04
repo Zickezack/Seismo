@@ -80,6 +80,19 @@
   <summary><h2>Filter{% if filter.active %} (aktiv){% endif %}</h2></summary>
   <form class="form-grid" method="get" action="{{ action }}" data-testid="event-filter">
     {% if period is none %}
+    <div class="field field-wide">
+      <label for="filter-q">Suche</label>
+      <input type="search" id="filter-q" name="q" value="{{ filter.values.q or '' }}" maxlength="200" data-testid="filter-q">
+      <p class="hint">In Titel, Zusammenfassung und Aussagen der Berichte, auf Englisch, wie das Modell sie schreibt; Wortformen zählen mit („strike“ findet „strikes“). Mehrere Wörter: alle; „in Anführungszeichen“: als Wortfolge; or: eines davon; -Wort: ohne.</p>
+    </div>
+    <div class="field">
+      <label for="filter-from">Berichtet von (UTC)</label>
+      <input type="date" id="filter-from" name="from" value="{{ filter.values.from or '' }}" data-testid="filter-from">
+    </div>
+    <div class="field">
+      <label for="filter-to">Berichtet bis (UTC)</label>
+      <input type="date" id="filter-to" name="to" value="{{ filter.values.to or '' }}" data-testid="filter-to">
+    </div>
     <div class="field">
       <label for="filter-period">Zeitraum</label>
       <select id="filter-period" name="period" data-testid="filter-period">
@@ -105,7 +118,8 @@
     <div class="form-actions actions">
       <button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button>
       {% if filter.active or (period is none and filter.values.period) %}<a class="button button-secondary" href="{{ action }}{% if period %}?period={{ period }}{% endif %}" data-testid="reset-filter">Filter zurücksetzen</a>{% endif %}
-      {% if filter.active %}<a class="button button-secondary" href="/alerts/rules/new?{{ filter.query(period='', development='') }}" data-testid="save-as-rule">Als Alert-Regel speichern</a>{% endif %}
+      {# A rule keeps neither period nor search: it watches what comes. #}
+      {% if filter.rule_query %}<a class="button button-secondary" href="/alerts/rules/new?{{ filter.rule_query }}" data-testid="save-as-rule">Als Alert-Regel speichern</a>{% endif %}
     </div>
   </form>
 </details>

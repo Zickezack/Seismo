@@ -29,7 +29,7 @@ import re
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
 from urllib.parse import urlencode
@@ -61,12 +61,15 @@ LIST_LIMIT = 100
 PERIODS = {"24h": ("24 Stunden", timedelta(hours=24)), "3d": ("3 Tage", timedelta(days=3)), "7d": ("7 Tage", timedelta(days=7))}
 DEFAULT_PERIOD = "24h"
 DEVELOPMENT_LABELS = {NEW: "Neu", DEVELOPING: "In Entwicklung", CHANGED: "Mit Zustandswechsel"}
+# The fields of the list only: neither the start page nor an alert rule has them.
+LIST_ONLY = ("period", "development", "q", "from", "to")
 # Relevance (the admin's decision of 2026-11-02): reported by at least so many sources, and an impact on the economy
 # that a report names - on a company, a sector, a commodity or a market, not a country or anything else.
 MIN_SOURCES = (2, 3, 5)
 ECONOMIC_TARGETS = (TargetKind.COMPANY, TargetKind.SECTOR, TargetKind.COMMODITY, TargetKind.MARKET)
 FILTER_HORIZONS = {key: label for key, label in HORIZON_LABELS.items() if key != Horizon.UNKNOWN}
 COMPANY_MAX_CHARS = 200
+SEARCH_MAX_CHARS = 200
 _COUNTRY = re.compile(r"[A-Z]{2}")
 _WORD = re.compile(r"[^\W_]+")
 # Words that say nothing about which incident a report is of, in the English the model writes.
@@ -388,6 +391,11 @@ class EventFilterForm:
         """Anything chosen beyond the period."""
         return any(value for key, value in self.values.items() if key != "period")
 
+    @property
+    def rule_query(self) -> str:
+        """The URL's query of what an alert rule keeps of it: neither period nor search."""
+        return self.query(**{key: "" for key in LIST_ONLY})
+
     def query(self, **changes: str) -> str:
         """The URL's query of this filter, with `changes` in place of its own values; empty ones left out."""
         return urlencode({key: value for key, value in (self.values | changes).items() if value})
@@ -432,14 +440,27 @@ def parse_filter(params: Mapping[str, str], now: datetime | None = None, with_pe
         values["watchlist"] = str(int(params["watchlist"]))
     if (params.get("situation") or "").isdigit():
         values["situation"] = str(int(params["situation"]))
-    since = None
+    since = until = None
     if with_period:
+        words = " ".join((params.get("q") or "").split())[:SEARCH_MAX_CHARS]
+        if words:
+            values["q"] = words
+        start, end = _day(params.get("from")), _day(params.get("to"))
+        if start:
+            values["from"] = start.isoformat()
+            since = datetime.combine(start, time(), UTC)
+        if end:
+            values["to"] = end.isoformat()
+            # The whole day.
+            until = datetime.combine(end, time(), UTC) + timedelta(days=1)
         if params.get("development") in DEVELOPMENT_LABELS:
             values["development"] = params["development"]
         period = params.get("period")
-        if period in PERIODS or "development" in values:
+        if period in PERIODS or ("development" in values and since is None):
             values["period"] = period if period in PERIODS else DEFAULT_PERIOD
-            since = (now or datetime.now(UTC)) - PERIODS[values["period"]][1]
+            recent = (now or datetime.now(UTC)) - PERIODS[values["period"]][1]
+            # Both narrow: the later start.
+            since = max(since, recent) if since else recent
     criteria = EventFilter(
         country=values.get("country"),
         event_type=values.get("type"),
@@ -449,11 +470,21 @@ def parse_filter(params: Mapping[str, str], now: datetime | None = None, with_pe
         impact_kinds=ECONOMIC_TARGETS if "impact" in values else (),
         horizon=values.get("horizon"),
         since=since,
+        until=until,
         development=values.get("development"),
+        text=values.get("q"),
         watchlist_id=int(values["watchlist"]) if "watchlist" in values else None,
         situation_id=int(values["situation"]) if "situation" in values else None,
     )
     return EventFilterForm(values, criteria)
+
+
+def _day(raw: str | None) -> date | None:
+    """A day of the form's date field (YYYY-MM-DD), a UTC day; anything else none."""
+    try:
+        return date.fromisoformat((raw or "").strip())
+    except ValueError:
+        return None
 
 
 def filter_choices(engine: Engine) -> FilterChoices:
@@ -690,17 +721,27 @@ def _report(row: Row, states: list[StateView]) -> ReportView:
     withdrawn version is in effect no more."""
     values = {each.name: row._mapping[each.name] for each in fields(ReportView) if each.name in row._mapping}
     report = ReportView(**values)
-    states = [state for state in states if not state.withdrawn]
-    if any(state.candidate_id == report.id and not state.repeats for state in states):
-        return replace(report, effect=StateEffect.VERSION)
-    in_effect = [state.status for state in states if state.valid_from <= report.moment]
+    effect, contradicted = report_effect(report.id, report.status, report.moment, [state for state in states if not state.withdrawn])
+    return replace(report, effect=effect, contradicted_state=contradicted)
+
+
+def report_effect(report_id: int, status: str, moment: datetime, versions: list) -> tuple[StateEffect, str | None]:
+    """What a report does to the state in effect at its time as the versions stand now, and the state it contradicts.
+    `versions` are the event's versions not withdrawn, the earliest first (status, valid_from, candidate_id); one
+    whose status the one before it has is a repeat and changed nothing (mark_repeats)."""
+    previous = None
+    for version in versions:
+        if version.candidate_id == report_id and version.status != previous:
+            return StateEffect.VERSION, None
+        previous = version.status
+    in_effect = [version.status for version in versions if version.valid_from <= moment]
     current = in_effect[-1] if in_effect else None
-    effect = state_effect(current, report.status)
+    effect = state_effect(current, status)
     # A change by today's versions that made none when it was assigned: a late report has since added a version
     # before it. Neither confirming nor contradicting, it stays without a label rather than a guess.
     if effect == StateEffect.VERSION:
-        effect = StateEffect.NONE
-    return replace(report, effect=effect, contradicted_state=current if effect == StateEffect.CONTRADICTS else None)
+        return StateEffect.NONE, None
+    return effect, current if effect == StateEffect.CONTRADICTS else None
 
 
 def _state(row: Row) -> StateView:

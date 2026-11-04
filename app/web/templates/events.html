@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_event_filter.html" import event_filter %}
+{% from "_uncertainty.html" import uncertainty_compact %}
 {% block title %}Ereignisse{% endblock %}
 {% block content %}
 <h1>Ereignisse</h1>
@@ -10,6 +11,7 @@
     {% if overview.total > overview.events|length %}Angezeigt: die zuletzt berichteten {{ overview.events|length }} von {{ overview.total }}{{ " passenden" if filtered }} Ereignissen.{% elif filtered %}{{ overview.total }} {{ "passendes Ereignis" if overview.total == 1 else "passende Ereignisse" }}.{% else %}{{ overview.total }} {{ "Ereignis" if overview.total == 1 else "Ereignisse" }}.{% endif %}
     {% if overview.waiting %}{{ overview.waiting }} {{ "Ereigniskandidat wartet" if overview.waiting == 1 else "Ereigniskandidaten warten" }} auf die Zuordnung.{% endif %}
   </p>
+  <p class="hint">Die Suche und ein Zeitraum von, bis reichen über die ganze Geschichte; ein Ereignis passt mit einem Bericht in diesem Zeitraum. Je Ereignis stehen seine Aussagen nach Art, Widersprüche und wie viele Stufen niedrig oder unbekannt sind, nie ein einzelner Wert.</p>
   <p class="hint">Ein Ereignis ist ein Vorfall mit seiner Fortsetzung, nicht ein Thema. Ein neuer Bericht kommt zu einem Ereignis, das bis sieben Tage davor oder danach berichtet wurde: bei ähnlichen Worten von selbst, im Zweifel entscheidet das LLM.</p>
 </section>
 
@@ -28,6 +30,7 @@
         <th>Land</th>
         <th>Berichte</th>
         <th>Quellen</th>
+        <th>Belege und Unsicherheit</th>
       </tr>
     </thead>
     <tbody>
@@ -41,6 +44,7 @@
         <td>{{ event.country or "–" }}</td>
         <td data-testid="event-reports-{{ event.id }}">{{ event.report_count }}</td>
         <td data-testid="event-sources-{{ event.id }}">{{ event.source_count }}</td>
+        <td>{% if uncertainty.get(event.id) %}{{ uncertainty_compact(uncertainty[event.id], "event-uncertainty-" ~ event.id) }}{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
