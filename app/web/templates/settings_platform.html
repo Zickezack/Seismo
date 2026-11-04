@@ -28,6 +28,15 @@
 </div>
 {% endmacro %}
 
+{% macro date_field(field) %}
+<div class="field">
+  <label for="{{ field.name }}">{{ field.label }}</label>
+  <input id="{{ field.name }}" name="{{ field.name }}" type="date"
+         value="{{ settings[field.name] or "" }}" aria-describedby="{{ field.name }}-hint" data-testid="{{ field.name }}">
+  <p class="hint" id="{{ field.name }}-hint">{{ field.hint }}</p>
+</div>
+{% endmacro %}
+
 {% macro llm_status() %}
 <p class="hint field-wide" data-testid="llm-status">{% if llm %}Ollama {{ llm.base_url }}, Modell {{ llm.model }}, Kontext {{ llm.num_ctx }} Tokens: {% if llm.served %}<span class="status status-active">verfügbar</span>{% else %}<span class="status status-failed">nicht verfügbar</span> - nicht erreichbar oder das Modell nicht geladen (ollama pull){% endif %}{% else %}Kein Ollama konfiguriert (OLLAMA_BASE_URL): der Worker extrahiert nichts.{% endif %} Festgelegt in der Umgebung des Servers, nicht hier.</p>
 {% endmacro %}
@@ -37,7 +46,7 @@
   <summary><h2>{{ title }}</h2></summary>
   <form class="form-grid" method="post" action="/settings/platform" data-inline-save data-testid="form-{{ id }}">
     {% if id == "extraktion" %}{{ llm_status() }}{% endif %}
-    {% for name in names %}{% if fields[name].kind in ("domains", "quality") %}{{ domain_field(fields[name]) }}{% elif fields[name].kind == "text" %}{{ text_field(fields[name]) }}{% else %}{{ number_field(fields[name]) }}{% endif %}{% endfor %}
+    {% for name in names %}{% if fields[name].kind in ("domains", "quality") %}{{ domain_field(fields[name]) }}{% elif fields[name].kind == "text" %}{{ text_field(fields[name]) }}{% elif fields[name].kind == "date" %}{{ date_field(fields[name]) }}{% else %}{{ number_field(fields[name]) }}{% endif %}{% endfor %}
     <div class="form-actions">
       <button class="button" type="submit" data-testid="save-{{ id }}">Speichern</button>
       <span class="save-status" data-save-status role="status" data-testid="status-{{ id }}"></span>
@@ -52,6 +61,7 @@
   ("extraktion", "Ereignisextraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour", "source_quality_domains"]),
   ("kurse", "Kurse", ["price_interval_minutes", "price_history_years", "price_full_resolution_days", "tracked_instruments_max", "minute_backfill_days"]),
   ("lagen", "Lagen", ["situation_open_days", "situation_llm_calls_per_hour"]),
+  ("eventstudy", "Event-Study", ["study_training_until", "study_validation_until"]),
   ("aufbewahrung", "Aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
   ("backups", "Backups", ["backup_interval_hours", "backups_to_keep"]),
 ] %}

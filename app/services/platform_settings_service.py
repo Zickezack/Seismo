@@ -2,6 +2,7 @@
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
+from datetime import date
 
 from sqlalchemy import Connection, Engine
 
@@ -65,6 +66,10 @@ class PlatformSettings:
     # The Lagen (situation_service): open after their latest event; LLM calls per hour, apart from the other budgets.
     situation_open_days: int = 30
     situation_llm_calls_per_hour: int = 20
+    # The event study's periods (event_study_service): training up to the first day, validation up to the second, test
+    # after the last one set; neither set: not divided.
+    study_training_until: date | None = None
+    study_validation_until: date | None = None
 
     @property
     def blocked_domains(self) -> list[str]:
@@ -168,6 +173,25 @@ class QualityListField:
             shown = ", ".join(invalid[:5]) + (" …" if len(invalid) > 5 else "")
             raise InvalidSetting(f"{self.label}: je Zeile eine Domain und hoch, mittel oder niedrig, nicht: {shown}.")
         return "\n".join(f"{domain} {word}" for domain, word in sorted(levels.items()))
+
+
+@dataclass(frozen=True)
+class DateField:
+    """A day, or empty, as the form's date input sends it (ISO 8601)."""
+
+    name: str
+    label: str
+    hint: str
+    kind = "date"
+
+    def parse(self, raw: str) -> date | None:
+        raw = raw.strip()
+        if not raw:
+            return None
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            raise InvalidSetting(f"{self.label}: bitte ein Datum wie 2025-12-31 eingeben oder leer lassen.") from None
 
 
 FORM_FIELDS = {
@@ -294,6 +318,16 @@ FORM_FIELDS = {
             0,
             1000,
         ),
+        DateField(
+            "study_training_until",
+            "Training bis",
+            "Ereignisse mit der ersten Meldung bis und mit diesem Tag gehören zum Trainingszeitraum. Leer: nicht aufgeteilt.",
+        ),
+        DateField(
+            "study_validation_until",
+            "Validierung bis",
+            "Danach bis und mit diesem Tag Validierung, später Test. Leer: nach dem Training gleich Test.",
+        ),
         NumberField(
             "succeeded_jobs_retention_days", "Erledigte Jobs aufbewahren (Tage)", "Danach löscht der Worker sie.", 1, 3650
         ),
@@ -338,6 +372,7 @@ def save(engine: Engine, form: Mapping[str, str]) -> PlatformSettings:
     """Save the settings a form sent; other settings stay as they are. One invalid value changes nothing."""
     values = parse(form)
     with engine.begin() as connection:
+        check_periods({**_period_values(load(connection)), **values})
         store(connection, values)
         return load(connection)
 
@@ -361,4 +396,23 @@ def parse(form: Mapping[str, str]) -> dict[str, object]:
             errors.append(str(error))
     if errors:
         raise InvalidSetting(" ".join(errors))
+    check_periods(values)
     return values
+
+
+PERIOD_FIELDS = ("study_training_until", "study_validation_until")
+
+
+def _period_values(settings: PlatformSettings) -> dict[str, object]:
+    return {name: getattr(settings, name) for name in PERIOD_FIELDS}
+
+
+def check_periods(values: Mapping[str, object]) -> None:
+    """Validation needs a training period before it, and ends after it (the database's check, said in words)."""
+    training, validation = values.get("study_training_until"), values.get("study_validation_until")
+    if validation is None:
+        return
+    if training is None and "study_training_until" in values:
+        raise InvalidSetting("Validierung bis: zuerst „Training bis“ setzen.")
+    if training is not None and validation <= training:
+        raise InvalidSetting("Validierung bis: muss nach „Training bis“ liegen.")

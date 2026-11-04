@@ -6,7 +6,7 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
-from app.services import alert_service
+from app.services import alert_service, event_study_service
 from app.web.access import current_admin
 
 WEB_DIR = Path(__file__).parent
@@ -71,3 +71,7 @@ def _size(value: float | None) -> str:
 templates = Jinja2Templates(directory=WEB_DIR / "templates", context_processors=[_admin, _unread_alerts, _flash])
 templates.env.filters["local_time"] = _local_time
 templates.env.filters["size"] = _size
+# A return as a signed percentage ("+1,23 %"), a number with a decimal comma, a share ("67 %") (event_study_service).
+templates.env.filters["percent"] = event_study_service.percent_label
+templates.env.filters["decimal"] = event_study_service.number_label
+templates.env.filters["share"] = event_study_service.share_label

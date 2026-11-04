@@ -1,12 +1,19 @@
 """Ereignisse pages in the web layer, without a database: the services are replaced."""
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.repositories.event_repository import EventFilter
-from app.services import event_context_service, entity_service, event_correction_service, event_service, instrument_service
+from app.services import (
+    entity_service,
+    event_context_service,
+    event_correction_service,
+    event_service,
+    event_study_service,
+    instrument_service,
+)
 from app.services.bulk import BulkResult
 from app.services.entity_service import EntityRef
 from app.services.event_correction_service import InvalidReason, SimilarEvent, SplitResult
@@ -32,10 +39,24 @@ from app.services.event_context_service import (
     UncertainForm,
     Uncertainty,
 )
+from app.services.event_study_service import (
+    WINDOWS,
+    Adjustment,
+    Benchmark,
+    EventReaction,
+    Measurement,
+    Model,
+    Period,
+    Reaction,
+    SectorRef,
+    Status,
+    WindowResult,
+)
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
 
 
+NO_REACTION = EventReaction(None, None, Period.UNDIVIDED, None, [], [])
 CHOICES = FilterChoices(["CH", "US"], [EntityRef(7, "Halbleiter"), EntityRef(8, "Öl und Gas")])
 
 
@@ -70,6 +91,7 @@ def pages(monkeypatch):
     monkeypatch.setattr(event_context_service, "earlier_events", lambda _engine, event_id: calls.get("earlier", Comparison()))
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: calls.get("entities", []))
     monkeypatch.setattr(instrument_service, "of_entities", lambda _engine, entity_ids: calls.get("instruments", []))
+    monkeypatch.setattr(event_study_service, "of_event", lambda _engine, event_id: calls.get("reaction", NO_REACTION))
     return calls
 
 
@@ -506,3 +528,46 @@ def test_without_comparable_earlier_events_the_page_says_so(client, pages):
     html = client.get("/events/7").text
 
     assert text_of(html, "no-earlier") == "Kein früheres Ereignis ist vergleichbar."
+
+
+def test_the_event_page_shows_the_market_reaction_with_both_measures_gaps_and_adjustments(client, pages):
+    pages["detail"] = EventDetail(event(7), [report(1, "new", founding=True)])
+    day, d5 = date(2025, 6, 10), date(2025, 6, 17)
+    results = [
+        WindowResult(WINDOWS[1], day, day, Status.DONE, [], 0.062, 0.004, 0.058, 0.0512, 4.24),
+        WindowResult(WINDOWS[3], day, d5, Status.GAP, [("XCO", date(2025, 6, 13))]),
+        WindowResult(WINDOWS[5], day, date(2025, 9, 4), Status.OPEN, [], cut=True),
+    ]
+    market = Measurement(Benchmark.MARKET, "SPY", "SPDR S&P 500", Model(0.0002, 1.53, 0.004, 120), results)
+    sector = Measurement(Benchmark.SECTOR, "XLE", "Energy Select", None, results[:1])
+    pages["reaction"] = EventReaction(
+        day, (date(2024, 12, 9), date(2025, 5, 23)), Period.TRAINING, SectorRef("oil-gas", "Öl und Gas", "XLE"),
+        [Reaction(3, "XCO", "Exco Inc.", [market, sector], [Adjustment("XCO", date(2025, 3, 18), "Aktiensplit 1:2")], [date(2025, 6, 13)])],
+        [],
+    )
+
+    html = client.get("/events/7").text
+
+    assert text_of(html, "reaction-period") == "Training"
+    assert text_of(html, "reaction-sector") == "Öl und Gas (XLE)"
+    assert "Ereignistag 10.06.2025" in html and "Schätzfenster 09.12.2024 bis 23.05.2025" in html
+    assert text_of(html, "excess-3-market-day") == "+5,80 %"
+    assert text_of(html, "abnormal-3-market-day") == "+5,12 %"
+    assert "Alpha +0,02 % pro Tag, Beta 1,53" in text_of(html, "reaction-model-3-market")
+    assert "zu wenig Daten" in text_of(html, "reaction-model-3-sector")
+    gap = re.search(r'data-testid="status-3-market-d5">(.*?)</td>', html, re.DOTALL).group(1)
+    assert gap.startswith("Lücke") and "ohne Kurs: XCO 13.06.2025" in gap
+    open_window = re.search(r'data-testid="status-3-market-d60">(.*?)</td>', html, re.DOTALL).group(1)
+    assert open_window.startswith("offen bis 04.09.2025") and "zählt dort nicht" in open_window
+    assert text_of(html, "reaction-adjustments-3") == "Anpassungen: XCO Aktiensplit 1:2 am 18.03.2025."
+    assert text_of(html, "reaction-gaps-3") == "Lücken von XCO im ganzen Zeitraum: 13.06.2025."
+    assert tag_of(html, "section-nav-reaction") is not None
+
+
+def test_without_a_us_wertpapier_the_page_says_there_is_no_reaction(client, pages):
+    pages["detail"] = EventDetail(event(7), [report(1, "new", founding=True)])
+
+    html = client.get("/events/7").text
+
+    assert text_of(html, "no-reaction") == "Keine Entität seiner Berichte hat ein US-Wertpapier mit Tageskursen (Alpaca)."
+    assert text_of(html, "reaction-sector") == "keine genannt, nur gegen den Markt"

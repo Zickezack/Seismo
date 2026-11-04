@@ -423,6 +423,10 @@ class PlatformSettingsRecord(Base):
     # The Lagen (situation_service): open this long after their latest event; LLM calls per hour for them.
     situation_open_days: Mapped[int] = mapped_column(server_default="30")
     situation_llm_calls_per_hour: Mapped[int] = mapped_column(server_default="20")
+    # The event study's periods (event_study_service): an event of its first report's day up to the first is in
+    # training, up to the second in validation, after the last one set in test; neither set: not divided.
+    study_training_until: Mapped[date | None] = mapped_column(Date)
+    study_validation_until: Mapped[date | None] = mapped_column(Date)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -448,6 +452,11 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(situation_open_days.between(1, 365), name="situation_open_days"),
         # 0 holds the forming of Lagen.
         CheckConstraint(situation_llm_calls_per_hour >= 0, name="situation_llm_calls_per_hour"),
+        # Validation only after a training period, and after its end.
+        CheckConstraint(
+            "study_validation_until IS NULL OR (study_training_until IS NOT NULL AND study_validation_until > study_training_until)",
+            name="study_periods",
+        ),
     )
 
 

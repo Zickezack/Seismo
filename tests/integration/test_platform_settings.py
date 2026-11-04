@@ -1,4 +1,6 @@
 """Plattform-Einstellungen in PostgreSQL: defaults, a single row, saving."""
+from datetime import date
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -53,3 +55,24 @@ def test_one_invalid_value_changes_nothing(database):
 def test_database_rejects_a_limit_below_one(database):
     with pytest.raises(IntegrityError), database.begin() as connection:
         platform_settings_repository.save(connection, {"llm_max_parallel_calls": 0})
+
+
+def test_the_event_study_periods_are_saved_and_checked_against_the_stored_ones(database):
+    saved = platform_settings_service.save(database, {"study_training_until": "2025-12-31", "study_validation_until": "2026-06-30"})
+    assert (saved.study_training_until, saved.study_validation_until) == (date(2025, 12, 31), date(2026, 6, 30))
+
+    # A form of the other field alone is checked against the one stored.
+    with pytest.raises(InvalidSetting, match="nach „Training bis“"):
+        platform_settings_service.save(database, {"study_validation_until": "2025-06-30"})
+    with pytest.raises(InvalidSetting, match="nach „Training bis“"):
+        platform_settings_service.save(database, {"study_training_until": "2026-07-01"})
+
+    cleared = platform_settings_service.save(database, {"study_training_until": "", "study_validation_until": ""})
+    assert (cleared.study_training_until, cleared.study_validation_until) == (None, None)
+
+
+def test_database_rejects_validation_without_training_before_it(database):
+    for values in ({"study_validation_until": date(2026, 6, 30)},
+                   {"study_training_until": date(2026, 6, 30), "study_validation_until": date(2026, 6, 30)}):
+        with pytest.raises(IntegrityError), database.begin() as connection:
+            platform_settings_repository.save(connection, values)

@@ -1,6 +1,6 @@
 """Ereignisse: the most recently reported events, filtered and searched as the analyst chooses, and one event with its
-reports, what they leave uncertain or contradict and the earlier events comparable with it, where the analyst merges
-similar events into it and splits off reports of another incident."""
+reports, what they leave uncertain or contradict, how the market reacted and the earlier events comparable with it,
+where the analyst merges similar events into it and splits off reports of another incident."""
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Request
@@ -12,6 +12,7 @@ from app.services import (
     event_context_service,
     event_correction_service,
     event_service,
+    event_study_service,
     instrument_service,
     situation_service,
     watchlist_service,
@@ -57,6 +58,7 @@ def event_page(request: Request, event_id: int) -> Response:
         "earlier": event_context_service.earlier_events(engine, event_id),
         "entities": entities,
         "instruments": instrument_service.of_entities(engine, [entity.id for entity in entities]),
+        "reaction": event_study_service.of_event(engine, event_id),
         "watch": watchlist_service.watching(engine, WatchItemKind.EVENT, event_id),
         "situations": situation_service.of_event(engine, event_id),
     }

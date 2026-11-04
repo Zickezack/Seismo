@@ -89,6 +89,11 @@ too: 1440 calls a day of the plan's quota - track one only with a plan that allo
 behalten (Tage)" (90 by default, 0 unlimited) the worker compresses the points to hours; Datenbestand shows what
 tracking takes per day.
 
+The Event-Study page and an event's Marktreaktion measure the US Wertpapiere of the companies its reports name
+against SPY and the sector ETF of the sector they name most, from the daily prices (Alpaca's keys needed; SPY and the
+sector ETFs are fetched first). To keep training, validation and test apart, set "Training bis" and "Validierung bis"
+under Plattform-Einstellungen, Event-Study; empty, the events are not divided.
+
 The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
 show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):
 

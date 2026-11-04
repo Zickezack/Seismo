@@ -12,6 +12,7 @@ from app.services import (
     event_context_service,
     event_correction_service,
     event_service,
+    event_study_service,
     instrument_service,
     relationship_service,
     tracking_service,
@@ -36,7 +37,7 @@ from app.services.event_context_service import Comparison, Uncertainty
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, SETTINGS, tag_of, text_of
 from tests.unit.test_web_entities import entity
-from tests.unit.test_web_events import event
+from tests.unit.test_web_events import NO_REACTION, event
 
 AT = datetime(2026, 10, 30, 20, 29, tzinfo=UTC)
 SOURCES = [SourceStatus("alpaca", "Alpaca", True, ("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY")), SourceStatus("six", "SIX", True, ()),
@@ -249,6 +250,7 @@ def test_an_entity_and_an_event_show_the_latest_prices_of_their_wertpapiere(clie
     monkeypatch.setattr(event_correction_service, "similar_events", lambda _engine, event_id: [])
     monkeypatch.setattr(event_context_service, "uncertainty_of", lambda _engine, event_ids: {each: Uncertainty() for each in event_ids})
     monkeypatch.setattr(event_context_service, "earlier_events", lambda _engine, event_id: Comparison())
+    monkeypatch.setattr(event_study_service, "of_event", lambda _engine, event_id: NO_REACTION)
 
     for path in ("/entities/7", "/events/8"):
         html = client.get(path).text

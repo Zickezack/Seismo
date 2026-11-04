@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Event-Study{% endblock %}
+{% block content %}
+<h1>Event-Study</h1>
+
+<section class="card stack">
+  <p>Wie sich die US-Wertpapiere der Firmen, die die Berichte eines Ereignisses nennen, um den Ereignistag bewegten - den ersten Handelstag, der nach der ersten Meldung schliesst. Jedes Wertpapier zählt je Ereignis einmal.</p>
+  <p class="hint">Renditen mit Dividenden, splitbereinigt, von Schluss zu Schluss, aus den Tageskursen aller US-Börsen (Alpaca, SIP). Marktmodell: Alpha und Beta aus den Handelstagen {{ estimation[0] }} bis {{ estimation[1] }}, ab {{ min_estimation_days }} Tagen mit beiden Kursen. Branche: der ETF der Branche, die die Berichte am häufigsten nennen. Ein Fenster mit einer Lücke, eines das noch nicht geschlossen oder noch nicht abgerufen ist, zählt nicht; ebenso eines, das über das Ende seines Zeitraums hinausreicht - spätere Kurse fliessen nie in einen früheren Zeitraum. Berechnet beim Aufruf, keine Prognose.</p>
+  <p data-testid="study-counts">{{ overview.events }} {{ "Ereignis" if overview.events == 1 else "Ereignisse" }} mit {{ overview.observations }} {{ "Wertpapier" if overview.observations == 1 else "Wertpapieren" }}.
+    Zeiträume: <span data-testid="study-periods">{% if overview.training_until %}Training bis {{ overview.training_until.strftime("%d.%m.%Y") }}{% if overview.validation_until %}, Validierung bis {{ overview.validation_until.strftime("%d.%m.%Y") }}{% endif %}, danach Test{% else %}nicht aufgeteilt{% endif %}</span> (<a href="/settings/platform#eventstudy">Plattform-Einstellungen</a>).</p>
+  {% if overview.benchmarks_missing %}<p class="hint" data-testid="benchmarks-missing">Nicht in Alpacas Liste: {{ overview.benchmarks_missing|join(", ") }}.</p>{% endif %}
+</section>
+
+<details class="card section" id="choice" open data-testid="section-choice">
+  <summary><h2>Auswahl</h2></summary>
+  <form class="form-grid" method="get" action="/event-study" data-testid="study-choice">
+    <div class="field">
+      <label for="choice-benchmark">Benchmark</label>
+      <select id="choice-benchmark" name="benchmark" data-testid="choice-benchmark">
+        {% for key, label in benchmark_labels.items() %}<option value="{{ key }}"{% if overview.benchmark == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="choice-measure">Mass</label>
+      <select id="choice-measure" name="measure" data-testid="choice-measure">
+        {% for key, label in measure_labels.items() %}<option value="{{ key }}"{% if overview.measure == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="form-actions actions">
+      <button class="button button-secondary" type="submit" data-testid="apply-choice">Anzeigen</button>
+    </div>
+  </form>
+</details>
+
+<details class="card section" id="results" open data-testid="section-results">
+  <summary><h2>Nach Ereignistyp und Fenster</h2></summary>
+  <div class="stack">
+    <p class="hint">Je Zeitraum: n, Mittelwert, Median und der Anteil über null - nebeneinander, kein einzelner Wert; darunter, was nicht zählt und warum.</p>
+    <div class="table-container">
+      <table class="table" data-testid="study-table">
+        <thead>
+          <tr>
+            <th>Ereignistyp</th>
+            <th>Fenster</th>
+            {% for period in overview.periods %}<th data-testid="period-{{ period }}">{{ overview.period_labels[period] }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in overview.rows %}
+          <tr data-testid="study-{{ row.event_type or 'all' }}-{{ row.window.key }}">
+            <td class="cell-title">{% if loop.first or row.event_type != loop.previtem.event_type %}{% if row.event_type %}<a href="/events?type={{ row.event_type }}">{{ row.label }}</a>{% else %}{{ row.label }}{% endif %}{% endif %}</td>
+            <td>{{ row.window.label }}</td>
+            {% for period in overview.periods %}
+            {% set figure = row.figures[period] %}
+            <td class="cell-wrap" data-testid="figure-{{ row.event_type or 'all' }}-{{ row.window.key }}-{{ period }}">
+              {% if figure.count %}<span class="uncertainty"><span>n {{ figure.count }}</span><span>Ø {{ figure.mean|percent }}</span><span>Median {{ figure.median|percent }}</span><span>{{ figure.positive|share }} positiv</span></span>{% else %}<span>n 0</span>{% endif %}
+              {% if figure.excluded_count %}<span class="hint" data-testid="excluded-{{ row.event_type or 'all' }}-{{ row.window.key }}-{{ period }}">ohne {{ figure.excluded_count }}: {{ figure.excluded_label }}</span>{% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+{% endblock %}

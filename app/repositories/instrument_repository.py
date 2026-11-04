@@ -89,6 +89,19 @@ def of_entities(connection: Connection, entity_ids: Iterable[int]) -> Sequence[R
     return connection.execute(statement).all()
 
 
+def by_symbols(connection: Connection, source: str, symbols: Iterable[str]) -> dict[str, Row]:
+    """The source's Wertpapiere with these symbols now, by symbol: a traded one before one no longer traded."""
+    statement = (
+        select(Instrument.__table__)
+        .where(Instrument.source == source, Instrument.symbol.in_(list(symbols)))
+        .order_by(Instrument.symbol, Instrument.status, Instrument.id)
+    )
+    found = {}
+    for row in connection.execute(statement):
+        found.setdefault(row.symbol, row)
+    return found
+
+
 def find(connection: Connection, source: str, source_ref: str) -> int | None:
     statement = select(Instrument.id).where(Instrument.source == source, Instrument.source_ref == source_ref)
     return connection.execute(statement).scalar_one_or_none()
@@ -149,10 +162,11 @@ def live_due(connection: Connection, source: str, asked_before: datetime) -> Seq
     return connection.execute(statement).all()
 
 
-def history_due(connection: Connection, source: str, through: date) -> Sequence[Row]:
+def history_due(connection: Connection, source: str, through: date, first: Sequence[str] = ()) -> Sequence[Row]:
     """The source's Wertpapiere whose daily prices do not reach `through` yet, those not fetched at all first, then by
-    how far they reach - so a batch shares one start. One no longer traded is fetched once; one whose symbol a traded
-    one carries now only once its last day is known - before, its prices could not be told from the other's."""
+    how far they reach - so a batch shares one start -, and among those reaching as far the symbols `first` first. One
+    no longer traded is fetched once; one whose symbol a traded one carries now only once its last day is known -
+    before, its prices could not be told from the other's."""
     other = aliased(Instrument)
     symbol_taken = exists().where(
         other.source == Instrument.source, other.symbol == Instrument.symbol, other.status == InstrumentStatus.ACTIVE,
@@ -166,7 +180,12 @@ def history_due(connection: Connection, source: str, through: date) -> Sequence[
             or_(Instrument.history_through.is_(None), and_(~inactive, Instrument.history_through < through)),
             ~and_(inactive, Instrument.delisted_on.is_(None), symbol_taken),
         )
-        .order_by(Instrument.history_through.asc().nulls_first(), Instrument.status, Instrument.id)
+        .order_by(
+            Instrument.history_through.asc().nulls_first(),
+            Instrument.symbol.in_(list(first)).desc(),
+            Instrument.status,
+            Instrument.id,
+        )
     )
     return connection.execute(statement).all()
 

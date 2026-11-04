@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from app.repositories import platform_settings_repository
@@ -37,6 +39,9 @@ def test_every_setting_has_a_form_field_and_every_default_fits_its_range():
         if field.kind in ("domains", "text", "quality"):
             # Valid, and already as the form stores it.
             assert field.parse(getattr(defaults, name)) == getattr(defaults, name)
+        elif field.kind == "date":
+            # Empty until the admin divides the events into periods.
+            assert getattr(defaults, name) is None
         else:
             assert field.minimum <= getattr(defaults, name) <= field.maximum
 
@@ -98,3 +103,30 @@ def test_load_uses_the_default_for_every_setting_never_saved(monkeypatch, stored
     monkeypatch.setattr(platform_settings_repository, "load", lambda _connection: stored)
 
     assert platform_settings_service.load(None) == expected
+
+
+def test_a_date_is_iso_or_empty():
+    field = FORM_FIELDS["study_training_until"]
+    assert field.parse(" 2025-12-31 ") == date(2025, 12, 31)
+    assert field.parse("") is None
+    with pytest.raises(InvalidSetting, match="Training bis: bitte ein Datum"):
+        field.parse("31.12.2025")
+
+
+@pytest.mark.parametrize(
+    ("form", "message"),
+    [
+        ({"study_training_until": "", "study_validation_until": "2026-06-30"}, "zuerst „Training bis“"),
+        ({"study_training_until": "2026-06-30", "study_validation_until": "2026-06-30"}, "nach „Training bis“"),
+        ({"study_training_until": "2026-07-01", "study_validation_until": "2026-06-30"}, "nach „Training bis“"),
+    ],
+)
+def test_validation_needs_a_training_period_before_it(form, message):
+    with pytest.raises(InvalidSetting, match=message):
+        platform_settings_service.parse(form)
+
+
+def test_the_periods_may_be_left_open():
+    assert platform_settings_service.parse({"study_training_until": "2025-12-31", "study_validation_until": ""}) == {
+        "study_training_until": date(2025, 12, 31), "study_validation_until": None,
+    }

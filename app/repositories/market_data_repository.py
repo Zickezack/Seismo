@@ -1,9 +1,10 @@
 """Data access for the market data behind the daily prices: the trading days, the corporate actions (Kapitalmassnahmen),
 how far each sync came, and the daily prices as known at a moment (datamodel.md, rule 14)."""
-from collections.abc import Sequence
-from datetime import date, datetime
+from collections.abc import Iterable, Sequence
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import Connection, Date, Row, cast, func, select
+from sqlalchemy import BigInteger, Connection, Date, DateTime, Row, and_, cast, column, func, select, values
 from sqlalchemy.dialects.postgresql import insert
 
 from app.db.models import CorporateAction, MarketDataSync, PricePoint, PriceResolution, TradingDay
@@ -11,6 +12,7 @@ from app.db.models import CorporateAction, MarketDataSync, PricePoint, PriceReso
 # A daily price's trading day: its time is the day's start in New York, as Alpaca sends it.
 _DAY = cast(func.timezone("America/New_York", PricePoint.at), Date)
 _DAILY = PricePoint.resolution == PriceResolution.DAY
+_NEW_YORK = ZoneInfo("America/New_York")
 
 
 def upsert_trading_days(connection: Connection, rows: list[dict]) -> None:
@@ -59,6 +61,43 @@ def actions(connection: Connection, instrument_id: int, kinds: Sequence[str] | N
         statement = statement.where(CorporateAction.kind.in_(list(kinds)))
     day = func.coalesce(CorporateAction.ex_date, CorporateAction.effective_date, CorporateAction.process_date)
     return connection.execute(statement.order_by(day.desc().nulls_last(), CorporateAction.id.desc())).all()
+
+
+def actions_of(connection: Connection, instrument_ids: Iterable[int], kinds: Sequence[str]) -> Sequence[Row]:
+    """The corporate actions of these kinds of these Wertpapiere, by Wertpapier and day."""
+    statement = (
+        select(CorporateAction.__table__)
+        .where(CorporateAction.instrument_id.in_(list(instrument_ids)), CorporateAction.kind.in_(list(kinds)))
+        .order_by(CorporateAction.instrument_id, CorporateAction.ex_date, CorporateAction.id)
+    )
+    return connection.execute(statement).all()
+
+
+def trading_days(connection: Connection) -> Sequence[Row]:
+    """Every trading day the calendar knows - day, closes_at -, the earliest first: a few thousand."""
+    return connection.execute(select(TradingDay.day, TradingDay.closes_at).order_by(TradingDay.day)).all()
+
+
+def _day_start(day: date) -> datetime:
+    return datetime.combine(day, time(), _NEW_YORK)
+
+
+def daily_closes(connection: Connection, spans: Sequence[tuple[int, date, date]]) -> Sequence[Row]:
+    """The daily closes of each Wertpapier from the first to the last day of its span - instrument_id, day, close -, by
+    Wertpapier and day. By its time, so the unique index on Wertpapier, resolution and time serves it."""
+    if not spans:
+        return []
+    span = values(
+        column("instrument_id", BigInteger), column("starts", DateTime(timezone=True)), column("ends", DateTime(timezone=True)),
+        name="span",
+    ).data([(instrument_id, _day_start(first), _day_start(last + timedelta(days=1))) for instrument_id, first, last in spans])
+    statement = (
+        select(PricePoint.instrument_id, _DAY.label("day"), PricePoint.close)
+        .join(span, and_(PricePoint.instrument_id == span.c.instrument_id, PricePoint.at >= span.c.starts, PricePoint.at < span.c.ends))
+        .where(_DAILY)
+        .order_by(PricePoint.instrument_id, PricePoint.at)
+    )
+    return connection.execute(statement).all()
 
 
 def known_bars(connection: Connection, instrument_id: int, reference: datetime, limit: int) -> Sequence[Row]:

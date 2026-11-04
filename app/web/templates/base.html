@@ -12,7 +12,7 @@
     <a class="brand" href="/">Seismo</a>
     {% if admin %}
     <nav class="site-nav" aria-label="Hauptnavigation">
-      {% for href, label, name in [("/", "Dashboard", "dashboard"), ("/sources", "Quellen", "sources"), ("/articles", "Artikel", "articles"), ("/events", "Ereignisse", "events"), ("/situations", "Lagen", "situations"), ("/entities", "Entitäten", "entities"), ("/instruments", "Wertpapiere", "instruments"), ("/watchlists", "Watchlists", "watchlists"), ("/alerts", "Alerts", "alerts"), ("/jobs", "Jobs", "jobs"), ("/data", "Datenbestand", "data"), ("/settings/platform", "Einstellungen", "settings")] %}
+      {% for href, label, name in [("/", "Dashboard", "dashboard"), ("/sources", "Quellen", "sources"), ("/articles", "Artikel", "articles"), ("/events", "Ereignisse", "events"), ("/situations", "Lagen", "situations"), ("/entities", "Entitäten", "entities"), ("/instruments", "Wertpapiere", "instruments"), ("/event-study", "Event-Study", "event-study"), ("/watchlists", "Watchlists", "watchlists"), ("/alerts", "Alerts", "alerts"), ("/jobs", "Jobs", "jobs"), ("/data", "Datenbestand", "data"), ("/settings/platform", "Einstellungen", "settings")] %}
       <a href="{{ href }}" data-testid="nav-{{ name }}"{% if request.url.path == href or (href != "/" and request.url.path.startswith(href)) %} aria-current="page"{% endif %}>{{ label }}{% if name == "alerts" and unread_alerts %} <span class="badge" data-testid="unread-alerts" aria-label="{{ unread_alerts }} ungelesen">{{ unread_alerts }}</span>{% endif %}</a>
       {% endfor %}
     </nav>

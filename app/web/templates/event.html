@@ -8,7 +8,7 @@
 {% set merged = detail.merged_into is not none %}
 {# A split needs a report to leave and one to stay. #}
 {% set splittable = not merged and detail.reports|length > 1 %}
-{% set sections = [("states", "Verlauf"), ("uncertainty", "Unsicherheit"), ("chronicle", "Chronik"), ("reports", "Berichte"), ("sources", "Quellen"), ("entities", "Entitäten"), ("instruments", "Kurse")]
+{% set sections = [("states", "Verlauf"), ("uncertainty", "Unsicherheit"), ("chronicle", "Chronik"), ("reports", "Berichte"), ("sources", "Quellen"), ("entities", "Entitäten"), ("instruments", "Kurse"), ("reaction", "Marktreaktion")]
   + ([] if merged else [("similar", "Ähnliche Ereignisse"), ("earlier", "Frühere Ereignisse")])
   + ([("corrections", "Korrekturen")] if detail.corrections else []) %}
 <h1 data-testid="event-title">{{ event.title }}</h1>
@@ -269,6 +269,54 @@
     {% else %}
     <p data-testid="no-instruments">Keine Entität seiner Berichte hat ein Wertpapier.</p>
     {% endif %}
+  </div>
+</details>
+
+{# The event study (Historische Markt- und Ereignisdaten, story 2): computed as the page loads, nothing stored. #}
+<details class="section" id="reaction" open data-testid="reaction-section">
+  <summary><h2>Marktreaktion ({{ reaction.reactions|length }})</h2></summary>
+  <div class="stack">
+    <p class="hint">Die US-Wertpapiere mit Tageskursen der Entitäten seiner Berichte, gegen den Markt und die Branche, die seine Berichte am häufigsten nennen. Renditen mit Dividenden, splitbereinigt, von Schluss zu Schluss; ein fehlender Kurs ist eine Lücke und wird nie aufgefüllt. Zwei Masse nebeneinander, kein einzelner Wert: bereinigt ist die Rendite minus die des Benchmarks, abnormal die Summe der Abweichungen vom Marktmodell mit ihrem t-Wert. <a href="/event-study">Alle Ereignisse in der Event-Study</a></p>
+    <p data-testid="reaction-basis">
+      {% if reaction.event_day %}Ereignistag {{ reaction.event_day.strftime("%d.%m.%Y") }}, der erste Handelstag, der nach der ersten Meldung schliesst.{% else %}Kein Ereignistag: der Handelskalender reicht nicht so weit.{% endif %}
+      Zeitraum: <span data-testid="reaction-period">{{ reaction.period_label }}</span>.
+      {% if reaction.estimation %}Schätzfenster {{ reaction.estimation[0].strftime("%d.%m.%Y") }} bis {{ reaction.estimation[1].strftime("%d.%m.%Y") }}.{% endif %}
+      Branche: <span data-testid="reaction-sector">{% if reaction.sector %}{{ reaction.sector.name }} ({{ reaction.sector.symbol }}){% else %}keine genannt, nur gegen den Markt{% endif %}</span>.
+    </p>
+    {% for each in reaction.reactions %}
+    <div class="stack" data-testid="reaction-{{ each.instrument_id }}">
+      <h3><a href="/instruments/{{ each.instrument_id }}">{{ each.name }}</a> <span class="hint">{{ each.symbol }}</span></h3>
+      {% for m in each.measurements %}
+      <p class="hint" data-testid="reaction-model-{{ each.instrument_id }}-{{ m.benchmark }}">Gegen {{ m.benchmark_label }}: {{ m.name }} ({{ m.symbol }}). {{ m.model_label }}.</p>
+      <div class="table-container">
+        <table class="table" data-testid="reaction-table-{{ each.instrument_id }}-{{ m.benchmark }}">
+          <thead><tr><th>Fenster</th><th>Handelstage</th><th>Rendite</th><th>{{ m.symbol }}</th><th>Bereinigt</th><th>Abnormal</th><th>t</th><th>Stand</th></tr></thead>
+          <tbody>
+            {% for w in m.windows %}
+            <tr data-testid="reaction-{{ each.instrument_id }}-{{ m.benchmark }}-{{ w.window.key }}">
+              <td>{{ w.window.label }}</td>
+              <td class="cell-wrap">{% if w.first_day %}{{ w.first_day.strftime("%d.%m.%Y") }}{% if w.last_day and w.last_day != w.first_day %} bis {{ w.last_day.strftime("%d.%m.%Y") }}{% endif %}{% else %}–{% endif %}</td>
+              <td>{{ w.raw|percent }}</td>
+              <td>{{ w.benchmark|percent }}</td>
+              <td data-testid="excess-{{ each.instrument_id }}-{{ m.benchmark }}-{{ w.window.key }}">{{ w.excess|percent }}</td>
+              <td data-testid="abnormal-{{ each.instrument_id }}-{{ m.benchmark }}-{{ w.window.key }}">{{ w.abnormal|percent }}</td>
+              <td>{{ w.t|decimal }}</td>
+              <td class="cell-wrap" data-testid="status-{{ each.instrument_id }}-{{ m.benchmark }}-{{ w.window.key }}">{{ w.status_label }}{% if w.status == "open" and w.last_day %} bis {{ w.last_day.strftime("%d.%m.%Y") }}{% endif %}{% if w.missing %}<span class="hint">ohne Kurs: {% for symbol, day in w.missing[:3] %}{{ symbol }} {{ day.strftime("%d.%m.%Y") }}{% if not loop.last %}, {% endif %}{% endfor %}{% if w.missing|length > 3 %} und {{ w.missing|length - 3 }} weitere{% endif %}</span>{% endif %}{% if w.cut %}<span class="hint">reicht über das Ende des Zeitraums: zählt dort nicht</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p data-testid="reaction-none-{{ each.instrument_id }}">Nicht messbar: kein Ereignistag oder kein Benchmark in Alpacas Liste.</p>
+      {% endfor %}
+      <p class="hint" data-testid="reaction-adjustments-{{ each.instrument_id }}">Anpassungen: {% for a in each.adjustments %}{{ a.symbol }} {{ a.text }} am {{ a.day.strftime("%d.%m.%Y") }}{% if not loop.last %}; {% endif %}{% else %}keine{% endfor %}.</p>
+      <p class="hint" data-testid="reaction-gaps-{{ each.instrument_id }}">Lücken von {{ each.symbol }} im ganzen Zeitraum: {% for day in each.gaps[:10] %}{{ day.strftime("%d.%m.%Y") }}{% if not loop.last %}, {% endif %}{% else %}keine{% endfor %}{% if each.gaps|length > 10 %} und {{ each.gaps|length - 10 }} weitere{% endif %}.</p>
+    </div>
+    {% else %}
+    <p data-testid="no-reaction">Keine Entität seiner Berichte hat ein US-Wertpapier mit Tageskursen (Alpaca).</p>
+    {% endfor %}
+    {% if reaction.benchmarks_missing %}<p class="hint" data-testid="benchmarks-missing">Nicht in Alpacas Liste: {{ reaction.benchmarks_missing|join(", ") }}.</p>{% endif %}
   </div>
 </details>
 

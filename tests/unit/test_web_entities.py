@@ -12,6 +12,7 @@ from app.services import (
     event_context_service,
     event_correction_service,
     event_service,
+    event_study_service,
     instrument_service,
     relationship_service,
     seed_service,
@@ -27,7 +28,7 @@ from app.services.watchlist_service import Watching, WatchlistRef
 from app.services.event_context_service import Comparison, Uncertainty
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
-from tests.unit.test_web_events import event
+from tests.unit.test_web_events import NO_REACTION, event
 
 
 def entity(entity_id, **fields):
@@ -218,6 +219,7 @@ def test_the_event_page_lists_the_entities_its_reports_name(client, monkeypatch)
     monkeypatch.setattr(event_correction_service, "similar_events", lambda _engine, event_id: [])
     monkeypatch.setattr(event_context_service, "uncertainty_of", lambda _engine, event_ids: {each: Uncertainty() for each in event_ids})
     monkeypatch.setattr(event_context_service, "earlier_events", lambda _engine, event_id: Comparison())
+    monkeypatch.setattr(event_study_service, "of_event", lambda _engine, event_id: NO_REACTION)
     monkeypatch.setattr(instrument_service, "of_entities", lambda _engine, entity_ids: [])
     monkeypatch.setattr(entity_service, "of_event", lambda _engine, event_id: [
         EventEntity(3, "person", "Volodymyr Zelenskyy", 2, True, ["Vladimir Zelensky", "Volodymyr Zelenskyy"]),

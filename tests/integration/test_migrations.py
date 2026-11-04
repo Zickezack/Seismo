@@ -592,3 +592,22 @@ def test_existing_wertpapiere_are_not_tracked_and_minutes_and_hours_go_with_a_do
     assert resolutions == ["quote"] and "price_gap" not in tables
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_the_settings_row_starts_with_the_events_undivided_and_keeps_its_values_on_downgrade(engine):
+    upgrade(engine, "8fc0aafe5eb6")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO platform_settings (id, backups_to_keep) VALUES (1, 5)"))
+
+    upgrade(engine)
+    with engine.begin() as connection:
+        periods = connection.execute(text("SELECT study_training_until, study_validation_until FROM platform_settings")).one()
+        connection.execute(text("UPDATE platform_settings SET study_training_until = '2025-12-31', study_validation_until = '2026-06-30'"))
+    assert tuple(periods) == (None, None)
+
+    downgrade(engine, "8fc0aafe5eb6")
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT backups_to_keep FROM platform_settings")).scalar_one() == 5
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

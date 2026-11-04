@@ -1,6 +1,6 @@
 """Export and import of the configuration against PostgreSQL: a round trip, names in use, all or nothing."""
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -118,3 +118,16 @@ def _as_form(source):
         for name in transfer_service.SOURCE_FIELDS
         for value in [getattr(source, name)]
     }
+
+
+def test_the_event_study_periods_travel_as_iso_days(database):
+    platform_settings_service.save(database, {"study_training_until": "2025-12-31", "study_validation_until": "2026-06-30"})
+    exported = transfer_service.export(database, True, False, NOW)
+    settings = document(exported)["platform_settings"]
+    assert (settings["study_training_until"], settings["study_validation_until"]) == ("2025-12-31", "2026-06-30")
+    platform_settings_service.save(database, {"study_training_until": "", "study_validation_until": ""})
+
+    transfer_service.import_file(database, exported.content, True, False)
+
+    current = platform_settings_service.current(database)
+    assert (current.study_training_until, current.study_validation_until) == (date(2025, 12, 31), date(2026, 6, 30))

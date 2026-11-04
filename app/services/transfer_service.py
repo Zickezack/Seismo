@@ -9,7 +9,7 @@ jobs - goes with the database backups (backup_service), not here.
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, fields
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import Engine
 
@@ -106,7 +106,8 @@ def _file(settings, sources, now: datetime | None) -> ExportFile:
     scope = [name for name, part in ((SETTINGS, settings), (SOURCES, sources)) if part is not None]
     document["scope"] = scope
     if settings is not None:
-        document[SETTINGS] = asdict(settings)
+        # A day as the form takes it (ISO 8601); JSON has no type of its own for it.
+        document[SETTINGS] = {name: value.isoformat() if isinstance(value, date) else value for name, value in asdict(settings).items()}
     if sources is not None:
         document[SOURCES] = [{name: getattr(source, name) for name in SOURCE_FIELDS} for source in sources]
     parts = "-".join({SETTINGS: "einstellungen", SOURCES: "quellen"}[name] for name in scope)

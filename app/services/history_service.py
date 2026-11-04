@@ -51,6 +51,36 @@ ACTIONS_LEAD = timedelta(days=7)
 UPSERT_ROWS = 1000
 INSERT_ROWS = 2000
 SPLITS = ("forward_split", "reverse_split")
+DIVIDENDS = ("cash_dividend",)
+# Benchmarks (the admin's decisions of 2026-10-31 and 2026-11-04): broad ETFs, no free source having the indices'
+# history - the market's, and per sector of the starter list (its key) one of Alpaca's sector ETFs. Their daily prices
+# are fetched before all others' (`instrument_repository.history_due`): an event study measures against them.
+MARKET_BENCHMARK = "SPY"
+SECTOR_BENCHMARKS = {
+    "oil-gas": "XLE",
+    "utilities": "XLU",
+    "renewable-energy": "ICLN",
+    "mining-metals": "XME",
+    "chemicals": "XLB",
+    "agriculture-food": "PBJ",
+    "automotive": "CARZ",
+    "aerospace-defense": "ITA",
+    "industrial-goods": "XLI",
+    "construction-real-estate": "XLRE",
+    "transport-logistics": "IYT",
+    "airlines-tourism": "JETS",
+    "banking": "KBE",
+    "insurance": "KIE",
+    "financial-services": "XLF",
+    "software-it": "IGV",
+    "semiconductors": "SMH",
+    "hardware-electronics": "XLK",
+    "telecommunications": "IYZ",
+    "media-entertainment": "XLC",
+    "retail-consumer-goods": "XRT",
+    "healthcare-pharma": "XLV",
+}
+BENCHMARK_SYMBOLS = (MARKET_BENCHMARK, *sorted(set(SECTOR_BENCHMARKS.values())))
 DELISTINGS = ("worthless_removal", "cash_merger", "stock_merger", "stock_and_cash_merger")
 # A ticker as the name forms write it (EXCHANGE:SYMBOL): Alpaca's exchange code, and how reports name it.
 TICKER_EXCHANGES = {
@@ -153,7 +183,7 @@ def enqueue_due(engine: Engine, now: datetime | None = None) -> list[int]:
             queued.append(_start(connection, job_service.FETCH_ACTIONS_JOB_KIND, _chunk(through, start, yesterday)))
         closed = market_data_repository.last_closed_day(connection, now - SETTLE)
         if through is not None and through >= yesterday - ACTIONS_LEAD and closed is not None:
-            if instrument_repository.history_due(connection, SOURCE.NAME, closed):
+            if instrument_repository.history_due(connection, SOURCE.NAME, closed, BENCHMARK_SYMBOLS):
                 queued.append(_start(connection, job_service.FETCH_BARS_JOB_KIND, {}))
     return [job_id for job_id in queued if job_id]
 
@@ -233,7 +263,7 @@ def fetch_bars(engine: Engine, payload: dict, contact: str) -> Callable[[Connect
             follow_renames, period = payload["follow_renames"], date.fromisoformat(payload["period"])
         else:
             closed = market_data_repository.last_closed_day(connection, now - SETTLE)
-            due = instrument_repository.history_due(connection, SOURCE.NAME, closed) if closed else []
+            due = instrument_repository.history_due(connection, SOURCE.NAME, closed, BENCHMARK_SYMBOLS) if closed else []
             if not due:
                 return None
             batch = next_batch(due)
