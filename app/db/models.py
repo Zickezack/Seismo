@@ -1534,3 +1534,86 @@ class ImpactHypothesisVersion(Base):
         CheckConstraint(classification.in_([s.value for s in ImpactClass]), name="classification"),
         CheckConstraint(origin.in_([s.value for s in ImpactOrigin]), name="origin"),
     )
+
+
+class OutcomeStatus(StrEnum):
+    """What became of a Prognose when its horizon closed (forecast_service)."""
+
+    MEASURED = "measured"
+    GAP = "gap"  # a trading day without a price: not measurable, never filled
+    ENDED = "ended"  # the Wertpapier was no longer traded before its end
+
+
+FORECAST_HORIZONS = (5, 20, 60)
+
+
+class Forecast(Base):
+    """A forecast the platform made (UI term: Prognose): from a version of a Wirkungsannahme, for one Wertpapier and
+    horizon, logged before its outcome is known and never changed (datamodel.md, rule 12) - a trigger refuses every
+    UPDATE, DELETE and TRUNCATE (migration of 2026-11-04)."""
+
+    __tablename__ = "forecast"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    hypothesis_version_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("impact_hypothesis_version.id"), index=True)
+    hypothesis_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("impact_hypothesis.id"), index=True)
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("event.id"), index=True)
+    instrument_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instrument.id"), index=True)
+    # The benchmark: the ETF of the sector the event names most, else SPY (history_service), and which of the two.
+    benchmark_instrument_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instrument.id"))
+    benchmark: Mapped[str] = mapped_column(String(10))
+    sector_key: Mapped[str | None] = mapped_column(String(40))
+    horizon: Mapped[int] = mapped_column(SmallInteger)  # trading days after the entry day
+    direction: Mapped[str] = mapped_column(String(10))
+    probability: Mapped[str] = mapped_column(String(10))
+    classification: Mapped[str] = mapped_column(String(12))
+    # The target metric: the return with dividends, split-adjusted, minus the benchmark's, from the close of the entry
+    # day to that of the horizon's last day; the direction says its sign.
+    metric: Mapped[str] = mapped_column(String(30), server_default="excess_return")
+    # The last trading day closed when it was logged: the window lies wholly after the forecast.
+    entry_day: Mapped[date] = mapped_column(Date)
+    end_day: Mapped[date] = mapped_column(Date)
+    # The data state: how far the Wertpapier's and the benchmark's daily prices reached when it was logged.
+    prices_through: Mapped[date | None] = mapped_column(Date)
+    benchmark_prices_through: Mapped[date | None] = mapped_column(Date)
+    # Who made it: the LLM's model and prompt version, or the analyst's (both empty).
+    origin: Mapped[str] = mapped_column(String(10))
+    model: Mapped[str | None] = mapped_column(String(100))
+    prompt_version: Mapped[int | None] = mapped_column(SmallInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(hypothesis_version_id, instrument_id, horizon),
+        CheckConstraint(horizon.in_(FORECAST_HORIZONS), name="horizon"),
+        CheckConstraint(direction.in_(("positive", "negative")), name="direction"),
+        CheckConstraint(probability.in_([s.value for s in ImpactProbability]), name="probability"),
+        CheckConstraint(benchmark.in_(("market", "sector")), name="benchmark"),
+        CheckConstraint(origin.in_([s.value for s in ImpactOrigin]), name="origin"),
+        CheckConstraint(end_day > entry_day, name="period"),
+    )
+
+
+class ForecastOutcome(Base):
+    """What became of a Prognose (UI term: Ergebnis), apart from it (datamodel.md, rule 12): stored once its horizon
+    closed and its prices are in."""
+
+    __tablename__ = "forecast_outcome"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    forecast_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("forecast.id"), unique=True)
+    status: Mapped[str] = mapped_column(String(10))
+    asset_return: Mapped[float | None] = mapped_column(Float)
+    benchmark_return: Mapped[float | None] = mapped_column(Float)
+    excess_return: Mapped[float | None] = mapped_column(Float)
+    # The excess return has the forecast's sign; None when not measured.
+    hit: Mapped[bool | None] = mapped_column()
+    # The trading days without a price, by symbol: [{"symbol": "XCO", "day": "2026-11-05"}].
+    missing: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    # The splits and dividends in its window, as applied: [{"symbol": ..., "day": ..., "text": ...}].
+    adjustments: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(status.in_([s.value for s in OutcomeStatus]), name="status"),
+        CheckConstraint("(status = 'measured') = (excess_return IS NOT NULL)", name="measured"),
+    )

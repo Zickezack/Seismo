@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app.services import impact_service
+from app.services import forecast_service, impact_service
 from app.services.impact_service import InvalidHypothesis
 from app.web.templating import flash, name_list, templates
 
@@ -125,8 +125,9 @@ def _form_page(request, event_id, detail, choices, values, support, against, err
         }
         support = [each.key for each in current.support]
         against = [each.key for each in current.against]
+    forecasts = forecast_service.of_hypothesis(request.app.state.engine, current.id) if current is not None else []
     context = {
-        "event_id": event_id, "detail": detail, "choices": choices, "values": values, "support": set(support),
+        "event_id": event_id, "detail": detail, "choices": choices, "values": values, "support": set(support), "forecasts": forecasts,
         "against": set(against), "error": error, "directions": impact_service.DIRECTION_LABELS,
         "horizons": impact_service.HORIZON_LABELS, "classes": impact_service.CLASS_LABELS,
         "probabilities": impact_service.PROBABILITY_LABELS, "expectations": impact_service.EXPECTED_LABELS,

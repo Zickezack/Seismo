@@ -38,7 +38,14 @@ from app.db.models import (
 from app.llm.limiter import LlmCallLimiter
 from app.llm.ollama import OllamaClient
 from app.repositories import entity_repository, impact_repository, relationship_repository, reprocessing_repository
-from app.services import event_study_service, instrument_service, job_service, platform_settings_service, relationship_service
+from app.services import (
+    event_study_service,
+    forecast_service,
+    instrument_service,
+    job_service,
+    platform_settings_service,
+    relationship_service,
+)
 from app.services.bulk import BulkResult
 from app.services.entity_service import KIND_LABELS as ENTITY_KIND_LABELS
 from app.services.extraction_service import DIRECTION_LABELS, HORIZON_LABELS, TARGET_KIND_LABELS
@@ -556,22 +563,30 @@ def reconcile(connection: Connection, event_id: int, found: Sequence[Proposal], 
                 "via_relationship_id": proposal.via_relationship_id, "via_entity_id": proposal.via_entity_id,
                 "origin": ImpactOrigin.LLM,
             })
-            impact_repository.insert_version(connection, hypothesis_id, version)
+            _append(connection, hypothesis_id, version)
             appended += 1
         elif row.status in (ImpactStatus.CONFIRMED, ImpactStatus.REJECTED):
             continue
         elif row.status == ImpactStatus.SUPERSEDED or _fields(row) != proposal.fields():
-            impact_repository.insert_version(connection, row.id, version)
+            _append(connection, row.id, version)
             appended += 1
     keys = {proposal.key for proposal in found}
     for key, row in existing.items():
         if key not in keys and row.status == ImpactStatus.PROPOSED:
-            impact_repository.insert_version(connection, row.id, _fields(row) | {
+            _append(connection, row.id, _fields(row) | {
                 "status": ImpactStatus.SUPERSEDED, "proposed_classification": row.proposed_classification,
                 "proposed_probability": row.proposed_probability, "origin": ImpactOrigin.LLM, "assessment_id": assessment_id,
             })
             appended += 1
     return appended
+
+
+def _append(connection: Connection, hypothesis_id: int, values: dict) -> int:
+    """A new version, and the Prognosen it makes (forecast_service) - in one transaction, so none is ever logged for a
+    version that was not stored, nor a version stored without them."""
+    version_id = impact_repository.insert_version(connection, hypothesis_id, values)
+    forecast_service.log_version(connection, version_id)
+    return version_id
 
 
 def _fields(row) -> dict:
@@ -608,7 +623,7 @@ def _review(engine: Engine, event_id: int, hypothesis_ids: Iterable[int], status
         if blocked or not rows:
             return BulkResult(0, blocked)
         for row in rows:
-            impact_repository.insert_version(connection, row.id, _fields(row) | {
+            _append(connection, row.id, _fields(row) | {
                 "status": status, "proposed_classification": None, "proposed_probability": None, "origin": ImpactOrigin.ANALYST,
                 "note": note,
             })
@@ -728,7 +743,7 @@ def create(engine: Engine, event_id: int, form: Mapping[str, str], support: Sequ
             "event_id": event_id, "target_entity_id": entries.target_entity_id, "path": entries.path,
             "via_relationship_id": entries.via_relationship_id, "via_entity_id": entries.via_entity_id, "origin": ImpactOrigin.ANALYST,
         })
-        impact_repository.insert_version(connection, hypothesis_id, entries.fields | {
+        _append(connection, hypothesis_id, entries.fields | {
             "status": ImpactStatus.CONFIRMED, "origin": ImpactOrigin.ANALYST, "note": entries.note,
         })
     logger.info("Impact hypothesis created", extra={"event_id": event_id, "hypothesis_id": hypothesis_id})
@@ -746,7 +761,7 @@ def change(engine: Engine, hypothesis_id: int, form: Mapping[str, str], support:
         moves = event_study_service.pre_moves(connection, row.event_id, [row.target_entity_id])
         entries = parse(form, support, against, _with_cited(shown, connection, row), keep, moves, row.expected_support)
         impact_repository.lock(connection, row.event_id)
-        impact_repository.insert_version(connection, hypothesis_id, entries.fields | {
+        _append(connection, hypothesis_id, entries.fields | {
             "status": ImpactStatus.CONFIRMED, "origin": ImpactOrigin.ANALYST, "note": entries.note,
         })
     logger.info("Impact hypothesis changed", extra={"event_id": row.event_id, "hypothesis_id": hypothesis_id})

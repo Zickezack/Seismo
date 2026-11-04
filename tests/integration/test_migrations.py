@@ -657,3 +657,19 @@ def test_the_versions_so_far_stay_without_a_probability(engine):
         assert connection.execute(text("SELECT count(*) FROM impact_hypothesis_version")).scalar_one() == 1
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_forecasts_are_refused_any_change_and_go_with_a_downgrade(engine):
+    upgrade(engine)
+    with engine.connect() as connection:
+        triggers = set(connection.execute(text("SELECT tgname FROM pg_trigger WHERE tgrelid = 'forecast'::regclass")).scalars())
+    assert {"forecast_no_change", "forecast_no_truncate"} <= triggers
+
+    downgrade(engine, "b5ab8c26a4a3")
+
+    with engine.connect() as connection:
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+        function = connection.execute(text("SELECT count(*) FROM pg_proc WHERE proname = 'forecast_immutable'")).scalar_one()
+    assert not tables & {"forecast", "forecast_outcome"} and function == 0
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

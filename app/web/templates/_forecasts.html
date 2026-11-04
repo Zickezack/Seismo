@@ -1,0 +1,30 @@
+{# Forecasts as a table - the Prognosen page and a Wirkungsannahme's - each with what it said, from when to when,
+   and what became of it. #}
+{% macro forecast_table(forecasts, testid, with_event=true) %}
+<div class="table-container">
+  <table class="table" data-testid="{{ testid }}">
+    <thead>
+      <tr>
+        {% if with_event %}<th>Ereignis und Ziel</th>{% endif %}
+        <th>Wertpapier</th>
+        <th>Prognose</th>
+        <th>Zeitraum</th>
+        <th>Ergebnis</th>
+        <th>Protokolliert</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for each in forecasts %}
+      <tr data-testid="forecast-{{ each.id }}">
+        {% if with_event %}<td class="cell-title"><a href="/events/{{ each.event_id }}/impacts/{{ each.hypothesis_id }}">{{ each.target_name }}</a><span class="hint">{{ each.event_title }}</span></td>{% endif %}
+        <td class="cell-wrap"><a href="/instruments/{{ each.instrument_id }}">{{ each.asset_symbol }}</a><span class="hint">gegen {{ each.benchmark_label }}</span></td>
+        <td class="cell-wrap" data-testid="forecast-says-{{ each.id }}">{{ each.direction_label }} gegenüber dem Benchmark<span class="hint">Wahrscheinlichkeit {{ each.probability_label }} · {{ each.horizon }} Handelstage</span></td>
+        <td class="cell-wrap">Schluss {{ each.entry_day.strftime("%d.%m.%Y") }} bis {{ each.end_day.strftime("%d.%m.%Y") }}<span class="hint">Kurse damals bis {{ each.prices_through.strftime("%d.%m.%Y") if each.prices_through else "–" }}</span></td>
+        <td class="cell-wrap" data-testid="forecast-outcome-{{ each.id }}">{{ each.outcome_label }}{% if each.returns_label %}<span class="hint">{{ each.returns_label }}</span>{% endif %}{% if each.missing_label %}<span class="hint">{{ each.missing_label }}</span>{% endif %}</td>
+        <td class="cell-wrap">{{ each.created_at|local_time }}<span class="hint">{{ each.made_by }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}

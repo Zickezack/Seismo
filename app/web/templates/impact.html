@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_price.html" import price %}
 {% from "_likelihood.html" import likelihood %}
+{% from "_forecasts.html" import forecast_table %}
 {% block title %}Wirkungsannahme{% endblock %}
 
 {% macro belege(items, testid) %}
@@ -125,6 +126,17 @@
 </details>
 
 {% if detail %}
+<details class="card section" id="forecasts" open data-testid="section-forecasts">
+  <summary><h2>Prognosen ({{ forecasts|length }})</h2></summary>
+  <div class="stack">
+    {% if forecasts %}
+    {{ forecast_table(forecasts, "hypothesis-forecasts", with_event=false) }}
+    {% else %}
+    <p class="hint" data-testid="no-forecasts">Keine: protokolliert wird je Version mit Wahrscheinlichkeit, positiver oder negativer Richtung und einem US-Wertpapier mit Tageskursen beim Ziel.</p>
+    {% endif %}
+  </div>
+</details>
+
 <details class="card section" id="versions" open data-testid="section-versions">
   <summary><h2>Versionen ({{ detail.versions|length }})</h2></summary>
   <div class="table-container">

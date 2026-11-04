@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.services import impact_service
+from app.services import forecast_service, impact_service
 from app.services.bulk import BulkResult
 from app.services.event_service import EventDetail
 from app.services.impact_service import (
@@ -65,6 +65,7 @@ def impacts(monkeypatch, pages):
     monkeypatch.setattr(impact_service, "reject", review("reject"))
     monkeypatch.setattr(impact_service, "detail", lambda _engine, hypothesis_id: calls.get("detail"))
     monkeypatch.setattr(impact_service, "form_choices", lambda _engine, event_id: CHOICES)
+    monkeypatch.setattr(forecast_service, "of_hypothesis", lambda _engine, hypothesis_id: calls.get("forecasts", []))
 
     def change(_engine, hypothesis_id, form, support, against):
         calls["change"] = (hypothesis_id, form, support, against)
@@ -215,3 +216,15 @@ def test_the_form_offers_probability_or_abstention_filled_from_the_latest_versio
     assert '<option value="abstain" selected>Enthaltung</option>' in html
     assert 'value="Unclear exposure."' in tag_of(html, "field-abstention")
     assert '<option value="yes" selected>erwartet</option>' in html
+
+
+def test_a_hypothesis_page_lists_its_forecasts(client, impacts):
+    from tests.unit.test_forecast_service import view
+
+    impacts["detail"] = detail()
+    impacts["forecasts"] = [view(hypothesis_id=1)]
+
+    html = client.get("/events/7/impacts/1").text
+
+    assert text_of(html, "forecast-outcome-1") == "offen bis 02.12.2026"
+    assert tag_of(html, "hypothesis-forecasts") is not None

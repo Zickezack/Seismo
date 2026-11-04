@@ -98,7 +98,8 @@ With Ollama configured, the worker proposes Wirkungsannahmen for events whose re
 company, sector or commodity - at most "LLM-Aufrufe pro Stunde (höchstens)" under Plattform-Einstellungen,
 Wirkungsannahmen (20 by default, 0 holds it). They are reviewed on the event's page, each with a probability apart from its
 direction - or an abstention -, lowered where the event was expected or a US Wertpapier of the target had already moved
-before it.
+before it. Each such hypothesis logs Prognosen (page Prognosen) the database never lets change; their outcomes come
+by themselves once the horizon has closed and the daily prices are in.
 
 The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
 show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):

@@ -606,6 +606,63 @@ def pre_moves(connection: Connection, event_id: int, entity_ids: Iterable[int], 
     return moves
 
 
+def sector_of(connection: Connection, event_id: int) -> SectorRef | None:
+    """The sector the event's reports name most, with its benchmark ETF (forecast_service)."""
+    return _sectors(connection, [event_id]).get(event_id)
+
+
+@dataclass(frozen=True)
+class Calendar:
+    """The trading days with their closes, loaded once for many measurements."""
+
+    days: list[date]
+    closes_at: list[datetime]
+
+    @property
+    def index(self) -> dict[date, int]:
+        return {day: number for number, day in enumerate(self.days)}
+
+    def last_closed(self, moment: datetime) -> int | None:
+        """The position of the last trading day closed at `moment`; None before the calendar."""
+        position = bisect_right(self.closes_at, moment) - 1
+        return position if position >= 0 else None
+
+
+def calendar(connection: Connection) -> Calendar:
+    rows = market_data_repository.trading_days(connection)
+    return Calendar([row.day for row in rows], [row.closes_at for row in rows])
+
+
+def measure_after(
+    connection: Connection, days: Calendar, stock, benchmark, entry_day: date, horizon: int, now: datetime,
+) -> tuple[WindowResult | None, list[Adjustment]]:
+    """The Wertpapier against the benchmark from the close of `entry_day` to that `horizon` trading days later, as a
+    window of the event study (returns with dividends, split-adjusted; a missing close a gap), and the splits and
+    dividends in it. `stock` and `benchmark`: rows with id, symbol, name, history_through, delisted_on."""
+    start = days.index.get(entry_day)
+    if start is None:
+        return None, []
+    last = min(start + horizon, len(days.days) - 1)
+    spans = [(each.id, days.days[start], days.days[last]) for each in (stock, benchmark)]
+    closes: dict[int, dict[date, Decimal]] = defaultdict(dict)
+    for bar in market_data_repository.daily_closes(connection, spans):
+        closes[bar.instrument_id][bar.day] = bar.close
+    splits, dividends, lines = _action_lines(market_data_repository.actions_of(connection, [stock.id, benchmark.id], (*SPLITS, *DIVIDENDS)))
+    series = [
+        Series(each.id, each.symbol, each.name, each.history_through, each.delisted_on, closes[each.id],
+               daily_returns(days.days, closes[each.id], splits[each.id], dividends[each.id]))
+        for each in (stock, benchmark)
+    ]
+    window = Window("forecast", f"{horizon} Handelstage", 1, horizon)
+    result = measure_window(window, start, *series, None, days.days, days.closes_at, now, None)
+    adjustments = sorted(
+        (Adjustment(each.symbol, day, text) for each in (stock, benchmark) for day, text in lines[each.id]
+         if days.days[start] < day <= days.days[last]),
+        key=lambda each: (each.day, each.symbol),
+    )
+    return result, adjustments
+
+
 def parse_choice(params: Mapping[str, str]) -> tuple[Benchmark, Measure]:
     """The overview's choice from its URL; anything else is the default: market, market model."""
     benchmark = params.get("benchmark", "")

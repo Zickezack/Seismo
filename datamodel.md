@@ -47,8 +47,8 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Marktdaten-Abgleich | `market_data_sync` | How far each sync of the historical market data came (list, corporate actions, period). Not shown as such. | none |
 | Wirkungsannahme | `impact_hypothesis` | An assumed effect of an event on a company, sector or commodity - directly or through a relationship - with direction, horizon, mechanism, Belege for and against, counterarguments and a classification (belegt, plausibel, spekulativ), each change a version of its own (`impact_hypothesis_version`). | none |
 | Wirkungsbewertung | `impact_assessment` | One LLM run that proposed an event's Wirkungsannahmen, with model and prompt version. | none |
-| Prognose | `forecast` | A forecast made by the platform, with creation time, data state, model version and target metric. | none |
-| Ergebnis | `forecast_outcome` | The actual outcome of a forecast. | none |
+| Prognose | `forecast` | A forecast made by the platform from a version of a Wirkungsannahme, for one Wertpapier and horizon, with creation time, data state, model version and target metric; never changed - the database refuses it. | none |
+| Ergebnis | `forecast_outcome` | The actual outcome of a forecast, stored apart once its horizon closed: measured, or not measurable for a gap. | none |
 | Watchlist | `watchlist` | What an analyst follows - Lagen, entities, Wertpapiere, single events, event types and countries -, each as a Watchlist-Eintrag (`watchlist_item`). | none |
 | Alert-Regel | `alert_rule` | A rule that notifies about the events of its watchlist and filter: new ones, changes of state, new reports - throttled. | none |
 | Alert | `alert` | A notification of an alert rule in the app: one event's hits, or a Sammel-Alert of several. | none |
@@ -954,6 +954,54 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
 - Relationships: belongs to one Wirkungsannahme; maybe to one Wirkungsbewertung; maybe names one Wertpapier.
 - Rules: appended, never changed (rule 3). The rule: belegt only when a cited Beleg is a report's named effect, with its quote, on this very target (the entity the recognition linked it to) in this direction; plausibel through a relationship in effect or with any cited Beleg; spekulativ otherwise; a proposal is only capped, never raised. An assessment appends a version to a hypothesis still proposed or superseded that reads differently, a superseded one to one proposed it no longer proposes, and leaves those the analyst confirmed or rejected; the analyst's confirmation, rejection or change is a version of their own, confirmed (a change keeps target and way). The probability (story 2 of Markt- und Wirkungsmodell, the admin's decisions of 2026-11-04): none without any Beleg and relationship - an abstention for too little data -; the LLM's abstention with its reason; spekulativ, or more Belege against than for, at most low; expected by the reports or priced in by the Vorlauf one step lower; never raised. The Vorlauf is measured when the version is made - closed then, so later prices do not change it (rule 11). A version from before stays without (UI: nicht bewertet); an older prompt makes the event due once again.
+- Privacy: none
+
+### Prognose (`forecast`)
+- Store: SQL table `forecast`; a trigger refuses every UPDATE, DELETE and TRUNCATE (`forecast_immutable`, rule 12).
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | hypothesis_version_id | bigint | yes | | The version of the Wirkungsannahme it came from. Foreign key to `impact_hypothesis_version`. Unique with `instrument_id` and `horizon`. Index. |
+  | hypothesis_id, event_id | bigint | yes | | Its hypothesis and event. Foreign keys. Index. |
+  | instrument_id | bigint | yes | | The target's Wertpapier with daily prices (Alpaca's, a traded one, by symbol). Foreign key to `instrument`. Index. UI: Wertpapier. |
+  | benchmark_instrument_id | bigint | yes | | Foreign key to `instrument`. |
+  | benchmark | varchar(10) | yes | | `sector` (the ETF of the sector the event names most, `history_service.SECTOR_BENCHMARKS`) or `market` (SPY); check constraint. UI: gegen Branche (XLE), Markt (SPY). |
+  | sector_key | varchar(40) | no | | Of a sector benchmark: the starter list's key. |
+  | horizon | smallint | yes | | 5, 20 or 60 trading days; check constraint. |
+  | direction | varchar(10) | yes | | `positive` or `negative`: the sign of the target metric; check constraint. UI: positiv, negativ gegenüber dem Benchmark. |
+  | probability | varchar(10) | yes | | The version's: `high`, `medium`, `low`. UI: Wahrscheinlichkeit. |
+  | classification | varchar(12) | yes | | The version's: `evidenced`, `plausible`, `speculative`. |
+  | metric | varchar(30) | yes | `excess_return` | The target metric: the return with dividends, split-adjusted, minus the benchmark's, from the close of `entry_day` to that of `end_day`. |
+  | entry_day | date | yes | | The last trading day closed when it was logged: the whole window lies after it. UI: Schluss ... bis ... |
+  | end_day | date | yes | | `horizon` trading days later; after `entry_day` (check constraint). |
+  | prices_through, benchmark_prices_through | date | no | | The data state: how far the Wertpapier's and the benchmark's daily prices reached when it was logged. UI: Kurse damals bis. |
+  | origin | varchar(10) | yes | | `llm` or `analyst`, as the version's. |
+  | model, prompt_version | varchar(100), smallint | no | | The assessment's that made the version; empty for the analyst's. UI: LLM (qwen3.5:9b, Prompt 3), Analyst. |
+  | created_at | timestamptz | yes | now() | When it was logged. UI: Protokolliert. |
+
+- Relationships: belongs to one version of a Wirkungsannahme, one Ereignis, one Wertpapier and its benchmark; has at most one Ergebnis.
+- Rules: logged by `forecast_service.log_version` in the transaction that stores the version - proposed or confirmed, with a probability, positive or negative, its target with a Wertpapier -, one per horizon within the calendar; a version repeating the hypothesis's latest forecast (direction and probability, as a confirmation does) logs none (Prognoseprotokoll und Evaluation, story 1, the admin's decisions of 2026-11-04). Never changed nor deleted: a later version is a forecast of its own. The page Prognosen lists the latest 200, open or with an outcome, with the hit rates; a Wirkungsannahme's page its own.
+- Privacy: none
+
+### Ergebnis (`forecast_outcome`)
+- Store: SQL table `forecast_outcome`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | forecast_id | bigint | yes | | Foreign key to `forecast`; unique: one per forecast. |
+  | status | varchar(10) | yes | | `measured`, `gap` (a trading day without a price), `ended` (the Wertpapier no longer traded); check constraint. UI: gemessen, nicht messbar: Lücke, nicht messbar: nicht mehr gehandelt. |
+  | asset_return, benchmark_return, excess_return | double precision | no | | Of a measured one: the returns over the window, with dividends, split-adjusted, and their difference; `excess_return` set exactly for a measured one (check constraint `measured`). |
+  | hit | boolean | no | | The excess return has the forecast's sign (0 is none). UI: Treffer, kein Treffer. |
+  | missing | jsonb | yes | `[]` | The days without a price: `[{"symbol", "day"}]`. UI: ohne Kurs. |
+  | adjustments | jsonb | yes | `[]` | The splits and dividends in the window, as applied: `[{"symbol", "day", "text"}]`. |
+  | recorded_at | timestamptz | yes | now() | |
+
+- Relationships: belongs to one Prognose.
+- Rules: stored by the worker's hourly check (`forecast_service.resolve_due`) once the forecast's last day has closed and the Wertpapier's and the benchmark's daily prices reach it (or the Wertpapier ended before), measured as an event study's window (`event_study_service.measure_after`); once per forecast. A gap is never filled.
 - Privacy: none
 
 <!-- Template - copy once per entity:

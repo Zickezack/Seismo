@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "_forecasts.html" import forecast_table %}
+{% block title %}Prognosen{% endblock %}
+{% block content %}
+<h1>Prognosen</h1>
+
+<section class="card stack">
+  <p>Was die Plattform vorhersagte: je neuer Version einer Wirkungsannahme mit Wahrscheinlichkeit, für das US-Wertpapier ihres Ziels, über 5, 20 und 60 Handelstage. Zielgrösse ist die Rendite gegenüber dem ETF der Branche, die das Ereignis am häufigsten nennt, sonst gegenüber SPY.</p>
+  <p class="hint">Gemessen ab dem Schluss des letzten Handelstags, der beim Protokollieren schon geschlossen hatte: der ganze Zeitraum liegt nach der Prognose. Renditen mit Dividenden, splitbereinigt; ein fehlender Kurs macht sie nicht messbar, nie aufgefüllt. Eine Prognose wird nie geändert, die Datenbank lehnt es ab; ihr Ergebnis steht für sich.</p>
+  <p data-testid="forecast-counts">{{ overview.open }} offen, {{ overview.measured }} gemessen, {{ overview.unmeasured }} nicht messbar.</p>
+</section>
+
+{% if overview.rates %}
+<details class="card section" id="rates" open data-testid="section-rates">
+  <summary><h2>Trefferquote</h2></summary>
+  <div class="stack">
+    <p class="hint">Der gemessenen Prognosen, je Horizont und Wahrscheinlichkeit: Anzahl, Treffer und die mittlere Rendite gegenüber dem Benchmark in der vorhergesagten Richtung - nebeneinander, kein einzelner Wert. Ein Treffer ist die vorhergesagte Richtung, keine Grösse.</p>
+    <div class="table-container">
+      <table class="table" data-testid="rate-table">
+        <thead><tr><th>Horizont</th><th>Wahrscheinlichkeit</th><th>Gemessen</th><th>Treffer</th><th>Mittlere Rendite in Richtung</th></tr></thead>
+        <tbody>
+          {% for rate in overview.rates %}
+          <tr data-testid="rate-{{ rate.horizon }}-{{ rate.probability }}">
+            <td>{{ rate.horizon }} Handelstage</td><td>{{ rate.probability_label }}</td><td>{{ rate.count }}</td>
+            <td>{{ rate.hits }} ({{ rate.rate_label }})</td><td>{{ rate.mean_label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+{% endif %}
+
+<details class="card section" id="list" open data-testid="section-list">
+  <summary><h2>Protokoll</h2></summary>
+  <div class="stack">
+    <form class="form-grid" method="get" action="/forecasts" data-testid="forecast-filter">
+      <div class="field">
+        <label for="filter-status">Stand</label>
+        <select id="filter-status" name="status" data-testid="filter-status">
+          {% for key, label in [("", "Alle"), ("open", "Offen"), ("resolved", "Mit Ergebnis")] %}<option value="{{ key }}"{% if overview.status == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-actions actions"><button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button></div>
+    </form>
+    {% if overview.forecasts %}
+    <p class="hint">Die neuesten {{ overview.forecasts|length }}, die zuletzt protokollierten zuerst.</p>
+    {{ forecast_table(overview.forecasts, "forecast-list") }}
+    {% else %}
+    <p data-testid="no-forecasts">Keine Prognosen{% if overview.status %} in dieser Auswahl{% endif %}.</p>
+    {% endif %}
+  </div>
+</details>
+{% endblock %}

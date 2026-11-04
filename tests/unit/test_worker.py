@@ -141,6 +141,7 @@ def no_database(monkeypatch):
     monkeypatch.setattr(worker.price_service, "enqueue_due", enqueue_due_prices)
     monkeypatch.setattr(worker.tracking_service, "enqueue_due", lambda _engine: [])
     monkeypatch.setattr(worker.tracking_service, "compress_due", lambda _engine: None)
+    monkeypatch.setattr(worker.forecast_service, "resolve_due", lambda _engine: 0)
     monkeypatch.setattr(worker.history_service, "enqueue_due", enqueue_due_market_data)
     monkeypatch.setattr(worker.alert_service, "sweep", sweep)
     monkeypatch.setattr(worker.situation_service, "sweep", sweep_situations)
@@ -409,6 +410,7 @@ def test_a_failing_extraction_check_does_not_keep_the_assignments_from_being_que
     ("enqueue_due", "history_service", "Market data check failed: connection lost"),
     ("sweep", "alert_service", "Alert sweep failed: connection lost"),
     ("sweep", "situation_service", "Situation sweep failed: connection lost"),
+    ("resolve_due", "forecast_service", "Forecast resolution failed: connection lost"),
 ])
 def test_a_failed_retire_or_storage_check_is_logged_and_the_worker_keeps_running(
     readiness, queue, no_database, tmp_path, caplog, monkeypatch, check, name, message
