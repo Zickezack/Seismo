@@ -17,6 +17,7 @@ from sqlalchemy import Connection, Engine
 
 from app.db.models import LIVE_PRIORITY, PriceResolution
 from app.prices import alpaca, eodhd, six
+from app.prices.base import Missing
 from app.repositories import instrument_repository, price_repository
 from app.services import job_service, platform_settings_service
 from app.services.fetch_policy_service import PoliteHttp
@@ -57,18 +58,15 @@ def enqueue_due(engine: Engine, now: datetime | None = None) -> list[int]:
     return [job_id for job_id in job_ids if job_id is not None]
 
 
-def fetch(
-    engine: Engine, source: str, instrument_ids: list[int], contact: str, reserved_slot: datetime | None = None
-) -> Callable[[Connection], None] | None:
-    """First phase of a fetch job, outside any transaction: ask the source for the batch's latest prices. Returns the
-    effect that stores them, or None when none of them has a Live-Kurs any more. Every error but HostBusy is first
-    recorded at the batch's Wertpapiere; SourceError and HostBusy as app/sources/errors.py says."""
+def ask(
+    engine: Engine, source: str, rows: list, contact: str, reserved_slot: datetime | None = None
+) -> tuple[list[dict], list[Missing], dict[str, int]]:
+    """Ask the source for the latest prices of the Wertpapiere `rows` (id, symbol, source_ref), outside any
+    transaction: the prices as rows to store, those it sent none for, and each Wertpapier's id by what it was asked
+    by. Every error but HostBusy is first recorded at them; SourceError and HostBusy as app/sources/errors.py says."""
     module = SOURCES[source]
     with engine.connect() as connection:
-        rows = [row for row in instrument_repository.by_ids(connection, instrument_ids) if row.live and row.source == source]
         min_interval = platform_settings_service.load(connection).domain_min_interval_seconds
-    if not rows:
-        return None
     by_ref: dict[str, int] = {}
     for row in rows:
         by_ref.setdefault(row.symbol if getattr(module, "BY_SYMBOL", False) else row.source_ref, row.id)
@@ -91,13 +89,26 @@ def fetch(
         }
         for quote in quotes if quote.ref in by_ref
     ]
+    return prices, [each for each in missing if each.ref in by_ref], by_ref
+
+
+def fetch(
+    engine: Engine, source: str, instrument_ids: list[int], contact: str, reserved_slot: datetime | None = None
+) -> Callable[[Connection], None] | None:
+    """First phase of a fetch job, outside any transaction: ask the source for the batch's latest prices. Returns the
+    effect that stores them, or None when none of them has a Live-Kurs any more. Every error but HostBusy is first
+    recorded at the batch's Wertpapiere; SourceError and HostBusy as app/sources/errors.py says."""
+    with engine.connect() as connection:
+        rows = [row for row in instrument_repository.by_ids(connection, instrument_ids) if row.live and row.source == source]
+    if not rows:
+        return None
+    prices, missing, by_ref = ask(engine, source, rows, contact, reserved_slot)
 
     def store(connection: Connection) -> None:
         stored = price_repository.insert_prices(connection, prices)
         instrument_repository.record_fetched(connection, [price["instrument_id"] for price in prices])
         for each in missing:
-            if each.ref in by_ref:
-                instrument_repository.record_error(connection, [by_ref[each.ref]], each.reason)
+            instrument_repository.record_error(connection, [by_ref[each.ref]], each.reason)
         # IDs and counts only (datamodel.md, rule 13).
         logger.info(
             "Prices fetched",

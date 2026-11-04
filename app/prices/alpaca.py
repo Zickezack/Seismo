@@ -9,7 +9,7 @@ hosts - the fetch policy's slots and pauses still apply (architecture.md).
 """
 import json
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -24,7 +24,11 @@ KEY_VARIABLES = ("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY")
 TRADING_HOST = "paper-api.alpaca.markets"
 DATA_HOST = "data.alpaca.markets"
 DELAYED = False  # IEX's last trade, as it happens; the daily history of all exchanges
-DELAY_LABEL = "Echtzeit (IEX)"
+# Of its delayed prices: the minutes of all exchanges (SIP) a tracked Wertpapier gets, free once 15 minutes old. Its
+# live prices from IEX are real time and say so.
+DELAY_LABEL = "verzögert, ab 15 Minuten (SIP)"
+# The minutes of all exchanges (SIP) come free only once this old; a tracked one's are asked for that late.
+SIP_DELAY = timedelta(minutes=16)
 NEW_YORK = ZoneInfo("America/New_York")
 # The exchanges whose Wertpapiere Seismo keeps; OTC ones are left out.
 EXCHANGES = ("NYSE", "NASDAQ", "ARCA", "AMEX", "BATS")
@@ -94,13 +98,24 @@ def daily_bars(
     """One page of the daily prices of the symbols from `start` to `end`, unadjusted, and the token of the next page
     (None: the last). `follow_renames`: a symbol's earlier prices under an earlier symbol too (Alpaca's `asof`); off for
     Wertpapiere no longer traded, whose symbol another may carry today."""
-    query = {
-        "symbols": ",".join(symbols), "timeframe": "1Day", "start": start.isoformat(), "end": end.isoformat(),
-        "limit": BAR_LIMIT, "adjustment": "raw", "feed": "sip",
-    } | ({} if follow_renames else {"asof": "-"}) | ({"page_token": page_token} if page_token else {})
-    data = _get(http, DATA_HOST, "/v2/stocks/bars", query)
+    query = {"timeframe": "1Day", "start": start.isoformat(), "end": end.isoformat()} | ({} if follow_renames else {"asof": "-"})
+    return _bars(http, symbols, query, page_token, "Tageskurse")
+
+
+def minute_bars(
+    http: PoliteHttp, symbols: Sequence[str], start: datetime, end: datetime, page_token: str | None = None
+) -> tuple[list[Bar], str | None]:
+    """One page of the minutes of the symbols from `start` to before `end` - a minute without a trade has none -, of all
+    US exchanges (SIP), unadjusted, and the token of the next page. Free only once 15 minutes old (SIP_DELAY)."""
+    query = {"timeframe": "1Min", "start": _rfc3339(start), "end": _rfc3339(end)}
+    return _bars(http, symbols, query, page_token, "Minutenkurse")
+
+
+def _bars(http: PoliteHttp, symbols: Sequence[str], query: dict, page_token: str | None, what: str) -> tuple[list[Bar], str | None]:
+    query = query | {"symbols": ",".join(symbols), "limit": BAR_LIMIT, "adjustment": "raw", "feed": "sip"}
+    data = _get(http, DATA_HOST, "/v2/stocks/bars", query | ({"page_token": page_token} if page_token else {}))
     if not isinstance(data, dict) or not isinstance(data.get("bars") or {}, dict):
-        raise SourceRejected("Antwort von Alpaca enthält keine Tageskurse")
+        raise SourceRejected(f"Antwort von Alpaca enthält keine {what}")
     bars = []
     for symbol, items in (data.get("bars") or {}).items():
         for item in items or []:
@@ -159,6 +174,11 @@ def _get(http: PoliteHttp, host: str, path: str, query: dict) -> object:
         return json.loads(response.content)
     except ValueError:
         raise SourceRejected("Antwort von Alpaca ist kein JSON") from None
+
+
+def _rfc3339(moment: datetime) -> str:
+    """A time as Alpaca takes it, in UTC: 2026-11-04T14:31:00Z."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _time(value: object) -> datetime | None:

@@ -258,7 +258,16 @@ class PriceResolution(StrEnum):
     """What a Kurspunkt covers: one price at its time, or an interval."""
 
     QUOTE = "quote"  # the last price at its time, with the day's open, high, low and volume so far
+    MINUTE = "minute"  # a minute's open, high, low, close and volume, `at` its start (a tracked one's, Alpaca)
+    HOUR = "hour"  # the minutes or quotes of an hour once their full resolution was kept long enough, `at` its start
     DAY = "day"  # a trading day: open, high, low, close and volume, `at` its start as the source gives it
+
+
+class GapCause(StrEnum):
+    """Why a tracked Wertpapier's prices were not collected for a while (UI term: Erfassungslücke)."""
+
+    NOT_ASKED = "not_asked"  # no collection ran: the worker stopped, the queue stuck
+    SOURCE_ERROR = "source_error"  # the source failed or sent no price for it
 
 
 class PriceSource(StrEnum):
@@ -406,6 +415,11 @@ class PlatformSettingsRecord(Base):
     # Live prices (price_service) and the daily history (history_service).
     price_interval_minutes: Mapped[int] = mapped_column(server_default="30")
     price_history_years: Mapped[int] = mapped_column(server_default="2")
+    # Days a tracked Wertpapier's prices keep their full resolution before they are compressed to hours; 0: always.
+    price_full_resolution_days: Mapped[int] = mapped_column(server_default="90")
+    tracked_instruments_max: Mapped[int] = mapped_column(server_default="50")
+    # Days of Alpaca's minutes before tracking began that are fetched afterwards; 0: none.
+    minute_backfill_days: Mapped[int] = mapped_column(server_default="90")
     # The Lagen (situation_service): open this long after their latest event; LLM calls per hour for them.
     situation_open_days: Mapped[int] = mapped_column(server_default="30")
     situation_llm_calls_per_hour: Mapped[int] = mapped_column(server_default="20")
@@ -428,6 +442,9 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(reprocessings_per_hour >= 0, name="reprocessings_per_hour"),
         CheckConstraint(price_interval_minutes.between(5, 1440), name="price_interval_minutes"),
         CheckConstraint(price_history_years.between(1, 30), name="price_history_years"),
+        CheckConstraint(price_full_resolution_days.between(0, 3650), name="price_full_resolution_days"),
+        CheckConstraint(tracked_instruments_max.between(0, 1000), name="tracked_instruments_max"),
+        CheckConstraint(minute_backfill_days.between(0, 3650), name="minute_backfill_days"),
         CheckConstraint(situation_open_days.between(1, 365), name="situation_open_days"),
         # 0 holds the forming of Lagen.
         CheckConstraint(situation_llm_calls_per_hour >= 0, name="situation_llm_calls_per_hour"),
@@ -1003,6 +1020,14 @@ class Instrument(Base):
     entity_uncertain: Mapped[bool] = mapped_column(server_default=false())
     # Its latest price is fetched at the interval of the Plattform-Einstellungen (UI: Live-Kurs).
     live: Mapped[bool] = mapped_column(server_default=true())
+    # Its prices are collected continuously at the highest resolution its source offers (tracking_service, UI: verfolgt).
+    tracked: Mapped[bool] = mapped_column(server_default=false())
+    # When it was last switched on; kept when switched off, so its full-resolution points are still compressed.
+    tracked_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Its prices are collected up to here: Alpaca's minutes up to this time, of the others the last collection.
+    collected_through: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Of Alpaca's: its minutes before tracking began are fetched afterwards up to here, until it reaches tracked_since.
+    backfill_through: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(10), server_default=InstrumentStatus.ACTIVE.value)
     delisted_on: Mapped[date | None] = mapped_column(Date)
     # Its daily prices are fetched (history_service), each trading day up to and including history_through.
@@ -1020,6 +1045,7 @@ class Instrument(Base):
         CheckConstraint(status.in_([s.value for s in InstrumentStatus]), name="status"),
         UniqueConstraint(source, source_ref),
         Index("ix_instrument_live", live),
+        Index("ix_instrument_tracked", tracked),
         Index("ix_instrument_symbol", source, symbol),
     )
 
@@ -1043,11 +1069,32 @@ class PricePoint(Base):
     source: Mapped[str] = mapped_column(String(20))
     delayed: Mapped[bool]  # the source delays it (EODHD: 15 to 20 minutes); else real time
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Of an hour: the points it replaced (tracking_service.compress); empty for a price as received.
+    samples: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (
         CheckConstraint(resolution.in_([s.value for s in PriceResolution]), name="resolution"),
         # A price asked for again unchanged - the market closed - is stored once.
         UniqueConstraint(instrument_id, resolution, at),
+    )
+
+
+class PriceGap(Base):
+    """A time a tracked Wertpapier's prices were not collected (UI term: Erfassungslücke): recorded, never filled
+    (requirements.md, Live-Kurse und Kursdatenspeicher, criterion 2)."""
+
+    __tablename__ = "price_gap"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instrument.id", ondelete="CASCADE"), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))  # the last collection before it
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))  # the first after it
+    cause: Mapped[str] = mapped_column(String(20))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(cause.in_([s.value for s in GapCause]), name="cause"),
+        CheckConstraint(ends_at > starts_at, name="period"),
     )
 
 

@@ -1,13 +1,13 @@
 """Data access for the Wertpapiere (instrument), each with its latest quote and the span of its daily prices."""
 from collections.abc import Iterable, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-from sqlalchemy import Connection, Row, and_, delete, exists, false, func, insert, or_, select, update
+from sqlalchemy import Connection, Row, and_, case, delete, exists, false, func, insert, null, or_, select, update
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
 
-from app.db.models import Entity, Instrument, InstrumentStatus, PricePoint, PriceResolution
+from app.db.models import Entity, Instrument, InstrumentStatus, PricePoint, PriceResolution, PriceSource
 from app.repositories.source_repository import NAME_COLLATION
 
 # When it was asked for last, successfully or not: what tells whether its live price is due again.
@@ -43,9 +43,11 @@ def _listed():
     )
 
 
-def _filtered(statement, live_only: bool, source: str | None, search: str | None):
+def _filtered(statement, live_only: bool, source: str | None, search: str | None, tracked_only: bool = False):
     if live_only:
         statement = statement.where(Instrument.live)
+    if tracked_only:
+        statement = statement.where(Instrument.tracked)
     if source:
         statement = statement.where(Instrument.source == source)
     if search:
@@ -56,18 +58,20 @@ def _filtered(statement, live_only: bool, source: str | None, search: str | None
     return statement
 
 
-def listing(connection: Connection, live_only: bool, source: str | None, search: str | None, limit: int) -> Sequence[Row]:
-    """The Wertpapiere by name - those with a live price only, of one source, with the search in the symbol or the
-    name, the one with the symbol searched for first -, at most `limit`."""
-    statement = _filtered(_listed(), live_only, source, search)
+def listing(
+    connection: Connection, live_only: bool, source: str | None, search: str | None, limit: int, tracked_only: bool = False
+) -> Sequence[Row]:
+    """The Wertpapiere by name - those with a live price only, the tracked ones only, of one source, with the search in
+    the symbol or the name, the one with the symbol searched for first -, at most `limit`."""
+    statement = _filtered(_listed(), live_only, source, search, tracked_only)
     if search:
         statement = statement.order_by((func.lower(Instrument.symbol) == search.lower()).desc())
     statement = statement.order_by(Instrument.name.collate(NAME_COLLATION), Instrument.id).limit(limit)
     return connection.execute(statement).all()
 
 
-def count_listing(connection: Connection, live_only: bool, source: str | None, search: str | None) -> int:
-    statement = _filtered(select(func.count()).select_from(Instrument), live_only, source, search)
+def count_listing(connection: Connection, live_only: bool, source: str | None, search: str | None, tracked_only: bool = False) -> int:
+    statement = _filtered(select(func.count()).select_from(Instrument), live_only, source, search, tracked_only)
     return connection.execute(statement).scalar_one()
 
 
@@ -133,10 +137,13 @@ def symbols(connection: Connection, source: str) -> dict[str, int]:
 
 
 def live_due(connection: Connection, source: str, asked_before: datetime) -> Sequence[Row]:
-    """The source's Wertpapiere with a live price not asked for since `asked_before`, by id."""
+    """The source's Wertpapiere with a live price not asked for since `asked_before`, by id. A tracked one of a source
+    asked for its latest price has it from its collection every minute (tracking_service); Alpaca's minutes are no
+    latest price."""
+    tracked_elsewhere = Instrument.tracked if source != PriceSource.ALPACA else false()
     statement = (
         select(Instrument.id, Instrument.symbol, Instrument.source_ref)
-        .where(Instrument.source == source, Instrument.live, or_(_ASKED.is_(None), _ASKED < asked_before))
+        .where(Instrument.source == source, Instrument.live, ~tracked_elsewhere, or_(_ASKED.is_(None), _ASKED < asked_before))
         .order_by(Instrument.id)
     )
     return connection.execute(statement).all()
@@ -233,7 +240,7 @@ def lock_instruments(connection: Connection, instrument_ids: list[int]) -> Seque
     """Id, name, source and whether it has Kurspunkte, of the existing ones, locked until the end of the transaction."""
     has_prices = exists().where(PricePoint.instrument_id == Instrument.id)
     statement = (
-        select(Instrument.id, Instrument.name, Instrument.source, has_prices.label("has_prices"))
+        select(Instrument.id, Instrument.name, Instrument.source, Instrument.status, Instrument.tracked, has_prices.label("has_prices"))
         .where(Instrument.id.in_(instrument_ids))
         .order_by(Instrument.id)
         .with_for_update(of=Instrument)
@@ -257,3 +264,84 @@ def record_error(connection: Connection, instrument_ids: list[int], message: str
     """The fetch's error for them; the time of the last success stays."""
     values = {"last_error": message[:2000], "last_error_at": func.now()}
     connection.execute(update(Instrument).where(Instrument.id.in_(instrument_ids)).values(values))
+
+
+# Tracked Wertpapiere (Live-Kurse und Kursdatenspeicher, story 2).
+
+def set_tracked(connection: Connection, instrument_ids: list[int], tracked: bool, backfill_days: int = 0) -> int:
+    """Switch tracking on or off. Switched on, an untracked one's collection starts now: what lies before is no gap;
+    of Alpaca's, its minutes of the `backfill_days` before are to be fetched afterwards."""
+    if not tracked:
+        return connection.execute(update(Instrument).where(Instrument.id.in_(instrument_ids)).values(tracked=False)).rowcount
+    backfill = case((Instrument.source == PriceSource.ALPACA, func.now() - timedelta(days=backfill_days)), else_=null())
+    statement = update(Instrument).where(Instrument.id.in_(instrument_ids), ~Instrument.tracked).values(
+        tracked=True, tracked_since=func.now(), collected_through=func.now(), backfill_through=backfill
+    )
+    return connection.execute(statement).rowcount
+
+
+def backfill_due(connection: Connection) -> Sequence[Row]:
+    """Alpaca's tracked Wertpapiere still traded whose minutes before tracking began are not all in yet, the one the
+    backfill came least far with first."""
+    statement = (
+        select(Instrument.id, Instrument.symbol, Instrument.backfill_through, Instrument.tracked_since)
+        .where(Instrument.source == PriceSource.ALPACA, Instrument.tracked, Instrument.status == InstrumentStatus.ACTIVE,
+               Instrument.backfill_through < Instrument.tracked_since)
+        .order_by(Instrument.backfill_through, Instrument.tracked_since, Instrument.id)
+    )
+    return connection.execute(statement).all()
+
+
+def record_backfilled(connection: Connection, instrument_ids: list[int], through: datetime) -> None:
+    """Their minutes before tracking began are in up to `through`, never back."""
+    connection.execute(
+        update(Instrument).where(Instrument.id.in_(instrument_ids))
+        .values(backfill_through=func.greatest(Instrument.backfill_through, through))
+    )
+
+
+def count_tracked(connection: Connection, excluding: Iterable[int] = ()) -> int:
+    statement = select(func.count()).select_from(Instrument).where(Instrument.tracked, Instrument.id.not_in(list(excluding)))
+    return connection.execute(statement).scalar_one()
+
+
+def tracked_of(connection: Connection, source: str) -> Sequence[Row]:
+    """The source's tracked Wertpapiere still traded, the one collected least far first."""
+    statement = (
+        select(Instrument.id, Instrument.symbol, Instrument.source_ref, Instrument.collected_through, Instrument.last_error_at)
+        .where(Instrument.source == source, Instrument.tracked, Instrument.status == InstrumentStatus.ACTIVE)
+        .order_by(Instrument.collected_through.asc().nulls_first(), Instrument.id)
+    )
+    return connection.execute(statement).all()
+
+
+def collection_state(connection: Connection, instrument_ids: Iterable[int]) -> dict[int, Row]:
+    """How far their collection came and their last error, locked until the end of the transaction."""
+    statement = (
+        select(Instrument.id, Instrument.collected_through, Instrument.last_error_at)
+        .where(Instrument.id.in_(list(instrument_ids)))
+        .with_for_update(of=Instrument)
+    )
+    return {row.id: row for row in connection.execute(statement)}
+
+
+def record_collected(connection: Connection, instrument_ids: list[int], through: datetime) -> None:
+    """Collected up to `through`, never back."""
+    connection.execute(
+        update(Instrument).where(Instrument.id.in_(instrument_ids))
+        .values(collected_through=func.greatest(func.coalesce(Instrument.collected_through, through), through))
+    )
+
+
+def compressible(connection: Connection) -> Sequence[Row]:
+    """The Wertpapiere whose full-resolution points are compressed once old enough: those tracked now or before, and
+    every one of a source asked for its latest price - its quotes; Alpaca's quotes are few, its minutes are compressed."""
+    statement = select(Instrument.id, Instrument.source).where(
+        or_(Instrument.tracked_since.is_not(None), Instrument.source != PriceSource.ALPACA)
+    ).order_by(Instrument.id)
+    return connection.execute(statement).all()
+
+
+def tracked_since_of(connection: Connection) -> Sequence[Row]:
+    """The tracked Wertpapiere and since when."""
+    return connection.execute(select(Instrument.id, Instrument.tracked_since).where(Instrument.tracked)).all()

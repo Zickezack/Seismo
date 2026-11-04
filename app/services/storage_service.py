@@ -14,6 +14,7 @@ from pathlib import Path
 from sqlalchemy import Connection, Engine
 
 from app.repositories import backup_repository, price_repository, storage_repository
+from app.services import tracking_service
 from app.services import backup_service
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,12 @@ class Storage:
     by_source: list[SourceRawTexts]  # raw texts per Quelle, the largest first
     price_count: int = 0  # Kurspunkte (Live-Kurse und Kursdatenspeicher, criterion 5)
     price_bytes: int = 0
+    tracking: object = None  # tracking_service.Need: what the tracked Wertpapiere take per day
+
+    @property
+    def bytes_per_price(self) -> float:
+        """A Kurspunkt's share of its table, indexes included, as estimated."""
+        return self.price_bytes / self.price_count if self.price_count else 0.0
 
 
 @dataclass(frozen=True)
@@ -83,6 +90,7 @@ def current(engine: Engine, backup_dir: Path) -> Storage:
         values = _measure(connection, backup_dir)
         by_source = storage_repository.raw_texts_by_source(connection)
         price_count = price_repository.estimated_count(connection)
+        tracking = tracking_service.need(connection)
     total = values["database_bytes"] or 1
     return Storage(
         values["database_bytes"],
@@ -90,7 +98,7 @@ def current(engine: Engine, backup_dir: Path) -> Storage:
         values["article_count"], values["raw_text_count"], values["raw_text_bytes"], values["backup_count"],
         values["backup_bytes"], values["backup_free_bytes"],
         [SourceRawTexts(row.id, row.name, row.count, int(row.size_bytes)) for row in by_source],
-        price_count, values["table_bytes"].get("price_point", 0),
+        price_count, values["table_bytes"].get("price_point", 0), tracking,
     )
 
 

@@ -555,3 +555,40 @@ def test_the_lagen_go_with_a_downgrade_and_a_watchlist_keeps_its_other_items(eng
         connection.execute(text("INSERT INTO platform_settings (id) VALUES (1)"))
         values = connection.execute(text("SELECT situation_open_days, situation_llm_calls_per_hour FROM platform_settings")).one()
     assert tuple(values) == (30, 20) and revision_of(engine) == head_revision()
+
+
+def test_existing_wertpapiere_are_not_tracked_and_minutes_and_hours_go_with_a_downgrade(engine):
+    upgrade(engine, "3c7e9a1f5b20")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO instrument (source, source_ref, symbol, exchange, name, kind, currency) "
+            "VALUES ('six', 'CH0038863350CHF4', 'NESN', 'SIX', 'Nestlé', 'stock', 'CHF')"
+        ))
+        connection.execute(text(
+            "INSERT INTO price_point (instrument_id, resolution, at, close, source, delayed) "
+            "SELECT id, 'quote', '2026-11-04 09:00+00', 81, 'six', true FROM instrument"
+        ))
+        connection.execute(text("INSERT INTO platform_settings (id) VALUES (1)"))
+
+    upgrade(engine)
+    with engine.begin() as connection:
+        tracked = connection.execute(text("SELECT tracked, tracked_since, collected_through FROM instrument")).one()
+        settings = connection.execute(text("SELECT price_full_resolution_days, tracked_instruments_max FROM platform_settings")).one()
+        connection.execute(text(
+            "INSERT INTO price_point (instrument_id, resolution, at, close, source, delayed, samples) "
+            "SELECT id, 'hour', '2026-01-01 09:00+00', 80, 'six', true, 60 FROM instrument"
+        ))
+        connection.execute(text(
+            "INSERT INTO price_gap (instrument_id, starts_at, ends_at, cause) "
+            "SELECT id, '2026-11-04 08:00+00', '2026-11-04 08:30+00', 'not_asked' FROM instrument"
+        ))
+    assert tuple(tracked) == (False, None, None) and tuple(settings) == (90, 50)
+
+    downgrade(engine, "3c7e9a1f5b20")
+
+    with engine.connect() as connection:
+        resolutions = connection.execute(text("SELECT resolution FROM price_point")).scalars().all()
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+    assert resolutions == ["quote"] and "price_gap" not in tables
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

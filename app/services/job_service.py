@@ -45,6 +45,11 @@ ASSIGN_EVENT_JOB_KIND = "assign_event"
 RECOGNISE_ENTITIES_JOB_KIND = "recognise_entities"
 # The latest prices of a batch of Wertpapiere (price_service); no retry: the next fetch comes a minute later anyway.
 FETCH_PRICES_JOB_KIND = "fetch_prices"
+# The collection of the tracked Wertpapiere (tracking_service): every minute their latest price, or Alpaca's minutes.
+COLLECT_PRICES_JOB_KIND = "collect_prices"
+FETCH_MINUTES_JOB_KIND = "fetch_minutes"
+# Alpaca's minutes of a tracked Wertpapier from before tracking began, behind live work.
+BACKFILL_MINUTES_JOB_KIND = "backfill_minutes"
 FETCH_PRICES_MAX_ATTEMPTS = 1
 # The chains of the historical market data (history_service), behind live work.
 SYNC_MARKET_JOB_KIND = "sync_market"
@@ -72,6 +77,9 @@ KIND_LABELS = {
     ASSIGN_EVENT_JOB_KIND: "Ereignis zuordnen",
     RECOGNISE_ENTITIES_JOB_KIND: "Entitäten erkennen",
     FETCH_PRICES_JOB_KIND: "Kurse abrufen",
+    COLLECT_PRICES_JOB_KIND: "Kurse erfassen",
+    FETCH_MINUTES_JOB_KIND: "Minutenkurse abrufen",
+    BACKFILL_MINUTES_JOB_KIND: "Minutenhistorie nachholen",
     SYNC_MARKET_JOB_KIND: "Wertpapiere abgleichen",
     FETCH_ACTIONS_JOB_KIND: "Kapitalmassnahmen abrufen",
     FETCH_BARS_JOB_KIND: "Tageskurse abrufen",

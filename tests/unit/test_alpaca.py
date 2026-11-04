@@ -151,3 +151,24 @@ def test_the_latest_price_is_the_last_trade_with_nanoseconds_read_to_microsecond
 def test_an_answer_that_is_no_list_of_daily_prices_is_rejected(body):
     with pytest.raises(SourceRejected, match="Antwort von Alpaca"):
         alpaca.daily_bars(FakeHttp(body), ["AAPL"], date(2026, 1, 1), date(2026, 1, 31))
+
+
+def test_a_tracked_wertpapier_s_minutes_are_asked_for_from_all_exchanges_by_the_minute():
+    http = FakeHttp({"bars": {"AAPL": [{"t": "2026-11-04T14:31:00Z", "o": 222.1, "h": 222.5, "l": 222.0, "c": 222.4, "v": 18211}]},
+                     "next_page_token": None})
+
+    bars, token = alpaca.minute_bars(
+        http, ["AAPL"], datetime(2026, 11, 4, 14, 30, 15, tzinfo=UTC), datetime(2026, 11, 4, 15, 0, tzinfo=UTC), "T2",
+    )
+
+    assert query(http) == {
+        "symbols": ["AAPL"], "timeframe": ["1Min"], "start": ["2026-11-04T14:30:15Z"], "end": ["2026-11-04T15:00:00Z"],
+        "limit": ["10000"], "adjustment": ["raw"], "feed": ["sip"], "page_token": ["T2"],
+    }
+    [bar] = bars
+    assert (bar.at, bar.open, bar.close, bar.volume, token) == (datetime(2026, 11, 4, 14, 31, tzinfo=UTC), Decimal("222.1"), Decimal("222.4"), 18211, None)
+
+
+def test_an_answer_without_minutes_is_refused():
+    with pytest.raises(SourceRejected, match="keine Minutenkurse"):
+        alpaca.minute_bars(FakeHttp({"bars": ["AAPL"]}), ["AAPL"], datetime(2026, 11, 4, tzinfo=UTC), datetime(2026, 11, 5, tzinfo=UTC))

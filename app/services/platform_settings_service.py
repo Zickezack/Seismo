@@ -58,6 +58,10 @@ class PlatformSettings:
     # The Wertpapiere's prices (price_service, history_service).
     price_interval_minutes: int = 30
     price_history_years: int = 2
+    # Tracked Wertpapiere (tracking_service): days at full resolution before hours, 0 always; how many at most.
+    price_full_resolution_days: int = 90
+    tracked_instruments_max: int = 50
+    minute_backfill_days: int = 90
     # The Lagen (situation_service): open after their latest event; LLM calls per hour, apart from the other budgets.
     situation_open_days: int = 30
     situation_llm_calls_per_hour: int = 20
@@ -250,6 +254,30 @@ FORM_FIELDS = {
             "für jedes Wertpapier noch einmal von vorn; eine Senkung löscht keine gespeicherten Kurse.",
             1,
             30,
+        ),
+        NumberField(
+            "price_full_resolution_days",
+            "Volle Auflösung behalten (Tage)",
+            "So lange bleiben die Kurspunkte verfolgter Wertpapiere, wie erfasst: Minuten, Einzelkurse. Danach fasst der Worker sie "
+            "stündlich zu Stundenbalken zusammen, nie ersatzlos gelöscht. 0: unbegrenzt. Den Bedarf je Wertpapier und Tag zeigt "
+            "der Datenbestand.",
+            0,
+            3650,
+        ),
+        NumberField(
+            "tracked_instruments_max",
+            "Verfolgte Wertpapiere (höchstens)",
+            "Mehr lassen sich nicht verfolgen; eine Senkung beendet keine Verfolgung.",
+            0,
+            1000,
+        ),
+        NumberField(
+            "minute_backfill_days",
+            "Minutenhistorie nachholen (Tage)",
+            "Wird ein US-Wertpapier verfolgt, holt der Worker seine Minuten so viele Tage vor dem Einschalten von Alpaca nach, "
+            "immer nach der laufenden Arbeit. Gilt ab dem nächsten Einschalten. 0: keine.",
+            0,
+            3650,
         ),
         NumberField(
             "situation_open_days",

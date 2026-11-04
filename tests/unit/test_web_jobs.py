@@ -194,7 +194,7 @@ def test_settings_page_shows_every_setting_in_its_section(client, services):
         ("verarbeitung", ["llm_max_parallel_calls", "reprocessings_per_hour"]),
         ("abruf", ["article_max_age_days", "domain_min_interval_seconds", "tdm_blocked_domains"]),
         ("extraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour", "source_quality_domains"]),
-        ("kurse", ["price_interval_minutes", "price_history_years"]),
+        ("kurse", ["price_interval_minutes", "price_history_years", "price_full_resolution_days", "tracked_instruments_max", "minute_backfill_days"]),
         ("lagen", ["situation_open_days", "situation_llm_calls_per_hour"]),
         ("aufbewahrung", ["succeeded_jobs_retention_days", "failed_jobs_retention_days"]),
         ("backups", ["backup_interval_hours", "backups_to_keep"]),

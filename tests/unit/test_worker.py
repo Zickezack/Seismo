@@ -139,6 +139,8 @@ def no_database(monkeypatch):
     monkeypatch.setattr(worker.storage_service, "measure_if_due", measure_if_due)
     monkeypatch.setattr(worker.raw_text_service, "delete_due", delete_due)
     monkeypatch.setattr(worker.price_service, "enqueue_due", enqueue_due_prices)
+    monkeypatch.setattr(worker.tracking_service, "enqueue_due", lambda _engine: [])
+    monkeypatch.setattr(worker.tracking_service, "compress_due", lambda _engine: None)
     monkeypatch.setattr(worker.history_service, "enqueue_due", enqueue_due_market_data)
     monkeypatch.setattr(worker.alert_service, "sweep", sweep)
     monkeypatch.setattr(worker.situation_service, "sweep", sweep_situations)
@@ -400,6 +402,8 @@ def test_a_failing_extraction_check_does_not_keep_the_assignments_from_being_que
     ("measure_if_due", "storage_service", "Storage measurement failed: connection lost"),
     ("delete_due", "raw_text_service", "Deleting raw texts failed: connection lost"),
     ("enqueue_due", "price_service", "Price fetch check failed: connection lost"),
+    ("enqueue_due", "tracking_service", "Price fetch check failed: connection lost"),
+    ("compress_due", "tracking_service", "Price compression failed: connection lost"),
     ("enqueue_due", "history_service", "Market data check failed: connection lost"),
     ("sweep", "alert_service", "Alert sweep failed: connection lost"),
     ("sweep", "situation_service", "Situation sweep failed: connection lost"),

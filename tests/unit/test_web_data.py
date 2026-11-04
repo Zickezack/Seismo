@@ -1,5 +1,6 @@
 """Datenbestand page in the web layer, without a database: the services are replaced."""
 import re
+from dataclasses import replace
 from datetime import date
 from urllib.parse import urlencode
 
@@ -11,6 +12,7 @@ from app.services.bulk import BulkResult
 from app.services.raw_text_service import Lifecycle
 from app.services.reprocessing_service import Group, InvalidReprocessing, Overview, Preview, ReprocessingView
 from app.services.storage_service import Measurement, SourceRawTexts, Storage, TableSize
+from app.services.tracking_service import Need
 from app.web.main import create_app
 from tests.unit.test_web_articles import AUTH, NOW, SETTINGS, tag_of, text_of
 
@@ -190,3 +192,25 @@ def test_cancelling_passes_the_selection_and_reports_the_result(client, page, mo
 
     assert calls == [[4]] and response.headers["location"] == "/data#neuverarbeitungen"
     assert text_of(client.get("/data").text, "flash") == message
+
+
+def test_what_the_tracked_wertpapiere_take_per_day_is_shown_with_its_full_resolution(client, page, monkeypatch):
+    # 1440 Kurspunkte in 256 kB: about 182 bytes each; 2 tracked at 500 a day.
+    monkeypatch.setattr(storage_service, "current", lambda _engine, backup_dir: replace(STORAGE, tracking=Need(2, 500.0, 3.5, 90)))
+
+    html = client.get("/data").text
+
+    cell = re.search(r'data-testid="storage-tracking">(.*?)</td>', html, re.DOTALL).group(1)
+    assert cell.startswith("178 kB pro Tag")
+    assert "2 verfolgt, je Wertpapier und Tag etwa 500 Kurspunkte" in cell and "gemessen über 3,5 Tage" in cell
+    assert "90 Tage volle Auflösung: etwa 16 MB" in cell
+
+
+def test_without_tracked_wertpapiere_there_is_no_need_to_show(client, page):
+    assert 'data-testid="storage-tracking"' not in client.get("/data").text
+
+
+def test_minutes_after_the_first_was_tracked_the_need_is_not_measurable_yet(client, page, monkeypatch):
+    monkeypatch.setattr(storage_service, "current", lambda _engine, backup_dir: replace(STORAGE, tracking=Need(2, 0.0, 0.01, 90)))
+
+    assert text_of(client.get("/data").text, "storage-tracking") == "noch nicht messbar"

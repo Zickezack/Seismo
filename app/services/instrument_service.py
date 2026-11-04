@@ -15,10 +15,10 @@ from decimal import Decimal
 
 from sqlalchemy import Connection, Engine, Row
 
-from app.db.models import AliasScheme, InstrumentKind, InstrumentStatus, PriceResolution, PriceSource
+from app.db.models import AliasScheme, GapCause, InstrumentKind, InstrumentStatus, PriceResolution, PriceSource
 from app.prices import alpaca, eodhd, six
 from app.repositories import entity_repository, instrument_repository, market_data_repository, price_repository
-from app.services import history_service, price_service
+from app.services import history_service, platform_settings_service, price_service, tracking_service
 from app.services.bulk import BulkResult
 from app.services.entity_names import identifier_key
 from app.services.history_service import KnownBar
@@ -128,6 +128,9 @@ class InstrumentView:
     last_error: str | None
     last_error_at: datetime | None
     price: PriceView | None = None
+    tracked: bool = False  # its prices collected continuously (tracking_service, UI: verfolgt)
+    tracked_since: datetime | None = None
+    collected_through: datetime | None = None
 
     @property
     def code(self) -> str:
@@ -208,6 +211,63 @@ class Coverage:
         return max(self.trading_days - self.bars, 0)
 
 
+GAP_CAUSE_LABELS = {GapCause.NOT_ASKED: "nicht abgefragt (Worker oder Warteschlange)", GapCause.SOURCE_ERROR: "Quelle fehlerhaft"}
+RESOLUTION_LABELS = {
+    PriceResolution.QUOTE: "Einzelkurse", PriceResolution.MINUTE: "Minuten", PriceResolution.HOUR: "Stunden", PriceResolution.DAY: "Tage",
+}
+COLLECTION_LABELS = {
+    PriceSource.ALPACA: "Minutenbalken aller US-Börsen (SIP), ab 15 Minuten alt, alle 15 Minuten nachgeholt",
+    PriceSource.SIX: "der letzte Kurs jede Minute, 15 Minuten verzögert; Handelszeit Mo–Fr 9:00–17:30 Zürich",
+    PriceSource.EODHD: "der letzte Kurs jede Minute, verzögert; jede Stunde zählt als Handelszeit",
+}
+MINUTES_LIMIT = 60
+COLLECTION_GAPS_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class GapView:
+    starts_at: datetime
+    ends_at: datetime | None  # None: still open, nothing collected since
+    cause: str | None
+
+    @property
+    def cause_label(self) -> str:
+        return GAP_CAUSE_LABELS[self.cause] if self.cause else "seither nichts erfasst"
+
+    @property
+    def duration_label(self) -> str:
+        minutes = int(((self.ends_at or datetime.now(UTC)) - self.starts_at).total_seconds() // 60)
+        return f"{minutes // 60} h {minutes % 60} min" if minutes >= 60 else f"{minutes} min"
+
+
+@dataclass(frozen=True)
+class Collection:
+    """How a Wertpapier's prices are collected and kept (Live-Kurse und Kursdatenspeicher, story 2)."""
+
+    source: str
+    counts: dict[str, int]  # its Kurspunkte by resolution
+    gaps: list[GapView]  # the latest COLLECTION_GAPS_LIMIT, an open one first
+    gap_count: int
+    full_resolution_days: int  # 0: unlimited
+    minutes: list[PriceView] = field(default_factory=list)  # Alpaca's latest MINUTES_LIMIT, the latest first
+    backfill_through: datetime | None = None  # Alpaca's minutes from before tracking began are in up to here
+    tracked_since: datetime | None = None
+
+    @property
+    def backfilling(self) -> bool:
+        """Its minutes from before tracking began are still being fetched."""
+        return self.backfill_through is not None and self.tracked_since is not None and self.backfill_through < self.tracked_since
+
+    @property
+    def label(self) -> str:
+        return COLLECTION_LABELS[self.source]
+
+    @property
+    def counts_label(self) -> str:
+        parts = [f"{self.counts[key]} {label}" for key, label in RESOLUTION_LABELS.items() if self.counts.get(key)]
+        return ", ".join(parts) or "noch keine"
+
+
 @dataclass(frozen=True)
 class InstrumentDetail:
     instrument: InstrumentView
@@ -217,6 +277,7 @@ class InstrumentDetail:
     as_of: datetime | None = None  # None: now
     coverage: Coverage | None = None
     actions: list[ActionView] = field(default_factory=list)
+    collection: Collection | None = None  # once it was tracked
 
 
 @dataclass(frozen=True)
@@ -300,13 +361,15 @@ def parse_as_of(raw: str | None) -> datetime | None:
     return datetime.combine(day, time(23, 59, 59), alpaca.NEW_YORK).astimezone(UTC)
 
 
-def overview(engine: Engine, live_only: bool = False, source: str | None = None, search: str | None = None) -> InstrumentOverview:
+def overview(
+    engine: Engine, live_only: bool = False, source: str | None = None, search: str | None = None, tracked_only: bool = False
+) -> InstrumentOverview:
     """The Wertpapiere by name; an unknown source filters nothing."""
     source = source if source in SOURCE_LABELS else None
     search = (search or "").strip() or None
     with engine.connect() as connection:
-        rows = instrument_repository.listing(connection, live_only, source, search, LIST_LIMIT)
-        total = instrument_repository.count_listing(connection, live_only, source, search)
+        rows = instrument_repository.listing(connection, live_only, source, search, LIST_LIMIT, tracked_only)
+        total = instrument_repository.count_listing(connection, live_only, source, search, tracked_only)
         market = history_service.status(connection)
     sources = [
         SourceStatus(alpaca.NAME, alpaca.LABEL, price_service.configured(alpaca.NAME), alpaca.KEY_VARIABLES),
@@ -334,8 +397,29 @@ def detail(engine: Engine, instrument_id: int, as_of: datetime | None = None) ->
                 gaps = market_data_repository.gaps(connection, instrument_id, span.first_day, span.last_day, GAPS_LIMIT)
             coverage = Coverage(span.first_day, span.last_day, span.bars, span.trading_days or 0, gaps)
             actions = [_action(each) for each in market_data_repository.actions(connection, instrument_id)]
+        collection = _collection(connection, row) if row.tracked_since is not None else None
     return InstrumentDetail(
-        _view(row), [_price(price, row.currency, row.exchange) for price in prices], count, bars, as_of, coverage, actions,
+        _view(row), [_price(price, row.currency, row.exchange) for price in prices], count, bars, as_of, coverage, actions, collection,
+    )
+
+
+def _collection(connection: Connection, row: Row, now: datetime | None = None) -> Collection:
+    """Its points by resolution, its gaps - one still open first, while it is tracked -, Alpaca's latest minutes."""
+    now = now or datetime.now(UTC)
+    gaps = [GapView(gap.starts_at, gap.ends_at, gap.cause) for gap in price_repository.gaps(connection, row.id, COLLECTION_GAPS_LIMIT)]
+    if row.tracked and row.collected_through is not None:
+        if row.source == PriceSource.ALPACA:
+            behind = tracking_service.minutes_end(now) - row.collected_through > tracking_service.GAP_FACTOR * tracking_service.MINUTES_EVERY
+        else:
+            behind = tracking_service.is_gap(row.source, row.collected_through, now)
+        if behind:
+            gaps.insert(0, GapView(row.collected_through, None, None))
+    minutes = []
+    if row.source == PriceSource.ALPACA:
+        minutes = [_price(each, row.currency, row.exchange) for each in price_repository.recent(connection, row.id, MINUTES_LIMIT, PriceResolution.MINUTE)]
+    return Collection(
+        row.source, price_repository.counts_by_resolution(connection, row.id), gaps, price_repository.count_gaps(connection, row.id),
+        platform_settings_service.load(connection).price_full_resolution_days, minutes, row.backfill_through, row.tracked_since,
     )
 
 
@@ -453,4 +537,5 @@ def _view(row: Row) -> InstrumentView:
         row.id, row.source, row.source_ref, row.symbol, row.exchange, row.name, row.kind, row.currency, row.isin, row.entity_id,
         row.entity_name, row.entity_uncertain, row.live, row.status, row.delisted_on, row.history, row.history_through,
         row.last_fetched_at, row.last_error, row.last_error_at, price,
+        tracked=row.tracked, tracked_since=row.tracked_since, collected_through=row.collected_through,
     )

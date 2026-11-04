@@ -11,6 +11,7 @@
 
 <section class="card stack" data-testid="market-status">
   <p class="hint">Alpaca liefert die Liste aller US-Aktien und ETFs, gehandelte und nicht mehr gehandelte, ihre Tageskurse seit {{ market.period_start.strftime("%d.%m.%Y") }} unbereinigt, die Kapitalmassnahmen getrennt davon und den Handelskalender; der Worker gleicht sie täglich ab, immer hinter laufender Arbeit. Live-Kurse holt er für die Wertpapiere mit Live-Kurs im Intervall der Plattform-Einstellungen: Schweizer von SIX (15 Minuten verzögert), US-Wertpapiere von Alpaca (Echtzeit über IEX), andere von EODHD (verzögert, mit Schlüssel).</p>
+  <p class="hint">Verfolgte Wertpapiere erfasst er laufend in der höchsten Auflösung, die ihre Quelle frei gibt: von Alpaca die Minuten aller US-Börsen, von SIX und EODHD jede Minute den letzten Kurs. Volle Auflösung bleibt so lange, wie die Plattform-Einstellungen sagen, danach werden Stundenbalken daraus; nicht erfasste Zeiten bleiben Lücken.</p>
   {% if market.configured %}
   <p data-testid="history-progress">
     Tageskurse: {{ market.done }} von {{ market.total }} Wertpapieren{% if market.closed_day %} bis {{ market.closed_day.strftime("%d.%m.%Y") }}{% endif %}.
@@ -34,6 +35,7 @@
       <label for="q">Symbol oder Name enthält</label>
       <input type="search" id="q" name="q" value="{{ q }}" maxlength="200" data-testid="filter-q">
       <label class="checkbox-label"><input type="checkbox" name="live" value="1"{% if live %} checked{% endif %} data-testid="filter-live"> Nur mit Live-Kurs</label>
+      <label class="checkbox-label"><input type="checkbox" name="tracked" value="1"{% if tracked %} checked{% endif %} data-testid="filter-tracked"> Nur verfolgte</label>
     </div>
     <button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button>
   </form>
@@ -46,6 +48,8 @@
     <div class="actions">
       <button class="button button-secondary" type="submit" formaction="/instruments/live-on" data-bulk-action data-testid="live-on" disabled>Live-Kurs an</button>
       <button class="button button-secondary" type="submit" formaction="/instruments/live-off" data-bulk-action data-testid="live-off" disabled>Live-Kurs aus</button>
+      <button class="button button-secondary" type="submit" formaction="/instruments/track-on" data-bulk-action data-testid="track-on" disabled>Verfolgen</button>
+      <button class="button button-secondary" type="submit" formaction="/instruments/track-off" data-bulk-action data-testid="track-off" disabled>Nicht verfolgen</button>
       <button class="button button-danger" type="submit" formaction="/instruments/delete" data-bulk-action data-confirm="Wertpapier|Wertpapiere" data-testid="delete" disabled>Löschen</button>
     </div>
     <a class="button" href="#new" data-testid="new-instrument">Wertpapier hinzufügen</a>
@@ -71,14 +75,14 @@
           <td class="cell-wrap">{{ price(instrument.price, "instrument-price-" ~ instrument.id) }}</td>
           <td>{{ instrument.kind_label }}</td>
           <td class="cell-wrap">{% if instrument.entity_id %}<a href="/entities/{{ instrument.entity_id }}">{{ instrument.entity_name }}</a>{% if instrument.entity_uncertain %} <span class="status status-uncertain" data-testid="entity-uncertain-{{ instrument.id }}">unsicher</span>{% endif %}{% else %}–{% endif %}</td>
-          <td class="cell-wrap" data-testid="instrument-status-{{ instrument.id }}">{% if not instrument.live %}<span class="status status-inactive">Aus</span>{% elif instrument.failing %}<span class="status status-failing">Fehler</span><span class="hint">{{ instrument.last_error }}</span>{% else %}<span class="status status-active">An</span>{% endif %}</td>
+          <td class="cell-wrap" data-testid="instrument-status-{{ instrument.id }}">{% if not instrument.live %}<span class="status status-inactive">Aus</span>{% elif instrument.failing %}<span class="status status-failing">Fehler</span><span class="hint">{{ instrument.last_error }}</span>{% else %}<span class="status status-active">An</span>{% endif %}{% if instrument.tracked %} <span class="status status-active" data-testid="instrument-tracked-{{ instrument.id }}">verfolgt</span>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <p data-testid="no-instruments">{% if live or source or q %}Keine Wertpapiere für diese Auswahl.{% else %}Noch keine Wertpapiere. Mit den Schlüsseln von Alpaca kommt die Liste der US-Wertpapiere von selbst; Schweizer hier erfassen, oder die Starterliste importieren (Plattform-Einstellungen, Starterdaten).{% endif %}</p>
+  <p data-testid="no-instruments">{% if live or tracked or source or q %}Keine Wertpapiere für diese Auswahl.{% else %}Noch keine Wertpapiere. Mit den Schlüsseln von Alpaca kommt die Liste der US-Wertpapiere von selbst; Schweizer hier erfassen, oder die Starterliste importieren (Plattform-Einstellungen, Starterdaten).{% endif %}</p>
   {% endif %}
 </form>
 

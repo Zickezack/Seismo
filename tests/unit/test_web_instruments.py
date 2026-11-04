@@ -14,6 +14,7 @@ from app.services import (
     event_service,
     instrument_service,
     relationship_service,
+    tracking_service,
 )
 from app.services.bulk import BulkResult
 from app.services.entity_service import EntityDetail, EventEntity
@@ -21,7 +22,9 @@ from app.services.event_service import EventDetail
 from app.services.history_service import KnownBar, MarketStatus
 from app.services.instrument_service import (
     ActionView,
+    Collection,
     Coverage,
+    GapView,
     InstrumentDetail,
     InstrumentOverview,
     InstrumentView,
@@ -71,8 +74,8 @@ def client():
 def pages(monkeypatch):
     calls = {"overview": overview([instrument(1)]), "filters": [], "details": []}
 
-    def listing(_engine, live_only, source, search):
-        calls["filters"].append((live_only, source, search))
+    def listing(_engine, live_only, source, search, tracked_only=False):
+        calls["filters"].append((live_only, source, search) + ((True,) if tracked_only else ()))
         return calls["overview"]
 
     def detail(_engine, instrument_id, as_of=None):
@@ -252,3 +255,83 @@ def test_an_entity_and_an_event_show_the_latest_prices_of_their_wertpapiere(clie
         section = re.search(r'data-testid="instruments-section">(.*?)</details>', html, re.DOTALL).group(1)
         assert "<strong>79,50 CHF</strong>" in section and 'href="/instruments/1"' in section
 
+
+
+# Tracked Wertpapiere (Live-Kurse und Kursdatenspeicher, story 2).
+
+def test_the_list_filters_the_tracked_ones_marks_them_and_offers_tracking_for_the_selection(client, pages):
+    pages["overview"] = overview([instrument(1, tracked=True), instrument(2)])
+
+    html = client.get("/instruments", params={"tracked": "1"}).text
+
+    assert pages["filters"] == [(False, "", "", True)]
+    assert "checked" in tag_of(html, "filter-tracked")
+    assert text_of(html, "instrument-tracked-1") == "verfolgt" and tag_of(html, "instrument-tracked-2") is None
+    for testid in ("track-on", "track-off"):
+        assert "data-bulk-action" in tag_of(html, testid) and "disabled" in tag_of(html, testid)
+    assert re.search(r'<input type="hidden" name="back" value="([^"]*)">', html).group(1) == "live=&amp;source=&amp;q=&amp;tracked=1"
+
+
+@pytest.mark.parametrize(("path", "tracked", "message"), [
+    ("track-on", True, "1 Wertpapier verfolgt."), ("track-off", False, "1 Wertpapier nicht mehr verfolgt."),
+])
+def test_tracking_the_selection_goes_through_the_tracking_rules_and_back_to_the_list(client, pages, monkeypatch, path, tracked, message):
+    calls = []
+    monkeypatch.setattr(tracking_service, "set_tracked", lambda _engine, ids, on: calls.append((ids, on)) or BulkResult(1, []))
+
+    response = client.post(f"/instruments/{path}", data={"instrument_id": ["3"], "back": "tracked=1&source=six"})
+
+    assert calls == [([3], tracked)] and response.headers["location"] == "/instruments?tracked=1&source=six"
+    assert text_of(client.get("/instruments").text, "flash") == message
+
+
+def test_beyond_the_most_tracked_nothing_is_tracked_and_the_message_says_why(client, pages, monkeypatch):
+    blocked = "höchstens 50 verfolgte Wertpapiere (Plattform-Einstellungen), es wären 51"
+    monkeypatch.setattr(tracking_service, "set_tracked", lambda _engine, ids, on: BulkResult(0, [blocked]))
+
+    client.post("/instruments/track-on", data={"instrument_id": ["3"]})
+
+    assert text_of(client.get("/instruments").text, "flash") == f"Nichts verfolgt, blockiert: {blocked}."
+
+
+def test_the_page_of_a_tracked_wertpapier_shows_its_collection_gaps_and_minutes(client, pages):
+    collection = Collection(
+        "alpaca", {"minute": 1200, "hour": 30, "day": 2500},
+        [GapView(AT, None, None), GapView(AT, AT.replace(hour=21), "source_error")], 1, 90, [price()],
+    )
+    us = instrument(4, source="alpaca", symbol="AAPL", exchange="NASDAQ", live=False, tracked=True, tracked_since=AT, collected_through=AT)
+    pages["detail"] = InstrumentDetail(us, collection=collection)
+
+    html = client.get("/instruments/4").text
+
+    assert text_of(html, "meta-tracked").startswith("Ja")
+    assert text_of(html, "collection-mode").startswith("Verfolgt: Minutenbalken aller US-Börsen (SIP)")
+    assert text_of(html, "collection-counts") == "1200 Minuten, 30 Stunden, 2500 Tage"
+    assert text_of(html, "collection-retention") == "90 Tage, danach Stundenbalken"
+    open_gap = re.search(r'data-testid="gap-1">(.*?)</tr>', html, re.DOTALL).group(1)
+    assert "seither nichts erfasst" in open_gap and "status-failing" in open_gap
+    assert "Quelle fehlerhaft" in re.search(r'data-testid="gap-2">(.*?)</tr>', html, re.DOTALL).group(1)
+    assert tag_of(html, "minute-1") is not None
+    assert text_of(html, "tracking-toggle") == "Nicht verfolgen" and tag_of(html, "section-nav-collection") is not None
+
+
+def test_an_untracked_wertpapier_offers_tracking_on_its_page(client, pages, monkeypatch):
+    pages["detail"] = InstrumentDetail(instrument(1))
+    calls = []
+    monkeypatch.setattr(tracking_service, "set_tracked", lambda _engine, ids, on: calls.append((ids, on)) or BulkResult(1, []))
+
+    html = client.get("/instruments/1").text
+    response = client.post("/instruments/1/tracking", data={"tracked": "1"})
+
+    assert text_of(html, "collection-mode").startswith("Nicht verfolgt") and text_of(html, "tracking-toggle") == "Verfolgen"
+    assert calls == [([1], True)] and response.headers["location"] == "/instruments/1#collection"
+    assert text_of(client.get("/instruments").text, "flash") == "Wird verfolgt."
+
+
+@pytest.mark.parametrize(("through", "label"), [(AT.replace(hour=10), "werden nachgeholt, bis"), (AT, "nachgeholt")])
+def test_the_page_says_how_far_the_minutes_before_tracking_came(client, pages, through, label):
+    collection = Collection("alpaca", {"minute": 10}, [], 0, 90, [], backfill_through=through, tracked_since=AT)
+    us = instrument(4, source="alpaca", symbol="AAPL", exchange="NASDAQ", live=False, tracked=True, tracked_since=AT, collected_through=AT)
+    pages["detail"] = InstrumentDetail(us, collection=collection)
+
+    assert text_of(client.get("/instruments/4").text, "collection-backfill").startswith(label)

@@ -13,7 +13,9 @@ within its own budget (app/services/reprocessing_service.py). Once a minute, too
 leave their events once the new ones have theirs; once an hour it measures the storage, if not yet that day
 (app/services/storage_service.py), and deletes the raw texts whose retention period is over
 (app/services/raw_text_service.py). Once a minute, too, it queues the fetch of the latest prices of the Wertpapiere
-with a Live-Kurs whose interval is over, from each source that can be asked (app/services/price_service.py); every ten
+with a Live-Kurs whose interval is over, from each source that can be asked (app/services/price_service.py), and the
+collection of the tracked ones; once an hour it compresses their prices kept long enough at full resolution
+(app/services/tracking_service.py); every ten
 minutes it starts the chains of the historical market data that are due and not under way
 (app/services/history_service.py). Once a minute, too, every active alert rule looks for what is new to it and sends
 what its throttle lets go (app/services/alert_service.py). Once an hour it weighs the events due against the Lagen and
@@ -55,6 +57,7 @@ from app.services import (
     reprocessing_service,
     situation_service,
     storage_service,
+    tracking_service,
 )
 from app.services.health_service import HealthReport, check_readiness
 from app.db.models import JobStatus
@@ -83,6 +86,8 @@ STORAGE_CHECK_INTERVAL_SECONDS = 60 * 60
 RAW_TEXT_CHECK_INTERVAL_SECONDS = 60 * 60
 # The latest prices: each at most a minute after its interval of the Plattform-Einstellungen.
 PRICE_CHECK_INTERVAL_SECONDS = 60
+# Full resolution is kept for days; an hour more costs nothing.
+COMPRESS_CHECK_INTERVAL_SECONDS = 60 * 60
 # The chains of the historical market data run for hours; a failed one starts again at most this late.
 HISTORY_CHECK_INTERVAL_SECONDS = 10 * 60
 # An alert goes out at most this late after its event's report was assigned or its entities recognised.
@@ -122,7 +127,7 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
     was_ready = llm_served = None
     next_purge = next_backup_check = next_fetch_check = next_normalize_check = next_llm_check = time.monotonic()
     next_retire_check = next_storage_check = next_raw_text_check = next_price_check = time.monotonic()
-    next_history_check = next_alert_check = next_situation_check = time.monotonic()
+    next_history_check = next_alert_check = next_situation_check = next_compress_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -157,6 +162,9 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and time.monotonic() >= next_price_check:
                 next_price_check = time.monotonic() + PRICE_CHECK_INTERVAL_SECONDS
                 _enqueue_due_price_fetches(engine)
+            if report.ready and time.monotonic() >= next_compress_check:
+                next_compress_check = time.monotonic() + COMPRESS_CHECK_INTERVAL_SECONDS
+                _compress_prices(engine)
             if report.ready and time.monotonic() >= next_history_check:
                 next_history_check = time.monotonic() + HISTORY_CHECK_INTERVAL_SECONDS
                 _enqueue_due_market_data(engine)
@@ -264,13 +272,21 @@ def _measure_storage(engine: Engine, backup_dir: Path) -> None:
 
 def _enqueue_due_price_fetches(engine: Engine) -> None:
     try:
-        job_ids = price_service.enqueue_due(engine)
+        job_ids = price_service.enqueue_due(engine) + tracking_service.enqueue_due(engine)
     except SQLAlchemyError as error:
         # Checked again at the next interval; a minute's prices come later.
         logger.warning("Price fetch check failed: %s", getattr(error, "orig", None) or error)
         return
     if job_ids:
         logger.debug("Price fetch jobs queued", extra={"jobs": len(job_ids)})
+
+
+def _compress_prices(engine: Engine) -> None:
+    try:
+        tracking_service.compress_due(engine)
+    except SQLAlchemyError as error:
+        # Tried again at the next interval; the points keep their full resolution a while longer.
+        logger.warning("Price compression failed: %s", getattr(error, "orig", None) or error)
 
 
 def _enqueue_due_market_data(engine: Engine) -> None:

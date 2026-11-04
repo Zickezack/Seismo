@@ -81,6 +81,14 @@ The live prices come at "Live-Kurs-Intervall (Minuten)" of the Plattform-Einstel
 Wertpapier with a Live-Kurs. The starter list of Swiss indices and broad ETFs comes with Plattform-Einstellungen,
 Starterdaten; its US ETFs once Alpaca's list is in.
 
+A tracked Wertpapier (Wertpapiere, "Verfolgen"; at most "Verfolgte Wertpapiere (höchstens)", 50 by default) is
+collected continuously: a US one's minutes of all exchanges from Alpaca every 15 minutes, 15 minutes delayed (its
+keys needed), and its minutes of the days before it was tracked ("Minutenhistorie nachholen (Tage)", 90 by default)
+fetched afterwards behind the other work; a Swiss one's latest price from SIX every minute. An EODHD one is asked every minute around the clock
+too: 1440 calls a day of the plan's quota - track one only with a plan that allows it. After "Volle Auflösung
+behalten (Tage)" (90 by default, 0 unlimited) the worker compresses the points to hours; Datenbestand shows what
+tracking takes per day.
+
 The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
 show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):
 

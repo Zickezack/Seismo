@@ -6,6 +6,8 @@
 {% block content %}
 {% set instrument = detail.instrument %}
 <h1 data-testid="instrument-title">{{ instrument.name }}</h1>
+{% set sections = ([("history", "Tageskurse"), ("actions", "Kapitalmassnahmen")] if instrument.history else [])
+  + [("collection", "Erfassung"), ("prices", "Live-Kurse"), ("settings", "Angaben")] %}
 
 <section class="card stack">
   <div class="table-container">
@@ -20,12 +22,18 @@
         <tr><th scope="row">ISIN</th><td>{{ instrument.isin or "–" }}</td></tr>
         <tr><th scope="row">Handel</th><td data-testid="meta-traded">{% if instrument.traded %}Gehandelt{% else %}Nicht mehr gehandelt{% if instrument.delisted_on %} seit {{ instrument.delisted_on.strftime("%d.%m.%Y") }}{% endif %}{% endif %}</td></tr>
         <tr><th scope="row">Entität</th><td data-testid="meta-entity">{% if instrument.entity_id %}<a href="/entities/{{ instrument.entity_id }}">{{ instrument.entity_name }}</a>{% if instrument.entity_uncertain %} <span class="status status-uncertain">unsicher</span> <span class="hint">nach dem Namen zugeordnet; hier bestätigen oder ändern</span>{% endif %}{% else %}–{% endif %}</td></tr>
+        <tr><th scope="row">Verfolgt</th><td data-testid="meta-tracked">{% if instrument.tracked %}Ja <span class="hint">seit {{ instrument.tracked_since|local_time }}</span>{% else %}Nein{% endif %}</td></tr>
         <tr><th scope="row">Live-Kurs</th><td data-testid="meta-status">{% if not instrument.live %}Aus{% elif instrument.failing %}<span class="status status-failing">Fehler</span> <span class="hint">{{ instrument.last_error }}, {{ instrument.last_error_at|local_time }}</span>{% else %}An{% if instrument.last_fetched_at %} <span class="hint">zuletzt {{ instrument.last_fetched_at|local_time }}</span>{% endif %}{% endif %}</td></tr>
       </tbody>
     </table>
   </div>
   {{ watch_form("instrument", instrument.id, watch.watchlists, watch.following, request.url.path) }}
 </section>
+
+{# Quick navigation for several sections (requirements.md, "Basic UI Requirements / Styleguide", item 4). #}
+<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
+  {% for id, title in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+</nav>
 
 {% if instrument.history %}
 <details class="card section" id="history" open data-testid="section-history">
@@ -91,6 +99,77 @@
   </div>
 </details>
 {% endif %}
+
+{# Live-Kurse und Kursdatenspeicher, story 2: collected continuously, compressed later, gaps kept as gaps. #}
+<details class="card section" id="collection" open data-testid="section-collection">
+  <summary><h2>Erfassung</h2></summary>
+  <div class="stack">
+    {% set collection = detail.collection %}
+    {% if instrument.tracked %}
+    <p data-testid="collection-mode">Verfolgt: {{ collection.label if collection else "" }}. {% if instrument.collected_through %}Erfasst bis {{ instrument.collected_through|local_time }}.{% endif %}</p>
+    {% elif collection %}
+    <p data-testid="collection-mode">Nicht mehr verfolgt; die erfassten Kurse bleiben.</p>
+    {% else %}
+    <p data-testid="collection-mode">Nicht verfolgt: Kurse kommen nur als Live-Kurs{% if instrument.history %} und Tageskurse{% endif %}.</p>
+    {% endif %}
+    {% if instrument.traded or instrument.tracked %}
+    <form class="toolbar" method="post" action="/instruments/{{ instrument.id }}/tracking" data-testid="tracking-form">
+      {% if not instrument.tracked %}<input type="hidden" name="tracked" value="1">{% endif %}
+      <button class="button button-secondary" type="submit" data-testid="tracking-toggle">{{ "Nicht verfolgen" if instrument.tracked else "Verfolgen" }}</button>
+    </form>
+    {% endif %}
+    {% if collection %}
+    <div class="table-container">
+      <table class="table table-details" data-testid="collection-meta">
+        <tbody>
+          <tr><th scope="row">Kurspunkte</th><td data-testid="collection-counts">{{ collection.counts_label }}</td></tr>
+          {% if collection.backfill_through %}
+          <tr><th scope="row">Minuten vor dem Verfolgen</th><td data-testid="collection-backfill">{% if collection.backfilling %}werden nachgeholt, bis {{ collection.backfill_through|local_time }} erledigt <span class="hint">immer nach der laufenden Arbeit</span>{% else %}nachgeholt{% endif %}</td></tr>
+          {% endif %}
+          <tr><th scope="row">Volle Auflösung</th><td data-testid="collection-retention">{% if collection.full_resolution_days %}{{ collection.full_resolution_days }} Tage, danach Stundenbalken{% else %}unbegrenzt{% endif %}</td></tr>
+          <tr><th scope="row">Erfassungslücken</th><td data-testid="collection-gap-count">{{ collection.gap_count }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    {% if collection.gaps %}
+    <div class="table-container">
+      <table class="table" data-testid="gap-table">
+        <thead><tr><th>Von</th><th>Bis</th><th>Dauer</th><th>Ursache</th></tr></thead>
+        <tbody>
+          {% for gap in collection.gaps %}
+          <tr data-testid="gap-{{ loop.index }}">
+            <td>{{ gap.starts_at|local_time }}</td>
+            <td>{{ gap.ends_at|local_time if gap.ends_at else "–" }}</td>
+            <td>{{ gap.duration_label }}</td>
+            <td class="cell-wrap">{% if not gap.ends_at %}<span class="status status-failing">{{ gap.cause_label }}</span>{% else %}{{ gap.cause_label }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Eine Lücke: in der Handelszeit länger als drei Intervalle nichts erfasst. Sie bleibt eine Lücke; nichts wird hineingerechnet.</p>
+    {% endif %}
+    {% if collection.minutes %}
+    <h3>Minuten</h3>
+    <p class="hint">Die letzten {{ collection.minutes|length }}, wie Alpaca sie sandte, unbereinigt; eine Minute ohne Handel hat keinen Balken.</p>
+    <div class="table-container">
+      <table class="table" data-testid="minute-table">
+        <thead><tr><th>Minute</th><th>Schluss</th><th>Erhalten</th></tr></thead>
+        <tbody>
+          {% for point in collection.minutes %}
+          <tr data-testid="minute-{{ loop.index }}">
+            <td>{{ point.at|local_time }}</td>
+            <td class="cell-wrap">{{ price(point, "minute-value-" ~ loop.index) }}</td>
+            <td>{{ point.received_at|local_time }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+</details>
 
 <details class="card section" id="prices"{% if detail.prices or not instrument.history %} open{% endif %} data-testid="section-prices">
   <summary><h2>Live-Kurse ({{ detail.price_count }})</h2></summary>

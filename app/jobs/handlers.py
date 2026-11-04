@@ -24,16 +24,20 @@ from app.services import (
     normalization_service,
     price_service,
     situation_service,
+    tracking_service,
 )
 from app.services.job_service import (
     ASSIGN_EVENT_JOB_KIND,
     ASSIGN_SITUATION_JOB_KIND,
     BACKFILL_JOB_KIND,
+    BACKFILL_MINUTES_JOB_KIND,
     BACKUP_JOB_KIND,
     EXTRACT_EVENTS_JOB_KIND,
     FETCH_ACTIONS_JOB_KIND,
     FETCH_ARTICLE_JOB_KIND,
+    COLLECT_PRICES_JOB_KIND,
     FETCH_BARS_JOB_KIND,
+    FETCH_MINUTES_JOB_KIND,
     FETCH_PRICES_JOB_KIND,
     FETCH_SOURCE_JOB_KIND,
     NORMALIZE_JOB_KIND,
@@ -77,6 +81,9 @@ def build_handlers(
             job, lambda: history_service.fetch_actions(engine, job.payload, fetch_contact)
         ),
         FETCH_BARS_JOB_KIND: lambda job: run_market_job(job, lambda: history_service.fetch_bars(engine, job.payload, fetch_contact)),
+        COLLECT_PRICES_JOB_KIND: lambda job: run_price_job(engine, job, fetch_contact, tracking_service.collect),
+        BACKFILL_MINUTES_JOB_KIND: lambda job: run_market_job(job, lambda: tracking_service.backfill_minutes(engine, job.payload, fetch_contact)),
+        FETCH_MINUTES_JOB_KIND: lambda job: run_market_job(job, lambda: tracking_service.fetch_minutes(engine, job.payload, fetch_contact, _reserved_slot(job))),
         # Reads only the raw text: no request, no slot.
         NORMALIZE_JOB_KIND: lambda job: normalization_service.normalize(engine, job.payload["article_id"]),
         EXTRACT_EVENTS_JOB_KIND: lambda job: run_extraction_job(engine, job, llm, limiter, stop_event),
@@ -178,12 +185,13 @@ def run_backfill_job(engine: Engine, job: ClaimedJob, fetch_contact: str) -> Eff
         raise _deferral(busy, job) from None
 
 
-def run_price_job(engine: Engine, job: ClaimedJob, fetch_contact: str) -> Effect | None:
-    """The latest prices of a batch of Wertpapiere; a source that answers with nothing usable fails at once."""
+def run_price_job(engine: Engine, job: ClaimedJob, fetch_contact: str, fetch=None) -> Effect | None:
+    """The latest prices of a batch of Wertpapiere - their Live-Kurs, or `fetch`: the collection of tracked ones; a
+    source that answers with nothing usable fails at once."""
     try:
         # A job queued before there were several sources: EODHD's.
         source = job.payload.get("source", "eodhd")
-        return price_service.fetch(engine, source, job.payload["instrument_ids"], fetch_contact, _reserved_slot(job))
+        return (fetch or price_service.fetch)(engine, source, job.payload["instrument_ids"], fetch_contact, _reserved_slot(job))
     except SourceRejected as error:
         raise PermanentJobError(str(error)) from None
     except HostBusy as busy:
