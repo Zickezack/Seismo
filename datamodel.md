@@ -51,6 +51,8 @@ German UI terms (`requirements.md`, "Basic UI Requirements / Styleguide") and th
 | Ergebnis | `forecast_outcome` | The actual outcome of a forecast, stored apart once its horizon closed: measured, or not measurable for a gap. | none |
 | Backtest-Lauf | `backtest_run` | A backtest of the Wirkungsannahmen' signals with its parameters, periods and data state, never changed - the database refuses it, so no variant tried can be hidden. | none |
 | Trade | `backtest_trade` | A trade of a Backtest-Lauf: a signal or a logged Prognose (paper trading), long or short its Wertpapier against the benchmark from the next open to the close of the horizon's last day. | none |
+| LLM-Aufruf | `llm_call` | One call to the LLM by a job: when, how long, its tokens, how it ended and the article it worked for; what the status page measures LLM time and cost per article by. | none |
+| Stundenwert | `job_hour` | What the jobs of one kind did in one UTC hour - finished, failed, attempts, waits, runs - and the queue then, kept after the jobs are deleted. | none |
 | Watchlist | `watchlist` | What an analyst follows - Lagen, entities, Wertpapiere, single events, event types and countries -, each as a Watchlist-Eintrag (`watchlist_item`). | none |
 | Alert-Regel | `alert_rule` | A rule that notifies about the events of its watchlist and filter: new ones, changes of state, new reports - throttled. | none |
 | Alert | `alert` | A notification of an alert rule in the app: one event's hits, or a Sammel-Alert of several. | none |
@@ -147,6 +149,7 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
   | study_validation_until | date | no | | Its validation period, after training, up to this day; after it, or after training while empty, test. Needs `study_training_until` and lies after it (check constraint `study_periods`). UI: Event-Study - Validierung bis. |
   | backtest_cost_bps | integer | yes | 10 | A new Backtest-Lauf's default costs per side and leg, in basis points (commission and half the spread); 0 to 500 (check constraint). UI: Backtests - Handelskosten je Seite und Bein (Basispunkte). |
   | backtest_borrow_bps | integer | yes | 50 | A new Backtest-Lauf's default borrow fee of the short leg per year, in basis points; 0 to 5000 (check constraint). UI: Backtests - Leihgebühr Short pro Jahr (Basispunkte). |
+  | llm_cost_rappen_per_hour | integer | yes | 0 | What an hour of LLM time costs - power, hardware - in Rappen; the status page shows the cost per article in CHF with it, 0: in seconds and tokens only; 0 to 100000 (check constraint). UI: Verarbeitung - Kosten pro LLM-Stunde (Rappen). |
   | updated_at | timestamptz | yes | now() | |
 
 - Relationships: none
@@ -1059,6 +1062,46 @@ Each term from "Domain terms" gets its entry here, with fields, when the story t
 
 - Relationships: belongs to one Backtest-Lauf; to a version of a Wirkungsannahme, its hypothesis and event; maybe to a Prognose; to its Wertpapier and benchmark.
 - Rules: the costs are the run's, applied when its figures are computed: on both legs at entry and exit, and the short leg's borrow fee over its days. A missing price makes it not measurable, never filled. Never changed nor deleted.
+- Privacy: none
+
+### LLM-Aufruf (`llm_call`)
+- Store: SQL table `llm_call`
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | id | bigint identity | yes | | |
+  | called_at | timestamptz | yes | | When the call began. Index. |
+  | duration_ms | integer | yes | | How long it took, answered or not; 0 or more (check constraint). UI: Rechenzeit. |
+  | kind | varchar(100) | yes | | The job's kind (`job_service.KIND_LABELS`). UI: Schritt. |
+  | job_id | bigint | no | | The job's id; no foreign key: finished jobs are deleted after their retention period. |
+  | article_id | bigint | no | | The article it worked for, where the job's payload names one: an extraction's article, a recognition's extraction's, an assignment's candidate's. Foreign key to `article`, set null on delete. Index. |
+  | model | varchar(200) | yes | | As the server named it, else as asked. |
+  | prompt_tokens, answer_tokens | integer | yes | 0 | As the server counted them; 0 without an answer. UI: Tokens. |
+  | outcome | varchar(12) | yes | | `answered`, `cut` (at the answer's limit or the context's end), `timeout`, `unreachable` (no connection, HTTP 5xx, the model not pulled), `rejected` (HTTP 4xx); check constraint. UI: ohne Antwort - every outcome but answered. |
+
+- Relationships: maybe to one Artikel.
+- Rules: recorded by the client's hook (`OllamaClient.on_call`, set by `run_llm_job` to `status_service.recorder`) as each call of a job ends, in a transaction of its own; a failure to record is logged and never fails the job (Skalierung und Betriebsqualität, story 1, the admin's decisions of 2026-11-04). Ids and counts only, never a text (rule 13). Kept: a call is a few dozen bytes.
+- Privacy: none
+
+### Stundenwert (`job_hour`)
+- Store: SQL table `job_hour`; primary key hour and kind.
+- Fields:
+
+  | Field | Type | Required | Default | Notes |
+  |-------|------|----------|---------|-------|
+  | hour | timestamptz | yes | | The UTC hour's start. |
+  | kind | varchar(100) | yes | | The job kind. |
+  | finished, failed | integer | yes | | Of the jobs finished in the hour: how many, and how many of them failed for good. UI: Beendet, Gescheitert. |
+  | attempts, failed_attempts | integer | yes | | Their attempts, and the failed ones among them - of a succeeded job all but the last, of a failed one all; a deferred job's waits are no attempts. UI: Fehlversuche. |
+  | started | integer | yes | | The jobs started in the hour. |
+  | wait_seconds, wait_seconds_max | double precision | yes | | Their waits from when they were due (`run_after`) to their start, summed and the longest. UI: Wartezeit Ø, max. |
+  | run_seconds, run_seconds_max | double precision | yes | | Of the jobs finished in the hour, from their start to their end, summed and the longest. UI: Laufzeit Ø, max. |
+  | queued_due, oldest_due_seconds | integer, double precision | yes, no | | The queue when it was measured: jobs due and waiting, and how long the oldest of them had waited. UI: Warteschlange. |
+  | measured_at | timestamptz | yes | now() | |
+
+- Relationships: none
+- Rules: stored by the worker, looking every 5 minutes, once the hour is over (`status_service.measure_hours`) - each hour and kind once (a second worker's is left out), hours it missed caught up afterwards, at most 48 back, while their jobs are kept. The status page adds them up for its period, the hours not stored yet - the current one - read from the jobs themselves. Kept after the jobs are deleted.
 - Privacy: none
 
 <!-- Template - copy once per entity:

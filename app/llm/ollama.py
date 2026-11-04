@@ -1,6 +1,9 @@
 """The Ollama server (architecture.md, "Environments and LLM"): one chat request whose answer is constrained to a JSON
 schema. Every call runs inside LlmCallLimiter.slot() (app/llm/limiter.py)."""
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import httpx2
 
@@ -44,12 +47,26 @@ class LlmAnswer:
     complete: bool  # False when the answer was cut at MAX_ANSWER_TOKENS or the context's end
 
 
+@dataclass(frozen=True)
+class LlmCallRecord:
+    """What one call took and how it ended - ids and counts only (status_service)."""
+
+    called_at: datetime
+    duration_ms: int
+    model: str
+    prompt_tokens: int
+    answer_tokens: int
+    outcome: str  # LlmOutcome: answered, cut, timeout, unreachable, rejected
+
+
 class OllamaClient:
-    """Use as a context manager; it keeps its connection open until the end of the block."""
+    """Use as a context manager; it keeps its connection open until the end of the block. `on_call`, when set, is told
+    of every chat call as it ends, answered or not (the status page's LLM calls)."""
 
     def __init__(self, base_url: str, model: str, num_ctx: int, transport: httpx2.BaseTransport | None = None) -> None:
         self.model = model
         self.num_ctx = num_ctx
+        self.on_call: Callable[[LlmCallRecord], None] | None = None
         timeout = httpx2.Timeout(ANSWER_TIMEOUT_SECONDS, connect=CONNECT_TIMEOUT_SECONDS)
         self._client = httpx2.Client(base_url=base_url, timeout=timeout, transport=transport)
 
@@ -71,6 +88,26 @@ class OllamaClient:
 
     def chat_json(self, messages: list[dict], schema: dict) -> LlmAnswer:
         """The model's answer to the messages (system, user, and an exchange before), constrained to `schema`."""
+        called_at, started = datetime.now(UTC), time.monotonic()
+        answer, outcome = None, "unreachable"
+        try:
+            answer = self._chat_json(messages, schema)
+            outcome = "answered" if answer.complete else "cut"
+            return answer
+        except LlmUnavailable as error:
+            outcome = "unreachable" if isinstance(error, LlmUnreachable) else "timeout"
+            raise
+        except LlmRejected:
+            outcome = "rejected"
+            raise
+        finally:
+            if self.on_call is not None:
+                self.on_call(LlmCallRecord(
+                    called_at, int((time.monotonic() - started) * 1000), answer.model if answer else self.model,
+                    answer.prompt_tokens if answer else 0, answer.answer_tokens if answer else 0, outcome,
+                ))
+
+    def _chat_json(self, messages: list[dict], schema: dict) -> LlmAnswer:
         request = {
             "model": self.model,
             "messages": messages,

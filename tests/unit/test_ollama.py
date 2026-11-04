@@ -106,3 +106,28 @@ def test_a_server_away_is_unreachable_a_silent_one_only_unavailable():
     with client(silent) as llm, pytest.raises(LlmUnavailable) as error:
         llm.chat_json(MESSAGES, {})
     assert not isinstance(error.value, LlmUnreachable)
+
+
+def test_every_call_is_told_as_it_ends_answered_or_not():
+    def silent(request):
+        raise httpx2.ReadTimeout("slow", request=request)
+
+    answered = {"model": "qwen3.5:9b", "message": {"content": "{}"}, "done_reason": "stop", "prompt_eval_count": 812, "eval_count": 9}
+    cases = [
+        (lambda _request: httpx2.Response(200, json=answered), "answered", (812, 9)),
+        (lambda _request: httpx2.Response(200, json=answered | {"done_reason": "length"}), "cut", (812, 9)),
+        (silent, "timeout", (0, 0)),
+        (lambda _request: httpx2.Response(503), "unreachable", (0, 0)),
+        (lambda _request: httpx2.Response(400, json={"error": "invalid format"}), "rejected", (0, 0)),
+    ]
+    for handler, outcome, tokens in cases:
+        calls = []
+        with client(handler) as llm:
+            llm.on_call = calls.append
+            try:
+                llm.chat_json(MESSAGES, {})
+            except (LlmUnavailable, LlmRejected):
+                pass
+        [call] = calls
+        assert (call.outcome, (call.prompt_tokens, call.answer_tokens), call.model) == (outcome, tokens, "qwen3.5:9b")
+        assert call.duration_ms >= 0 and call.called_at.tzinfo is not None

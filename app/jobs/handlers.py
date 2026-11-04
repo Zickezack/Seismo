@@ -9,7 +9,7 @@ from sqlalchemy import Engine
 from app.jobs.errors import JobDeferred, JobInterrupted, PermanentJobError
 from app.jobs.runner import Effect, Handler
 from app.llm.limiter import LlmCallLimiter
-from app.llm.ollama import LlmRejected, LlmUnreachable, OllamaClient
+from app.llm.ollama import LlmCallRecord, LlmRejected, LlmUnreachable, OllamaClient
 from app.repositories.backup_repository import ToolInterrupted
 from app.repositories.job_repository import ClaimedJob
 from app.db.models import BACKFILL_PRIORITY
@@ -26,6 +26,7 @@ from app.services import (
     normalization_service,
     price_service,
     situation_service,
+    status_service,
     tracking_service,
 )
 from app.services.job_service import (
@@ -94,29 +95,29 @@ def build_handlers(
         NORMALIZE_JOB_KIND: lambda job: normalization_service.normalize(engine, job.payload["article_id"]),
         EXTRACT_EVENTS_JOB_KIND: lambda job: run_extraction_job(engine, job, llm, limiter, stop_event),
         ASSIGN_EVENT_JOB_KIND: lambda job: run_llm_job(
-            llm, lambda client: event_service.assign(engine, job.payload["candidate_id"], client, limiter)
+            llm, status_service.recorder(engine, job), lambda client: event_service.assign(engine, job.payload["candidate_id"], client, limiter)
         ),
         ASSIGN_SITUATION_JOB_KIND: lambda job: run_llm_job(
-            llm, lambda client: situation_service.assign(engine, job.payload, client, limiter)
+            llm, status_service.recorder(engine, job), lambda client: situation_service.assign(engine, job.payload, client, limiter)
         ),
         PROPOSE_SITUATION_JOB_KIND: lambda job: run_llm_job(
-            llm, lambda client: situation_service.propose(engine, job.payload, client, limiter)
+            llm, status_service.recorder(engine, job), lambda client: situation_service.propose(engine, job.payload, client, limiter)
         ),
         ASSESS_IMPACTS_JOB_KIND: lambda job: run_llm_job(
-            llm, lambda client: impact_service.assess(engine, job.payload, client, limiter)
+            llm, status_service.recorder(engine, job), lambda client: impact_service.assess(engine, job.payload, client, limiter)
         ),
         RECOGNISE_ENTITIES_JOB_KIND: lambda job: run_llm_job(
-            llm, lambda client: entity_service.recognise(engine, job.payload["extraction_id"], client, limiter)
+            llm, status_service.recorder(engine, job), lambda client: entity_service.recognise(engine, job.payload["extraction_id"], client, limiter)
         ),
         REEXTRACT_EVENTS_JOB_KIND: lambda job: run_llm_job(
-            llm,
+            llm, status_service.recorder(engine, job),
             lambda client: extraction_service.extract(
                 engine, job.payload["article_id"], client, limiter, stop_event, job.payload["extraction_id"],
                 job.payload.get("reprocessing_id"),
             ),
         ),
         RERECOGNISE_ENTITIES_JOB_KIND: lambda job: run_llm_job(
-            llm,
+            llm, status_service.recorder(engine, job),
             lambda client: entity_service.recognise(
                 engine, job.payload["extraction_id"], client, limiter, rerun=True, reprocessing_id=job.payload.get("reprocessing_id")
             ),
@@ -127,16 +128,22 @@ def build_handlers(
 def run_extraction_job(
     engine: Engine, job: ClaimedJob, llm: LlmFactory, limiter: LlmCallLimiter, stop_event: threading.Event | None = None
 ) -> Effect | None:
-    return run_llm_job(llm, lambda client: extraction_service.extract(engine, job.payload["article_id"], client, limiter, stop_event))
+    return run_llm_job(
+        llm, status_service.recorder(engine, job),
+        lambda client: extraction_service.extract(engine, job.payload["article_id"], client, limiter, stop_event),
+    )
 
 
-def run_llm_job(llm: LlmFactory, work: Callable[[OllamaClient], Effect | None]) -> Effect | None:
+def run_llm_job(
+    llm: LlmFactory, recorder: Callable[[LlmCallRecord], None] | None, work: Callable[[OllamaClient], Effect | None]
+) -> Effect | None:
     """A request the server refuses fails at once. An unreachable server is waited for without counting the attempt
-    (JobDeferred); a timeout or an unusable answer is retried with it."""
+    (JobDeferred); a timeout or an unusable answer is retried with it. Every call is recorded (status_service)."""
     if llm is None:
         raise PermanentJobError("Kein Ollama konfiguriert (OLLAMA_BASE_URL)")
     try:
         with llm() as client:
+            client.on_call = recorder
             return work(client)
     except LlmRejected as error:
         raise PermanentJobError(str(error)) from None

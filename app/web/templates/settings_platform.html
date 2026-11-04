@@ -56,7 +56,7 @@
 {% endmacro %}
 
 {% set sections = [
-  ("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls", "reprocessings_per_hour"]),
+  ("verarbeitung", "Verarbeitung", ["llm_max_parallel_calls", "reprocessings_per_hour", "llm_cost_rappen_per_hour"]),
   ("abruf", "Abruf", ["article_max_age_days", "domain_min_interval_seconds", "tdm_blocked_domains"]),
   ("extraktion", "Ereignisextraktion", ["extraction_languages", "extraction_min_text_chars", "extraction_max_age_days", "extractions_per_hour", "source_quality_domains"]),
   ("kurse", "Kurse", ["price_interval_minutes", "price_history_years", "price_full_resolution_days", "tracked_instruments_max", "minute_backfill_days"]),

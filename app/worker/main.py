@@ -58,6 +58,7 @@ from app.services import (
     raw_text_service,
     reprocessing_service,
     situation_service,
+    status_service,
     storage_service,
     tracking_service,
 )
@@ -98,6 +99,8 @@ ALERT_CHECK_INTERVAL_SECONDS = 60
 SITUATION_CHECK_INTERVAL_SECONDS = 60 * 60
 # A forecast's outcome needs its daily prices, fetched once a day: an hour's delay costs nothing.
 FORECAST_CHECK_INTERVAL_SECONDS = 60 * 60
+# The job kinds' hours (status_service): looked at often, so an hour is stored soon after it is over.
+JOB_HOUR_CHECK_INTERVAL_SECONDS = 5 * 60
 
 
 def tick(engine: Engine, expected_revision: str, heartbeat_file: Path) -> HealthReport:
@@ -132,7 +135,7 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
     next_purge = next_backup_check = next_fetch_check = next_normalize_check = next_llm_check = time.monotonic()
     next_retire_check = next_storage_check = next_raw_text_check = next_price_check = time.monotonic()
     next_history_check = next_alert_check = next_situation_check = next_compress_check = time.monotonic()
-    next_forecast_check = time.monotonic()
+    next_forecast_check = next_job_hour_check = time.monotonic()
     try:
         while not stop_event.is_set():
             report = tick(engine, expected_revision, heartbeat_file)
@@ -173,6 +176,9 @@ def run(settings: Settings, stop_event: threading.Event, heartbeat_file: Path = 
             if report.ready and time.monotonic() >= next_forecast_check:
                 next_forecast_check = time.monotonic() + FORECAST_CHECK_INTERVAL_SECONDS
                 _resolve_forecasts(engine)
+            if report.ready and time.monotonic() >= next_job_hour_check:
+                next_job_hour_check = time.monotonic() + JOB_HOUR_CHECK_INTERVAL_SECONDS
+                _measure_job_hours(engine)
             if report.ready and time.monotonic() >= next_history_check:
                 next_history_check = time.monotonic() + HISTORY_CHECK_INTERVAL_SECONDS
                 _enqueue_due_market_data(engine)
@@ -295,6 +301,14 @@ def _resolve_forecasts(engine: Engine) -> None:
     except SQLAlchemyError as error:
         # Tried again at the next interval; the outcomes wait an hour longer.
         logger.warning("Forecast resolution failed: %s", getattr(error, "orig", None) or error)
+
+
+def _measure_job_hours(engine: Engine) -> None:
+    try:
+        status_service.measure_hours(engine)
+    except SQLAlchemyError as error:
+        # Tried again at the next interval; a missed hour is filled then, while its jobs are kept.
+        logger.warning("Job hour measurement failed: %s", getattr(error, "orig", None) or error)
 
 
 def _compress_prices(engine: Engine) -> None:

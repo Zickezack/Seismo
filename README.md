@@ -103,6 +103,9 @@ by themselves once the horizon has closed and the daily prices are in.
 The page Backtests asks the worker for a backtest of these signals - after costs (defaults under Plattform-Einstellungen,
 Backtests), against simple baselines, judged on the test period of the Event-Study's periods only; no run can be changed
 or deleted, so every variant tried stays counted. Seismo itself never trades.
+The page Status shows what the platform does, measured: articles per hour, the LLM's time and tokens per article (in CHF
+with "Kosten pro LLM-Stunde" under Plattform-Einstellungen, Verarbeitung), latencies, failed attempts, the queue and
+storage, per source and over time, and names the bottlenecks by fixed rules.
 
 The event extraction and the entity recognition ask an Ollama server (the worker; the api reads the same variables to
 show the model's status and which runs were made with another model; empty `OLLAMA_BASE_URL`: no extraction):

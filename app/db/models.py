@@ -483,6 +483,8 @@ class PlatformSettingsRecord(Base):
     # A backtest's default costs (backtest_service): per side and leg in basis points, the short leg's borrow fee per year.
     backtest_cost_bps: Mapped[int] = mapped_column(server_default="10")
     backtest_borrow_bps: Mapped[int] = mapped_column(server_default="50")
+    # What an hour of the LLM costs - power, hardware - in Rappen (status_service); 0: no amount in CHF shown.
+    llm_cost_rappen_per_hour: Mapped[int] = mapped_column(server_default="0")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -511,6 +513,7 @@ class PlatformSettingsRecord(Base):
         CheckConstraint(impact_llm_calls_per_hour.between(0, 1000), name="impact_llm_calls_per_hour"),
         CheckConstraint(backtest_cost_bps.between(0, 500), name="backtest_cost_bps"),
         CheckConstraint(backtest_borrow_bps.between(0, 5000), name="backtest_borrow_bps"),
+        CheckConstraint(llm_cost_rappen_per_hour.between(0, 100000), name="llm_cost_rappen_per_hour"),
         # Validation only after a training period, and after its end.
         CheckConstraint(
             "study_validation_until IS NULL OR (study_training_until IS NOT NULL AND study_validation_until > study_training_until)",
@@ -1735,3 +1738,63 @@ class BacktestTrade(Base):
         CheckConstraint("(status = 'measured') = (asset_return IS NOT NULL AND benchmark_return IS NOT NULL)", name="measured"),
         CheckConstraint("kind = 'signal' OR forecast_id IS NOT NULL", name="paper"),
     )
+
+
+class LlmOutcome(StrEnum):
+    """How an LLM call ended (status_service)."""
+
+    ANSWERED = "answered"
+    CUT = "cut"  # answered, but cut at the answer's limit or the context's end
+    TIMEOUT = "timeout"
+    UNREACHABLE = "unreachable"  # no connection, HTTP 5xx, the model not pulled
+    REJECTED = "rejected"  # HTTP 4xx
+
+
+class LlmCall(Base):
+    """One call to the LLM by a job (UI term: LLM-Aufruf): how long it took, its tokens and how it ended - what the
+    status page measures LLM time and cost per article by. Ids and counts only, never a text (datamodel.md, rule 13)."""
+
+    __tablename__ = "llm_call"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    called_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    # The job's kind and id; no foreign key: finished jobs are deleted after their retention period.
+    kind: Mapped[str] = mapped_column(String(100))
+    job_id: Mapped[int | None] = mapped_column(BigInteger)
+    # The article it worked for, where the job names one through its payload (extraction, recognition, assignment).
+    article_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("article.id", ondelete="SET NULL"), index=True)
+    model: Mapped[str] = mapped_column(String(200))
+    prompt_tokens: Mapped[int] = mapped_column(Integer, server_default="0")
+    answer_tokens: Mapped[int] = mapped_column(Integer, server_default="0")
+    outcome: Mapped[str] = mapped_column(String(12))
+
+    __table_args__ = (
+        CheckConstraint(outcome.in_([s.value for s in LlmOutcome]), name="outcome"),
+        CheckConstraint(duration_ms >= 0, name="duration_ms"),
+    )
+
+
+class JobHour(Base):
+    """What the jobs of one kind did in one UTC hour (UI term: Stundenwert), measured by the worker once the hour is
+    over, so the status page keeps its history after finished jobs are deleted."""
+
+    __tablename__ = "job_hour"
+
+    hour: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(100), primary_key=True)
+    # Of the jobs finished in the hour: how many, how many failed for good, their attempts and the failed ones among them.
+    finished: Mapped[int] = mapped_column(Integer)
+    failed: Mapped[int] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer)
+    failed_attempts: Mapped[int] = mapped_column(Integer)
+    # Of the jobs started in the hour: the wait from when they were due, and of those finished their run, in seconds.
+    started: Mapped[int] = mapped_column(Integer)
+    wait_seconds: Mapped[float] = mapped_column(Float)
+    wait_seconds_max: Mapped[float] = mapped_column(Float)
+    run_seconds: Mapped[float] = mapped_column(Float)
+    run_seconds_max: Mapped[float] = mapped_column(Float)
+    # The queue when measured: jobs due and waiting, and how long the oldest of them had waited.
+    queued_due: Mapped[int] = mapped_column(Integer)
+    oldest_due_seconds: Mapped[float | None] = mapped_column(Float)
+    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

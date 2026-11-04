@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Status{% endblock %}
+{% set sections = [
+  ("engpaesse", "Engpässe"),
+  ("durchsatz", "Durchsatz"),
+  ("kosten", "Kosten pro Artikel"),
+  ("latenz", "Latenz"),
+  ("jobs", "Jobs"),
+  ("warteschlange", "Warteschlange"),
+  ("quellen", "Je Quelle"),
+  ("verlauf", "Verlauf"),
+  ("speicher", "Speicher"),
+] %}
+{% block content %}
+<h1>Status</h1>
+
+<section class="card stack">
+  {# Plain links: the period works without JavaScript and the URL can be bookmarked. #}
+  <nav class="filters" aria-label="Zeitraum" data-testid="period-filter">
+    {% for key, label in status.periods.items() %}
+    <a class="filter" href="/status?period={{ key }}" data-testid="period-{{ key }}"{% if status.period == key %} aria-current="true"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <p class="hint" data-testid="status-period">Von {{ status.start|local_time }} bis {{ status.end|local_time }}. Gemessen, nicht geschätzt: Artikel, Latenzen und Fehler aus den gespeicherten Artikeln, LLM-Zeit aus jedem LLM-Aufruf eines Jobs, Jobs aus den Stundenwerten des Workers - nach ganzen Stunden, die laufende aus den Jobs selbst.</p>
+</section>
+
+{# Quick navigation for several sections (requirements.md, "Basic UI Requirements / Styleguide", item 4). #}
+<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
+  {% for id, title in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+</nav>
+
+<details class="card section" id="engpaesse" open data-testid="section-engpaesse">
+  <summary><h2>Engpässe</h2></summary>
+  <div class="stack">
+    {% if status.bottlenecks %}
+    <ul class="stack" data-testid="bottlenecks">
+      {% for each in status.bottlenecks %}<li class="message message-warning" data-testid="bottleneck-{{ loop.index }}">{{ each }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p data-testid="no-bottlenecks">Kein Engpass nach den Regeln.</p>
+    {% endif %}
+    <p class="hint">Regeln: LLM ab 80 % ausgelastet; ein fälliger Job wartet seit einer Stunde oder länger; eine Job-Art scheitert bei mehr als 10 % von mindestens 10 Versuchen; das Extraktionsbudget der letzten Stunde ist aufgebraucht, während Artikel warten.</p>
+  </div>
+</details>
+
+<details class="card section" id="durchsatz" open data-testid="section-durchsatz">
+  <summary><h2>Durchsatz</h2></summary>
+  <div class="table-container">
+    <table class="table table-details" data-testid="throughput">
+      <tbody>
+        <tr><th>Artikel pro Stunde</th><td data-testid="articles-per-hour">{{ number(status.per_hour, 1) }}<span class="hint">{{ status.articles.live }} live, {{ status.articles.backfill }} aus Backfills; {{ status.articles.duplicates }} Duplikate</span></td></tr>
+        <tr><th>Extrahiert</th><td data-testid="articles-extracted">{{ status.extracted }} Artikel zum ersten Mal<span class="hint">von den abgerufenen {{ status.articles.extracted }} extrahiert, {{ status.articles.with_event }} mit Ereignis</span></td></tr>
+        <tr><th>Fehlerquote</th><td data-testid="failure-rate">{{ status.failed_attempt_label }} der Job-Versuche gescheitert ({{ status.failed_attempts }} von {{ status.attempts }})<span class="hint">{{ status.articles.failed }} abgerufene Artikel mit fehlgeschlagenem Volltext, Normalisierung oder Extraktion ({{ share(status.articles.failed, status.articles.live + status.articles.backfill) }})</span></td></tr>
+        <tr><th>LLM-Aufrufe</th><td data-testid="llm-calls">{{ status.llm_calls }} Aufrufe, {{ duration(status.llm_seconds) }} Rechenzeit<span class="hint">{{ number(status.prompt_tokens) }} Prompt- und {{ number(status.answer_tokens) }} Antwort-Tokens</span></td></tr>
+        <tr><th>LLM-Auslastung</th><td data-testid="llm-busy">{{ number(status.llm_busy * 100) }} %<span class="hint">Rechenzeit geteilt durch Zeitraum × {{ status.llm_slots }} {{ "Platz" if status.llm_slots == 1 else "Plätze" }} (Plattform-Einstellungen)</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<details class="card section" id="kosten" open data-testid="section-kosten">
+  <summary><h2>Kosten pro Artikel</h2></summary>
+  <div class="stack">
+    <p data-testid="cost-per-article">{% if status.per_article_seconds is not none %}{{ duration(status.per_article_seconds) }} LLM-Zeit und {{ number(status.per_article_tokens) }} Tokens je Artikel{% if status.cost_per_article_label %}, {{ status.cost_per_article_label }}{% endif %}.{% else %}Keine LLM-Aufrufe für Artikel erfasst in diesem Zeitraum.{% endif %}</p>
+    <p class="hint">Die Schritte, die für einen Artikel arbeiten (Extraktion, Entitäten, Zuordnung), geteilt durch die Artikel, für die sie im Zeitraum arbeiteten; Wirkungen und Lagen gelten Ereignissen, nicht Artikeln. Erfasst wird jeder LLM-Aufruf seit dem 04.11.2026. {% if status.cost_rappen_per_hour %}CHF mit {{ status.cost_rappen_per_hour }} Rappen pro LLM-Stunde.{% else %}CHF erst mit «Kosten pro LLM-Stunde» in den <a href="/settings/platform#verarbeitung">Plattform-Einstellungen</a>.{% endif %}</p>
+    {% if status.llm_steps %}
+    <div class="table-container">
+      <table class="table" data-testid="llm-steps">
+        <thead><tr><th>Schritt</th><th>Aufrufe</th><th>Rechenzeit</th><th>Tokens</th><th>Ohne Antwort</th><th>Je Artikel</th></tr></thead>
+        <tbody>
+          {% for each in status.llm_steps %}
+          <tr data-testid="llm-step-{{ each.kind }}">
+            <td class="cell-title">{{ each.label }}</td><td>{{ each.calls }}</td><td>{{ duration(each.seconds) }}</td>
+            <td>{{ number(each.prompt_tokens) }} + {{ number(each.answer_tokens) }}</td><td>{{ each.unanswered }}</td>
+            <td>{% if each.per_article_seconds is not none %}{{ duration(each.per_article_seconds) }}, {{ number(each.per_article_tokens) }} Tokens{% if each.cost_rappen is not none %}<span class="hint">CHF {{ "%.4f"|format(each.cost_rappen / 100) }}</span>{% endif %}{% else %}–{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</details>
+
+<details class="card section" id="latenz" open data-testid="section-latenz">
+  <summary><h2>Latenz</h2></summary>
+  <div class="stack">
+    <p class="hint">Der Live-Artikel, deren Schritt im Zeitraum endete - Backfills kommen absichtlich nach der laufenden Arbeit. Der Volltext gehört zum ersten Schritt: seine Zeit steht nur beim Rohtext, und der wird nach seiner Frist gelöscht.</p>
+    <div class="table-container">
+      <table class="table" data-testid="latencies">
+        <thead><tr><th>Schritt</th><th>Artikel</th><th>Median</th><th>90 % innert</th></tr></thead>
+        <tbody>
+          {% for each in status.latencies %}
+          <tr data-testid="latency-{{ each.key }}"><td class="cell-title">{{ each.label }}</td><td>{{ each.count }}</td><td>{{ each.median_label }}</td><td>{{ each.p90_label }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<details class="card section" id="jobs" open data-testid="section-jobs">
+  <summary><h2>Jobs</h2></summary>
+  <div class="stack">
+    <p class="hint">Je Art: beendete Jobs, endgültig gescheiterte, Fehlversuche unter allen Versuchen; Wartezeit ab Fälligkeit bis zum Start, Laufzeit bis zum Ende - im Mittel und am längsten.</p>
+    {% if status.kinds %}
+    <div class="table-container">
+      <table class="table" data-testid="job-kinds">
+        <thead><tr><th>Art</th><th>Beendet</th><th>Gescheitert</th><th>Fehlversuche</th><th>Wartezeit</th><th>Laufzeit</th></tr></thead>
+        <tbody>
+          {% for each in status.kinds %}
+          <tr data-testid="kind-{{ each.kind }}">
+            <td class="cell-title">{{ each.label }}</td><td>{{ each.finished }}</td><td>{{ each.failed }}</td>
+            <td>{{ each.failed_label }}<span class="hint">{{ each.failed_attempts }} von {{ each.attempts }}</span></td>
+            <td>Ø {{ duration(each.wait_mean) }}<span class="hint">max. {{ duration(each.wait_max) }}</span></td>
+            <td>Ø {{ duration(each.run_mean) }}<span class="hint">max. {{ duration(each.run_max) }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-kinds">Keine Jobs in diesem Zeitraum.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="card section" id="warteschlange" open data-testid="section-warteschlange">
+  <summary><h2>Warteschlange</h2></summary>
+  <div class="stack">
+    <p data-testid="extraction-waiting">{{ status.extraction_waiting }}{% if status.extraction_waiting >= 10000 %}+{% endif %} Artikel bestehen den Vorfilter der Extraktion und warten auf ihr Budget.</p>
+    {% if status.queue %}
+    <div class="table-container">
+      <table class="table" data-testid="queue">
+        <thead><tr><th>Art</th><th>Fällig</th><th>Später</th><th>Läuft</th><th>Ältester fälliger wartet</th></tr></thead>
+        <tbody>
+          {% for each in status.queue %}
+          <tr data-testid="queue-{{ each.kind }}-{{ each.priority }}"><td class="cell-title"><a href="/jobs?status=queued">{{ each.label }}</a></td><td>{{ each.due }}</td><td>{{ each.later }}</td><td>{{ each.running }}</td><td>{{ each.oldest_label }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="empty-queue">Die Warteschlange ist leer.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="card section" id="quellen" open data-testid="section-quellen">
+  <summary><h2>Je Quelle</h2></summary>
+  <div class="stack">
+    <p class="hint">Der im Zeitraum abgerufenen Artikel: wie viele pro Stunde, Duplikate, gescheiterte Schritte, mit Ereignis, und die LLM-Zeit je Artikel, der LLM-Zeit erhielt.</p>
+    {% if status.sources %}
+    <div class="table-container">
+      <table class="table" data-testid="sources">
+        <thead><tr><th>Quelle</th><th>Artikel</th><th>Duplikate</th><th>Gescheitert</th><th>Mit Ereignis</th><th>LLM je Artikel</th></tr></thead>
+        <tbody>
+          {% for each in status.sources %}
+          <tr data-testid="source-{{ each.source_id or 'deleted' }}">
+            <td class="cell-title">{% if each.source_id %}<a href="/sources/{{ each.source_id }}">{{ each.name }}</a>{% else %}{{ each.name }}{% endif %}</td>
+            <td>{{ each.articles }}<span class="hint">{{ number(each.per_hour, 1) }} pro Stunde</span></td><td>{{ each.duplicate_label }}</td>
+            <td>{{ each.failed_label }}</td><td>{{ each.event_label }}</td><td>{{ each.llm_label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p data-testid="no-sources">Keine Artikel in diesem Zeitraum.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="card section" id="verlauf" open data-testid="section-verlauf">
+  <summary><h2>Verlauf</h2></summary>
+  <div class="stack">
+    <p class="hint">Je {{ "Stunde" if status.history_unit == "hour" else "Tag" }} (UTC), die neueste zuerst. Warteschlange: fällige Jobs bei der letzten Messung.</p>
+    <div class="table-container">
+      <table class="table" data-testid="history">
+        <thead><tr><th>{{ "Stunde" if status.history_unit == "hour" else "Tag" }}</th><th>Artikel</th><th>LLM</th><th>Auslastung</th><th>Fehlversuche</th><th>Warteschlange</th></tr></thead>
+        <tbody>
+          {% for each in status.history %}
+          <tr data-testid="history-{{ loop.index }}">
+            <td>{{ each.start|local_time }}</td><td>{{ each.articles }}{% if each.failed_articles %}<span class="hint">{{ each.failed_articles }} gescheitert</span>{% endif %}</td>
+            <td>{{ each.llm_calls }}<span class="hint">{{ duration(each.llm_seconds) }}</span></td>
+            <td>{{ number(each.busy * 100) if each.busy is not none else "–" }} %</td>
+            <td>{{ share(each.failed_attempts, each.attempts) }}<span class="hint">{{ each.failed_attempts }} von {{ each.attempts }}</span></td>
+            <td>{{ each.queued_due if each.queued_due is not none else "–" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<details class="card section" id="speicher" open data-testid="section-speicher">
+  <summary><h2>Speicher</h2></summary>
+  <div class="stack">
+    {% if status.storage %}
+    <p data-testid="storage-now">Datenbank {{ status.storage.database_bytes|size }}, Rohtexte {{ status.storage.raw_text_bytes|size }}, Backups {{ status.storage.backup_bytes|size }}{% if status.storage.backup_free_bytes is not none %}, frei {{ status.storage.backup_free_bytes|size }}{% endif %} (gemessen am {{ status.storage.measured_on.strftime("%d.%m.%Y") }}).</p>
+    {% if status.growth %}<p data-testid="storage-growth">Wachstum pro Tag über {{ status.growth.days }} {{ "Tag" if status.growth.days == 1 else "Tage" }}: Datenbank {{ status.growth.database_bytes|size }}, Rohtexte {{ status.growth.raw_text_bytes|size }}, {{ number(status.growth.articles) }} Artikel.</p>{% endif %}
+    {% else %}
+    <p data-testid="storage-now">Noch nicht gemessen: der Worker misst einmal am Tag.</p>
+    {% endif %}
+    <p class="hint">Einzelne Tabellen, Rohtexte je Quelle und Kurspunkte im <a href="/data">Datenbestand</a>.</p>
+  </div>
+</details>
+{% endblock %}

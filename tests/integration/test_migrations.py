@@ -697,3 +697,22 @@ def test_backtests_are_refused_any_change_the_settings_row_gets_default_costs_an
     assert not tables & {"backtest_run", "backtest_trade"} and function == 0
     upgrade(engine)
     assert revision_of(engine) == head_revision()
+
+
+def test_the_status_tables_come_and_go_and_the_settings_row_gets_no_cost_rate(engine):
+    upgrade(engine, "fa2483c61784")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO platform_settings (id, backups_to_keep) VALUES (1, 5)"))
+
+    upgrade(engine)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT llm_cost_rappen_per_hour FROM platform_settings")).scalar_one() == 0
+
+    downgrade(engine, "fa2483c61784")
+
+    with engine.connect() as connection:
+        tables = set(connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars())
+        assert connection.execute(text("SELECT backups_to_keep FROM platform_settings")).scalar_one() == 5
+    assert not tables & {"llm_call", "job_hour"}
+    upgrade(engine)
+    assert revision_of(engine) == head_revision()

@@ -75,6 +75,8 @@ class PlatformSettings:
     # A backtest's default costs (backtest_service): per side and leg in basis points, the short leg's borrow fee per year.
     backtest_cost_bps: int = 10
     backtest_borrow_bps: int = 50
+    # What an hour of the LLM costs in Rappen (status_service); 0: no amount in CHF.
+    llm_cost_rappen_per_hour: int = 0
 
     @property
     def blocked_domains(self) -> list[str]:
@@ -340,6 +342,14 @@ FORM_FIELDS = {
             "study_validation_until",
             "Validierung bis",
             "Danach bis und mit diesem Tag Validierung, später Test. Leer: nach dem Training gleich Test.",
+        ),
+        NumberField(
+            "llm_cost_rappen_per_hour",
+            "Kosten pro LLM-Stunde (Rappen)",
+            "Strom und Hardware für eine Stunde LLM-Rechenzeit; die Statusseite rechnet damit die Kosten pro Artikel in CHF. "
+            "0: nur Sekunden und Tokens.",
+            0,
+            100000,
         ),
         NumberField(
             "backtest_cost_bps",
