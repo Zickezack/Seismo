@@ -99,7 +99,9 @@ company, sector or commodity - at most "LLM-Aufrufe pro Stunde (höchstens)" und
 Wirkungsannahmen (20 by default, 0 holds it). They are reviewed on the event's page, each with a probability apart from its
 direction - or an abstention -, lowered where the event was expected or a US Wertpapier of the target had already moved
 before it. Each such hypothesis logs Prognosen (page Prognosen) the database never lets change; their outcomes come
-by themselves once the horizon has closed and the daily prices are in.
+by themselves once the horizon has closed and the daily prices are in. The same page breaks their hit rate down - by
+model and prompt, event type, classification, way, sector, probability and month -, each with an uncertainty band
+widened for every group judged.
 The page Backtests asks the worker for a backtest of these signals - after costs (defaults under Plattform-Einstellungen,
 Backtests), against simple baselines, judged on the test period of the Event-Study's periods only; no run can be changed
 or deleted, so every variant tried stays counted. Seismo itself never trades.

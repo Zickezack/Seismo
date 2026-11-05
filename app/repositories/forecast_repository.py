@@ -8,7 +8,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
 
 from app.db.models import (
+    AliasScheme,
     Entity,
+    EntityAlias,
+    EntityKind,
     Event,
     Forecast,
     ForecastOutcome,
@@ -150,4 +153,36 @@ def hit_rates(connection: Connection) -> Sequence[Row]:
         .where(ForecastOutcome.status == "measured")
         .group_by(Forecast.horizon, Forecast.probability)
     )
+    return connection.execute(statement).all()
+
+
+def measured(connection: Connection, horizon: int | None) -> Sequence[Row]:
+    """The measured outcomes, of one horizon or all, with what may explain them: id, event_id, horizon, probability,
+    classification, origin, model, prompt_version, sector_key and its sector's name, created_at, hit, the excess return
+    signed the forecast's way, the event's type and the hypothesis's way - the earliest logged first."""
+    signed = case((Forecast.direction == "positive", ForecastOutcome.excess_return), else_=-ForecastOutcome.excess_return)
+    sector_name = (
+        select(Entity.name)
+        .join(EntityAlias, EntityAlias.entity_id == Entity.id)
+        .where(
+            EntityAlias.scheme == AliasScheme.CATALOGUE, EntityAlias.value == Forecast.sector_key, Entity.kind == EntityKind.SECTOR,
+        )
+        .order_by(Entity.id)
+        .limit(1)
+        .scalar_subquery()
+    )
+    statement = (
+        select(
+            Forecast.id, Forecast.event_id, Forecast.horizon, Forecast.probability, Forecast.classification, Forecast.origin,
+            Forecast.model, Forecast.prompt_version, Forecast.sector_key, sector_name.label("sector_name"), Forecast.created_at,
+            ForecastOutcome.hit, signed.label("signed"), Event.event_type, ImpactHypothesis.path,
+        )
+        .join(ForecastOutcome, ForecastOutcome.forecast_id == Forecast.id)
+        .join(Event, Event.id == Forecast.event_id)
+        .join(ImpactHypothesis, ImpactHypothesis.id == Forecast.hypothesis_id)
+        .where(ForecastOutcome.status == "measured")
+        .order_by(Forecast.created_at, Forecast.id)
+    )
+    if horizon is not None:
+        statement = statement.where(Forecast.horizon == horizon)
     return connection.execute(statement).all()

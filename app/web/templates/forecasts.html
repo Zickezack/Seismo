@@ -1,8 +1,33 @@
 {% extends "base.html" %}
 {% from "_forecasts.html" import forecast_table %}
 {% block title %}Prognosen{% endblock %}
+{% set sections = [("rates", "Trefferquote"), ("breakdown", "Aufschlüsselung"), ("trend", "Verlauf"), ("list", "Protokoll")] %}
+{% set verdict_classes = {"above": "status status-ok", "below": "status status-failed", "even": "status", "few": "status status-inactive"} %}
+{% macro group_table(groups, testid, first="Gruppe") %}
+<div class="table-container">
+  <table class="table" data-testid="{{ testid }}">
+    <thead><tr><th>{{ first }}</th><th>Gemessen</th><th>Treffer</th><th>Unsicherheitsband</th><th>Mittlere Rendite</th><th>Urteil</th></tr></thead>
+    <tbody>
+      {% for group in groups %}
+      <tr data-testid="{{ testid }}-{{ group.key }}">
+        <td class="cell-wrap">{{ group.label }}</td>
+        <td class="cell-wrap">{{ group.count }}<span class="hint">aus {{ group.events }} Ereignis{{ "sen" if group.events != 1 }}</span></td>
+        <td>{{ group.hits }} ({{ group.rate_label }})</td>
+        <td>{{ group.band_label }}</td>
+        <td>{{ group.mean_label }}</td>
+        <td><span class="{{ verdict_classes[group.verdict] }}" data-verdict="{{ group.verdict }}">{{ group.verdict_label }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
 {% block content %}
 <h1>Prognosen</h1>
+
+<nav class="section-nav" aria-label="Abschnitte" data-section-nav data-testid="section-nav">
+  {% for id, title in sections %}<a href="#{{ id }}" data-testid="section-nav-{{ id }}">{{ title }}</a>{% endfor %}
+</nav>
 
 <section class="card stack">
   <p>Was die Plattform vorhersagte: je neuer Version einer Wirkungsannahme mit Wahrscheinlichkeit, für das US-Wertpapier ihres Ziels, über 5, 20 und 60 Handelstage. Zielgrösse ist die Rendite gegenüber dem ETF der Branche, die das Ereignis am häufigsten nennt, sonst gegenüber SPY.</p>
@@ -10,10 +35,10 @@
   <p data-testid="forecast-counts">{{ overview.open }} offen, {{ overview.measured }} gemessen, {{ overview.unmeasured }} nicht messbar.</p>
 </section>
 
-{% if overview.rates %}
 <details class="card section" id="rates" open data-testid="section-rates">
   <summary><h2>Trefferquote</h2></summary>
   <div class="stack">
+    {% if overview.rates %}
     <p class="hint">Der gemessenen Prognosen, je Horizont und Wahrscheinlichkeit: Anzahl, Treffer und die mittlere Rendite gegenüber dem Benchmark in der vorhergesagten Richtung - nebeneinander, kein einzelner Wert. Ein Treffer ist die vorhergesagte Richtung, keine Grösse.</p>
     <div class="table-container">
       <table class="table" data-testid="rate-table">
@@ -28,20 +53,62 @@
         </tbody>
       </table>
     </div>
+    {% else %}
+    <p data-testid="no-rates">Noch keine gemessenen Prognosen.</p>
+    {% endif %}
   </div>
 </details>
-{% endif %}
+
+<details class="card section" id="breakdown" open data-testid="section-breakdown">
+  <summary><h2>Aufschlüsselung</h2></summary>
+  <div class="stack">
+    <p class="hint">Wo die Prognosen halten und wo nicht: die Trefferquote der gemessenen Prognosen eines Horizonts nach dem, was sie erklären kann. Eine Wirkungsannahme prognostiziert jeden Horizont, darum zählt jeder für sich; «Alle zusammen» zählt sie bis zu dreimal.</p>
+    <form class="form-grid" method="get" action="/forecasts#breakdown" data-testid="evaluation-filter">
+      <div class="field">
+        <label for="filter-horizon">Horizont</label>
+        <select id="filter-horizon" name="horizon" data-testid="filter-horizon">
+          {% for key, label in horizons.items() %}<option value="{{ key }}"{% if evaluation.horizon == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      {% if overview.status %}<input type="hidden" name="status" value="{{ overview.status }}">{% endif %}
+      <div class="form-actions actions"><button class="button button-secondary" type="submit" data-testid="apply-horizon">Anzeigen</button></div>
+    </form>
+    {% if evaluation.total.count %}
+    <p class="hint" data-testid="evaluation-rule">Urteil gegen Zufall (50 %) erst ab {{ evaluation.min_judged }} gemessenen, sonst «zu wenige»: «besser» oder «schlechter» nur, wenn das ganze Band über oder unter 50 % liegt, sonst «nicht unterscheidbar». Viele kleine Gruppen zeigen sonst Muster, die Rauschen sind: das Band ist darum nach Bonferroni für alle {{ evaluation.judged }} beurteilten Gruppen zugleich verbreitert (je {{ evaluation.level_label }}, z = {{ evaluation.z_label }}), wie bei den Backtests. Prognosen eines Ereignisses bewegen sich zusammen: das Band ist eher zu schmal, je weniger Ereignisse dahinter stehen. Mittlere Rendite: gegenüber dem Benchmark, in der vorhergesagten Richtung.</p>
+    {{ group_table([evaluation.total], "evaluation-total", "Alle gemessenen") }}
+    {% for breakdown in evaluation.breakdowns %}
+    <h3>{{ breakdown.title }}</h3>
+    {{ group_table(breakdown.groups, "breakdown-" ~ breakdown.key, breakdown.title) }}
+    {% endfor %}
+    {% else %}
+    <p data-testid="no-evaluation">Noch keine gemessenen Prognosen{% if evaluation.horizon != "all" %} über {{ horizons[evaluation.horizon] }}{% endif %}.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="card section" id="trend" open data-testid="section-trend">
+  <summary><h2>Verlauf</h2></summary>
+  <div class="stack">
+    <p class="hint">Je Monat, in dem die Prognosen protokolliert wurden (UTC), mit dem Horizont der Aufschlüsselung ({{ horizons[evaluation.horizon] }}): ob neuere Prognosen, etwa nach einem Modellwechsel, besser oder schlechter halten. Ein Monat erscheint erst, wenn eine seiner Prognosen gemessen ist.</p>
+    {% if evaluation.months %}
+    {{ group_table(evaluation.months, "trend", "Monat") }}
+    {% else %}
+    <p data-testid="no-trend">Noch keine gemessenen Prognosen{% if evaluation.horizon != "all" %} über {{ horizons[evaluation.horizon] }}{% endif %}.</p>
+    {% endif %}
+  </div>
+</details>
 
 <details class="card section" id="list" open data-testid="section-list">
   <summary><h2>Protokoll</h2></summary>
   <div class="stack">
-    <form class="form-grid" method="get" action="/forecasts" data-testid="forecast-filter">
+    <form class="form-grid" method="get" action="/forecasts#list" data-testid="forecast-filter">
       <div class="field">
         <label for="filter-status">Stand</label>
         <select id="filter-status" name="status" data-testid="filter-status">
           {% for key, label in [("", "Alle"), ("open", "Offen"), ("resolved", "Mit Ergebnis")] %}<option value="{{ key }}"{% if overview.status == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
         </select>
       </div>
+      <input type="hidden" name="horizon" value="{{ evaluation.horizon }}">
       <div class="form-actions actions"><button class="button button-secondary" type="submit" data-testid="apply-filter">Anzeigen</button></div>
     </form>
     {% if overview.forecasts %}

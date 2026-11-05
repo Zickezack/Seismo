@@ -10,7 +10,7 @@ from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.exc import DBAPIError
 
 from app.db.models import EntityAlias, EntityMention, Forecast, ForecastOutcome, Instrument, PricePoint, TradingDay
-from app.services import forecast_service, impact_service
+from app.services import forecast_evaluation_service, forecast_service, impact_service
 from tests.integration.test_duplicates import database  # noqa: F401
 from tests.integration.test_event_context import event_of, reported, statement
 from tests.integration.test_event_filter import named
@@ -183,3 +183,29 @@ def test_an_outcome_waits_for_the_benchmarks_prices(database, oil):
     assert forecast_service.resolve_due(database, LATER) == 0
     with database.connect() as connection:
         assert connection.execute(select(func.count()).select_from(ForecastOutcome)).scalar_one() == 0
+
+
+def test_the_hit_rate_is_broken_down_by_what_may_explain_it(database, oil):
+    """Story 3: of one horizon, per model and prompt, event type, classification, way, sector, probability and month."""
+    assess(database, oil["event_id"], answer(hypothesis(SHELL) | SAYS))
+    forecast_service.resolve_due(database, LATER)
+
+    evaluation = forecast_evaluation_service.evaluation(database)
+    assert evaluation.horizon == "20"
+    assert (evaluation.total.count, evaluation.total.events, evaluation.total.hits, evaluation.total.verdict) == (1, 1, 1, "few")
+    groups = {each.key: [(group.key, group.label, group.count) for group in each.groups] for each in evaluation.breakdowns}
+    assert "horizon" not in groups
+    assert groups["made_by"] == [("llm:qwen3.5:9b:3", "LLM (qwen3.5:9b, Prompt 3)", 1)]
+    assert groups["classification"] == [("evidenced", "belegt", 1)]
+    assert groups["way"] == [("direct", "direkt", 1)]
+    assert groups["sector"] == [("sector:oil-gas", "Öl und Gas", 1)]
+    assert groups["probability"] == [("high", "hoch", 1)]
+    [event_type] = groups["event_type"]
+    assert event_type[2] == 1
+    logged = forecasts(database)[0].created_at.astimezone(UTC)
+    assert [month.key for month in evaluation.months] == [f"{logged.year:04d}-{logged.month:02d}"]
+
+    pooled = forecast_evaluation_service.evaluation(database, "all")
+    assert (pooled.total.count, pooled.total.events) == (3, 1)
+    assert [(each.key, each.count) for each in next(b for b in pooled.breakdowns if b.key == "horizon").groups] == [("5", 1), ("20", 1), ("60", 1)]
+    assert forecast_evaluation_service.evaluation(database, "nonsense").horizon == "20"
